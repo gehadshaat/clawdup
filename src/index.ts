@@ -5,6 +5,8 @@ export {
   getTask,
   updateTaskStatus,
   addTaskComment,
+  addTaskCommentForUser,
+  notifyTaskCreator,
   getTaskComments,
   findPRUrlInComments,
   formatTaskForClaude,
@@ -25,6 +27,7 @@ export { runClaudeOnTask } from "./claude-worker.js";
 export { STATUS, PROJECT_ROOT, GIT_ROOT, log } from "./config.js";
 export type {
   ClickUpTask,
+  ClickUpUser,
   ClickUpList,
   ClickUpComment,
   ClaudeResult,

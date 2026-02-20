@@ -2,7 +2,7 @@
 // Docs: https://clickup.com/api
 
 import { CLICKUP_API_TOKEN, CLICKUP_LIST_ID, STATUS, log } from "./config.js";
-import type { ClickUpTask, ClickUpList, ClickUpComment } from "./types.js";
+import type { ClickUpTask, ClickUpUser, ClickUpList, ClickUpComment } from "./types.js";
 
 const BASE_URL = "https://api.clickup.com/api/v2";
 
@@ -106,6 +106,40 @@ export async function addTaskComment(
     comment_text: commentText,
     notify_all: true,
   });
+}
+
+/**
+ * Add a comment to a task directed at a specific user.
+ * Uses the `assignee` field to ensure the user receives a notification.
+ */
+export async function addTaskCommentForUser(
+  taskId: string,
+  commentText: string,
+  assigneeId: number,
+): Promise<void> {
+  log("info", `Adding comment to task ${taskId} (assigned to user ${assigneeId})`);
+  await request("POST", `/task/${taskId}/comment`, {
+    comment_text: commentText,
+    assignee: assigneeId,
+    notify_all: false,
+  });
+}
+
+/**
+ * Notify the task creator with a comment.
+ * Falls back to a regular comment if no creator info is available.
+ */
+export async function notifyTaskCreator(
+  taskId: string,
+  creator: ClickUpUser | undefined,
+  commentText: string,
+): Promise<void> {
+  if (creator?.id) {
+    const mention = creator.username ? `@${creator.username} ` : "";
+    await addTaskCommentForUser(taskId, `${mention}${commentText}`, creator.id);
+  } else {
+    await addTaskComment(taskId, commentText);
+  }
 }
 
 /**

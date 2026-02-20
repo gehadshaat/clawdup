@@ -8,6 +8,7 @@ import {
   getTaskComments,
   updateTaskStatus,
   addTaskComment,
+  notifyTaskCreator,
   formatTaskForClaude,
   slugify,
   validateStatuses,
@@ -137,8 +138,9 @@ async function processTask(task: ClickUpTask): Promise<void> {
         "warn",
         `Claude completed but made no file changes for task ${taskId}`,
       );
-      await addTaskComment(
+      await notifyTaskCreator(
         taskId,
+        task.creator,
         `⚠️ Automation completed but no code changes were produced. This may mean:\n` +
           `- The task was already done\n` +
           `- The task description wasn't actionable\n` +
@@ -181,8 +183,9 @@ async function processTask(task: ClickUpTask): Promise<void> {
     log("error", `Error processing task ${taskId}: ${(err as Error).message}`);
 
     try {
-      await addTaskComment(
+      await notifyTaskCreator(
         taskId,
+        task.creator,
         `❌ Automation encountered an error:\n\n\`\`\`\n${(err as Error).message}\n\`\`\`\n\n` +
           `The task has been moved to "Blocked". Please investigate and retry.`,
       );
@@ -221,8 +224,9 @@ async function handleNeedsInput(
 
   log("info", `Task ${task.id} requires more input: ${reason}`);
 
-  await addTaskComment(
+  await notifyTaskCreator(
     task.id,
+    task.creator,
     `🔍 Automation needs more information to complete this task:\n\n${reason}\n\n` +
       `Please add the requested details and move this task back to "${STATUS.TODO}" to retry.`,
   );
@@ -254,8 +258,9 @@ async function handleError(
         `[CU-${task.id}] WIP: ${task.name} (partial - automation error)`,
       );
       await pushBranch(branchName);
-      await addTaskComment(
+      await notifyTaskCreator(
         task.id,
+        task.creator,
         `⚠️ Automation encountered an error but made partial changes.\n\n` +
           `Error: \`${errorMsg}\`\n\n` +
           `Partial changes have been pushed to branch \`${branchName}\` for manual review.\n` +
@@ -304,8 +309,9 @@ async function processApprovedTask(task: ClickUpTask): Promise<void> {
 
     if (!prUrl) {
       log("warn", `No PR URL found in comments for task ${taskId}`);
-      await addTaskComment(
+      await notifyTaskCreator(
         taskId,
+        task.creator,
         `⚠️ Could not find a pull request URL in this task's comments.\n\n` +
           `This task was moved to "${STATUS.APPROVED}" but no associated PR was found. ` +
           `Please add the PR URL in a comment and move back to "${STATUS.APPROVED}", ` +
@@ -329,8 +335,9 @@ async function processApprovedTask(task: ClickUpTask): Promise<void> {
 
     if (prState !== "open") {
       log("warn", `PR is ${prState} for task ${taskId}: ${prUrl}`);
-      await addTaskComment(
+      await notifyTaskCreator(
         taskId,
+        task.creator,
         `⚠️ The associated PR is "${prState}" (expected "open"):\n${prUrl}\n\n` +
           `Cannot merge a ${prState} PR. Please investigate.`,
       );
@@ -356,8 +363,9 @@ async function processApprovedTask(task: ClickUpTask): Promise<void> {
     );
 
     try {
-      await addTaskComment(
+      await notifyTaskCreator(
         taskId,
+        task.creator,
         `❌ Automation failed to merge the PR:\n\n\`\`\`\n${(err as Error).message}\n\`\`\`\n\n` +
           `Please merge manually or investigate the error.`,
       );
@@ -482,8 +490,9 @@ async function recoverOrphanedTasks(): Promise<void> {
         `Failed to recover task ${taskId}: ${(err as Error).message}`,
       );
       try {
-        await addTaskComment(
+        await notifyTaskCreator(
           taskId,
+          task.creator,
           `⚠️ Automation restarted but failed to recover this task:\n\n` +
             `\`\`\`\n${(err as Error).message}\n\`\`\`\n\n` +
             `Moving to blocked.`,
