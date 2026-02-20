@@ -192,7 +192,7 @@ export async function createPullRequest({
  * Check if the working tree is clean (no uncommitted changes).
  */
 export async function isWorkingTreeClean(): Promise<boolean> {
-  const status = await git("status", "--porcelain");
+  const status = await git("status", "--porcelain", "-uno");
   return status.length === 0;
 }
 
