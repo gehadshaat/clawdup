@@ -51,7 +51,7 @@ IMPORTANT RULES:
 5. If you do NOT have enough information to complete the task, output "NEEDS_MORE_INFO:" followed by a clear description of what information is missing. Do not guess or make assumptions about unclear requirements.
 6. Do NOT commit or push changes - the automation will handle that.
 7. Do NOT create new branches - you're already on the correct branch.
-8. If you discover issues that need manual attention or follow-up tasks, create a file called ".clawup.todo.json" in the project root with an array of objects: [{"title": "Short task title", "description": "Detailed description of what needs to be done"}]. These will be automatically created as new tasks in the project tracker.`);
+8. ONLY after completing your main work, if you discovered issues that need manual attention or follow-up tasks that are outside the scope of the current task, create a file called ".clawup.todo.json" in the project root with an array of objects: [{"title": "Short task title", "description": "Detailed description of what needs to be done"}]. These will be automatically created as new tasks. Do NOT create this file if there are no follow-up items.`);
 
   // Project context from CLAUDE.md
   // In a monorepo, check both the package directory and the repo root.
@@ -105,6 +105,13 @@ export async function runClaudeOnTask(
       "--max-turns",
       String(CLAUDE_MAX_TURNS),
       "--verbose",
+      "--allowedTools",
+      "Edit",
+      "Write",
+      "Read",
+      "Glob",
+      "Grep",
+      "Bash",
     ];
 
     // Allow user config to append extra CLI args
@@ -126,8 +133,7 @@ export async function runClaudeOnTask(
     });
 
     proc.stderr.on("data", (chunk: Buffer) => {
-      const text = chunk.toString();
-      log("debug", `claude stderr: ${text.trim()}`);
+      process.stderr.write(chunk);
     });
 
     const timeout = setTimeout(() => {
