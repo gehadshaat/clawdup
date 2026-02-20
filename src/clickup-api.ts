@@ -56,11 +56,15 @@ export async function getTasksByStatus(status: string): Promise<ClickUpTask[]> {
   );
   const tasks = data.tasks || [];
 
-  // Sort by priority (1=urgent, 2=high, 3=normal, 4=low, null=no priority)
+  // Sort by priority (1=urgent, 2=high, 3=normal, 4=low, null=no priority),
+  // then by creation date (oldest first) within the same priority
   tasks.sort((a, b) => {
     const pa = a.priority ? parseInt(a.priority.id) : 99;
     const pb = b.priority ? parseInt(b.priority.id) : 99;
-    return pa - pb;
+    if (pa !== pb) return pa - pb;
+    const da = a.date_created ? parseInt(a.date_created) : 0;
+    const db = b.date_created ? parseInt(b.date_created) : 0;
+    return da - db;
   });
 
   log(

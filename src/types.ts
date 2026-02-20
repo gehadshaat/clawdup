@@ -4,6 +4,7 @@ export interface ClickUpTask {
   url: string;
   description?: string;
   text_content?: string;
+  date_created?: string;
   priority?: { id: string; priority: string };
   tags?: { name: string }[];
   checklists?: ClickUpChecklist[];
