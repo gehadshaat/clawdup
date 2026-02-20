@@ -93,6 +93,14 @@ export async function createTaskBranch(
   // Make sure base is up to date
   await syncBaseBranch();
 
+  // Check if a branch for this task already exists (local or remote)
+  const existingBranch = await findBranchForTask(taskId);
+  if (existingBranch) {
+    log("info", `Branch already exists for task ${taskId}: ${existingBranch}. Checking it out.`);
+    await checkoutExistingBranch(existingBranch);
+    return existingBranch;
+  }
+
   // Create new branch from base
   await git("checkout", "-b", branchName);
 
