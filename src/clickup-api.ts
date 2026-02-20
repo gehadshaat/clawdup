@@ -82,6 +82,15 @@ export async function getTask(taskId: string): Promise<ClickUpTask> {
 }
 
 /**
+ * Get the current status of a task.
+ * Returns the lowercase status string.
+ */
+export async function getTaskStatus(taskId: string): Promise<string> {
+  const task = await request<ClickUpTask>("GET", `/task/${taskId}`);
+  return task.status?.status?.toLowerCase() || "";
+}
+
+/**
  * Update a task's status.
  */
 export async function updateTaskStatus(

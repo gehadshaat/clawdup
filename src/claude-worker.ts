@@ -122,6 +122,7 @@ function formatToolUse(
 export async function runClaudeOnTask(
   taskPrompt: string,
   taskId: string,
+  abortSignal?: AbortSignal,
 ): Promise<ClaudeResult> {
   const systemPrompt = buildSystemPrompt(taskPrompt);
 
@@ -130,6 +131,7 @@ export async function runClaudeOnTask(
   return new Promise((resolve) => {
     let output = "";
     let timedOut = false;
+    let aborted = false;
 
     // Stream-json parsing state
     let jsonBuffer = "";
@@ -249,6 +251,22 @@ export async function runClaudeOnTask(
       timeout: CLAUDE_TIMEOUT_MS,
     });
 
+    // Listen for external abort (e.g. task moved to blocked)
+    if (abortSignal) {
+      const onAbort = () => {
+        if (!aborted) {
+          aborted = true;
+          log("info", `Aborting Claude Code for task ${taskId} (task was blocked)`);
+          proc.kill("SIGTERM");
+        }
+      };
+      if (abortSignal.aborted) {
+        onAbort();
+      } else {
+        abortSignal.addEventListener("abort", onAbort, { once: true });
+      }
+    }
+
     proc.stdout.on("data", (chunk: Buffer) => {
       jsonBuffer += chunk.toString();
 
@@ -289,6 +307,17 @@ export async function runClaudeOnTask(
         } catch {
           process.stdout.write(jsonBuffer);
         }
+      }
+
+      if (aborted) {
+        resolve({
+          success: false,
+          output,
+          needsInput: false,
+          aborted: true,
+          error: "Task was moved to blocked — Claude Code aborted",
+        });
+        return;
       }
 
       if (timedOut) {

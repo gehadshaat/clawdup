@@ -6,6 +6,7 @@ import { POLL_INTERVAL_MS, STATUS, BASE_BRANCH, PROJECT_ROOT, log } from "./conf
 import {
   getTasksByStatus,
   getTaskComments,
+  getTaskStatus,
   updateTaskStatus,
   addTaskComment,
   notifyTaskCreator,
@@ -51,6 +52,9 @@ let isShuttingDown = false;
 let isProcessing = false;
 
 const TODO_FILE_PATH = resolve(PROJECT_ROOT, ".clawup.todo.json");
+
+// How often to check if a task has been manually moved to "blocked" while Claude is working
+const STATUS_CHECK_INTERVAL_MS = 15_000;
 
 /**
  * Process the .clawup.todo.json file if it exists.
@@ -147,12 +151,45 @@ async function processTask(task: ClickUpTask): Promise<void> {
       `🤖 Automation picked up this task and is now working on it.\n\nPR: ${prUrl}`,
     );
 
-    // Step 4: Fetch comments, format the task for Claude, and run it
+    // Step 4: Fetch comments, format the task for Claude, and run it.
+    // Set up periodic status monitoring so we can abort if the task is
+    // manually moved to "blocked" while Claude is working.
+    const abortController = new AbortController();
+    const statusCheckInterval = setInterval(async () => {
+      try {
+        const currentStatus = await getTaskStatus(taskId);
+        if (currentStatus === STATUS.BLOCKED.toLowerCase()) {
+          log("info", `Task ${taskId} was manually moved to "blocked". Aborting work.`);
+          abortController.abort();
+        }
+      } catch (err) {
+        log("debug", `Status check for task ${taskId} failed: ${(err as Error).message}`);
+      }
+    }, STATUS_CHECK_INTERVAL_MS);
+
     const comments = await getTaskComments(taskId);
     const taskPrompt = formatTaskForClaude(task, comments);
-    const result = await runClaudeOnTask(taskPrompt, taskId);
+    let result: ClaudeResult;
+    try {
+      result = await runClaudeOnTask(taskPrompt, taskId, abortController.signal);
+    } finally {
+      clearInterval(statusCheckInterval);
+    }
 
-    // Step 5: Handle the result
+    // Step 5: Handle abort (task was manually moved to blocked)
+    if (result.aborted) {
+      log("info", `Task ${taskId} was blocked during work. Stopping and cleaning up.`);
+      await addTaskComment(
+        taskId,
+        `🛑 Work stopped — this task was moved to "blocked" while automation was in progress.\n\n` +
+          `Any in-progress changes have been discarded.\n` +
+          `To retry, move this task back to "${STATUS.TODO}".`,
+      );
+      await closePRAndCleanup(prUrl, branchName);
+      return;
+    }
+
+    // Step 6: Handle the result
     if (result.needsInput) {
       // Claude needs more information
       await handleNeedsInput(task, result, branchName, prUrl);
@@ -165,7 +202,7 @@ async function processTask(task: ClickUpTask): Promise<void> {
       return;
     }
 
-    // Step 6: Check if Claude actually made changes
+    // Step 7: Check if Claude actually made changes
     const changed = await hasChanges();
     if (!changed) {
       log(
@@ -186,7 +223,7 @@ async function processTask(task: ClickUpTask): Promise<void> {
       return;
     }
 
-    // Step 7: Commit, push, and update the PR
+    // Step 8: Commit, push, and update the PR
     const commitMsg = generateCommitMessage(task, result.output);
     await commitChanges(commitMsg);
     await pushBranch(branchName);
@@ -197,7 +234,7 @@ async function processTask(task: ClickUpTask): Promise<void> {
     await updatePullRequest(prUrl, { body: prBody });
     await markPRReady(prUrl);
 
-    // Step 8: Update ClickUp task
+    // Step 9: Update ClickUp task
     await updateTaskStatus(taskId, STATUS.IN_REVIEW);
     await addTaskComment(
       taskId,

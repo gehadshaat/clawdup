@@ -53,6 +53,7 @@ export interface ClaudeResult {
   output: string;
   needsInput: boolean;
   error?: string;
+  aborted?: boolean;
 }
 
 export interface UserConfig {
