@@ -11,6 +11,7 @@ import {
   notifyTaskCreator,
   formatTaskForClaude,
   slugify,
+  isValidTaskId,
   validateStatuses,
   findPRUrlInComments,
   createTask,
@@ -108,6 +109,12 @@ async function processTask(task: ClickUpTask): Promise<void> {
   log("info", `Processing task: ${taskName} (${taskId})`);
   log("info", `URL: ${task.url}`);
   log("info", `${"=".repeat(60)}\n`);
+
+  // Validate task ID format before using it in branch names and commands
+  if (!isValidTaskId(taskId)) {
+    log("error", `Invalid task ID format: ${taskId}. Skipping.`);
+    return;
+  }
 
   try {
     // Step 1: Move task to "In Progress"
@@ -367,6 +374,11 @@ async function processApprovedTask(task: ClickUpTask): Promise<void> {
   log("info", `\n${"=".repeat(60)}`);
   log("info", `Merging approved task: ${taskName} (${taskId})`);
   log("info", `${"=".repeat(60)}\n`);
+
+  if (!isValidTaskId(taskId)) {
+    log("error", `Invalid task ID format: ${taskId}. Skipping.`);
+    return;
+  }
 
   try {
     // Find the PR URL from the task's comments

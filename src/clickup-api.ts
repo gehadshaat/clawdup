@@ -191,6 +191,38 @@ export async function createTask(
   });
 }
 
+/**
+ * Known prompt injection patterns.
+ * These are logged as warnings when detected in task content.
+ */
+const INJECTION_PATTERNS = [
+  /ignore\s+(all\s+)?previous\s+instructions/i,
+  /ignore\s+(all\s+)?above\s+instructions/i,
+  /disregard\s+(all\s+)?previous/i,
+  /you\s+are\s+now\s+a/i,
+  /new\s+system\s+prompt/i,
+  /override\s+(the\s+)?system/i,
+  /forget\s+(all\s+)?(your\s+)?instructions/i,
+  /<\/task>/i,
+  /IMPORTANT:\s*ignore/i,
+  /CRITICAL:\s*override/i,
+];
+
+/**
+ * Check task content for known prompt injection patterns.
+ * Returns an array of matched pattern descriptions.
+ */
+export function detectInjectionPatterns(text: string): string[] {
+  const matches: string[] = [];
+  for (const pattern of INJECTION_PATTERNS) {
+    const match = text.match(pattern);
+    if (match) {
+      matches.push(match[0]);
+    }
+  }
+  return matches;
+}
+
 // Maximum lengths for task content sent to Claude
 const MAX_DESCRIPTION_LENGTH = 5000;
 const MAX_COMMENT_LENGTH = 2000;
@@ -214,6 +246,21 @@ export function formatTaskForClaude(
   task: ClickUpTask,
   comments?: ClickUpComment[],
 ): string {
+  // Check for injection patterns in all untrusted content
+  const allContent = [
+    task.name,
+    task.text_content || task.description || "",
+    ...(comments || []).map((c) => c.comment_text || ""),
+  ].join("\n");
+
+  const injectionMatches = detectInjectionPatterns(allContent);
+  if (injectionMatches.length > 0) {
+    log(
+      "warn",
+      `Potential prompt injection detected in task ${task.id}: ${injectionMatches.join(", ")}`,
+    );
+  }
+
   const parts: string[] = [];
 
   parts.push(`# Task: ${truncate(task.name, 200)}`);
@@ -283,6 +330,14 @@ export function formatTaskForClaude(
   }
 
   return parts.join("\n");
+}
+
+/**
+ * Validate that a task ID matches the expected ClickUp format (alphanumeric).
+ * Prevents injection through malformed task IDs.
+ */
+export function isValidTaskId(taskId: string): boolean {
+  return /^[a-zA-Z0-9]+$/.test(taskId) && taskId.length <= 30;
 }
 
 /**
