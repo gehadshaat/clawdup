@@ -140,6 +140,7 @@ export async function runClaudeOnTask(
     const args = [
       "-p", // print mode (non-interactive)
       systemPrompt,
+      "--verbose",
       "--output-format",
       "stream-json",
       "--include-partial-messages",
