@@ -83,7 +83,29 @@ IMPORTANT RULES:
 }
 
 /**
+ * Format a tool_use block into a human-readable line.
+ * Shows the tool name plus the most relevant parameter.
+ */
+function formatToolUse(
+  name: string,
+  input: Record<string, unknown>,
+): string {
+  let detail = "";
+  if (input.file_path) {
+    detail = ` ${input.file_path}`;
+  } else if (input.pattern) {
+    detail = ` ${input.pattern}`;
+  } else if (input.command) {
+    const cmd = String(input.command);
+    detail = ` ${cmd.length > 80 ? cmd.slice(0, 80) + "…" : cmd}`;
+  }
+  return `\n[${name}]${detail}\n`;
+}
+
+/**
  * Run Claude Code on a task.
+ * Uses stream-json output for structured JSONL events, which avoids
+ * the empty "[tool]: Edit" lines that verbose text mode can produce.
  */
 export async function runClaudeOnTask(
   taskPrompt: string,
@@ -97,14 +119,20 @@ export async function runClaudeOnTask(
     let output = "";
     let timedOut = false;
 
+    // Stream-json parsing state
+    let jsonBuffer = "";
+    let lastMessageId = "";
+    let lastTextLength = 0;
+    const displayedToolUseIds = new Set<string>();
+
     const args = [
       "-p", // print mode (non-interactive)
       systemPrompt,
       "--output-format",
-      "text",
+      "stream-json",
+      "--include-partial-messages",
       "--max-turns",
       String(CLAUDE_MAX_TURNS),
-      "--verbose",
       "--allowedTools",
       "Edit",
       "Write",
@@ -119,6 +147,86 @@ export async function runClaudeOnTask(
       args.push(...userConfig.claudeArgs);
     }
 
+    /**
+     * Process a single parsed stream-json event.
+     * Extracts text deltas for display and accumulates them in `output`.
+     * Formats tool_use blocks with tool name + key parameter.
+     */
+    function processStreamEvent(event: Record<string, unknown>): void {
+      const type = event.type as string;
+
+      if (type === "assistant") {
+        const message = event.message as
+          | Record<string, unknown>
+          | undefined;
+        if (!message?.content || !Array.isArray(message.content)) return;
+
+        const messageId = (message.id as string) || "";
+
+        // Reset tracking when a new message starts
+        if (messageId && messageId !== lastMessageId) {
+          lastMessageId = messageId;
+          lastTextLength = 0;
+        }
+
+        // Compute full text from all text blocks in this message
+        let fullText = "";
+        for (const block of message.content) {
+          if (block.type === "text") {
+            fullText += block.text;
+          }
+        }
+
+        // Display only the new text (delta) since last partial update
+        if (fullText.length > lastTextLength) {
+          const delta = fullText.slice(lastTextLength);
+          process.stdout.write(delta);
+          output += delta;
+          lastTextLength = fullText.length;
+        }
+
+        // Display each tool_use block once (keyed by its ID)
+        for (const block of message.content) {
+          if (
+            block.type === "tool_use" &&
+            block.id &&
+            !displayedToolUseIds.has(block.id)
+          ) {
+            displayedToolUseIds.add(block.id);
+            process.stdout.write(
+              formatToolUse(block.name, block.input || {}),
+            );
+          }
+        }
+      } else if (type === "result") {
+        const result = event.result as
+          | Record<string, unknown>
+          | undefined;
+        if (!result?.content || !Array.isArray(result.content)) return;
+
+        // Extract any final text not yet displayed
+        let fullText = "";
+        for (const block of result.content) {
+          if (block.type === "text") {
+            fullText += block.text;
+          }
+        }
+
+        if (fullText.length > lastTextLength) {
+          const delta = fullText.slice(lastTextLength);
+          process.stdout.write(delta);
+          output += delta;
+        }
+
+        // Show cost summary
+        if (event.cost_usd) {
+          const cost = (event.cost_usd as number).toFixed(4);
+          const turns = event.num_turns ?? "?";
+          process.stdout.write(`\n[Cost: $${cost} | Turns: ${turns}]\n`);
+        }
+      }
+    }
+
     const proc = spawn(CLAUDE_COMMAND, args, {
       cwd: PROJECT_ROOT,
       env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: "cli" },
@@ -127,9 +235,22 @@ export async function runClaudeOnTask(
     });
 
     proc.stdout.on("data", (chunk: Buffer) => {
-      const text = chunk.toString();
-      output += text;
-      process.stdout.write(text);
+      jsonBuffer += chunk.toString();
+
+      // Process complete JSONL lines
+      const lines = jsonBuffer.split("\n");
+      jsonBuffer = lines.pop() || ""; // keep incomplete last line
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const event = JSON.parse(line) as Record<string, unknown>;
+          processStreamEvent(event);
+        } catch {
+          // Not valid JSON — pass through raw text as fallback
+          process.stdout.write(line + "\n");
+        }
+      }
     });
 
     proc.stderr.on("data", (chunk: Buffer) => {
@@ -144,6 +265,16 @@ export async function runClaudeOnTask(
 
     proc.on("close", (code: number | null) => {
       clearTimeout(timeout);
+
+      // Flush any remaining buffer
+      if (jsonBuffer.trim()) {
+        try {
+          const event = JSON.parse(jsonBuffer) as Record<string, unknown>;
+          processStreamEvent(event);
+        } catch {
+          process.stdout.write(jsonBuffer);
+        }
+      }
 
       if (timedOut) {
         resolve({
