@@ -43,12 +43,12 @@ async function request<T>(
  */
 export async function getTasksByStatus(status: string): Promise<ClickUpTask[]> {
   const params = new URLSearchParams({
-    statuses: [status] as unknown as string,
     include_closed: "false",
     subtasks: "true",
     order_by: "created",
     reverse: "false",
   });
+  params.append("statuses[]", status);
 
   const data = await request<{ tasks: ClickUpTask[] }>(
     "GET",
