@@ -1,6 +1,4 @@
 # clawup
-<<<<<<< HEAD
-=======
 
 Automated pipeline that polls a ClickUp list for tasks, uses Claude Code to implement them, creates GitHub PRs, and manages task statuses through their full lifecycle.
 
