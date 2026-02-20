@@ -1,3 +1,9 @@
+export interface ClickUpUser {
+  id: number;
+  username?: string;
+  email?: string;
+}
+
 export interface ClickUpTask {
   id: string;
   name: string;
@@ -5,6 +11,7 @@ export interface ClickUpTask {
   description?: string;
   text_content?: string;
   date_created?: string;
+  creator?: ClickUpUser;
   priority?: { id: string; priority: string };
   tags?: { name: string }[];
   checklists?: ClickUpChecklist[];
