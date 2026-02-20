@@ -5,6 +5,7 @@ import { resolve } from "path";
 import { POLL_INTERVAL_MS, STATUS, BASE_BRANCH, PROJECT_ROOT, log } from "./config.js";
 import {
   getTasksByStatus,
+  getTaskComments,
   updateTaskStatus,
   addTaskComment,
   formatTaskForClaude,
@@ -111,8 +112,9 @@ async function processTask(task: ClickUpTask): Promise<void> {
     branchName = await createTaskBranch(taskId, slug);
     log("info", `Working on branch: ${branchName}`);
 
-    // Step 3: Format the task for Claude and run it
-    const taskPrompt = formatTaskForClaude(task);
+    // Step 3: Fetch comments, format the task for Claude, and run it
+    const comments = await getTaskComments(taskId);
+    const taskPrompt = formatTaskForClaude(task, comments);
     const result = await runClaudeOnTask(taskPrompt, taskId);
 
     // Step 4: Handle the result
