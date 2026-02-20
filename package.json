@@ -1,0 +1,49 @@
+{
+  "name": "clawup",
+  "version": "1.0.0",
+  "description": "Automated pipeline that polls ClickUp for tasks, uses Claude Code to implement them, and creates GitHub PRs",
+  "type": "module",
+  "bin": {
+    "clawup": "./bin/clawup.js"
+  },
+  "exports": {
+    ".": "./dist/index.js",
+    "./config": "./dist/config.js",
+    "./clickup-api": "./dist/clickup-api.js",
+    "./git-ops": "./dist/git-ops.js",
+    "./claude-worker": "./dist/claude-worker.js",
+    "./runner": "./dist/runner.js"
+  },
+  "files": [
+    "bin/",
+    "dist/",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.8.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "clickup",
+    "automation",
+    "claude",
+    "claude-code",
+    "github",
+    "pull-request",
+    "ai",
+    "task-automation",
+    "devops"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": ""
+  }
+}
