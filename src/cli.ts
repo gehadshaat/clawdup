@@ -92,7 +92,7 @@ Flow:
   3. Creates a git branch: clickup/CU-{task-id}-{slug} (auto-links to ClickUp)
   4. Runs Claude Code to implement the task (reads your CLAUDE.md for context)
   5. If successful: commits, pushes, creates PR, moves to "in review"
-  6. If approved: merges the PR, moves to "completed"
+  6. If approved: merges the PR, moves to "complete"
   7. If needs input: comments on task, moves to "require input"
   8. If error: comments on task, moves to "blocked"
   9. Repeats
@@ -117,7 +117,7 @@ Set up these statuses in your ClickUp list for the automation to work:
   approved         active     #2ecd6f   Approved — automation will merge the PR
   require input    active     #f9d900   Task needs clarification (comment added)
   blocked          active     #f44336   Automation hit an error
-  completed        closed     #6bc950   Task is done (PR merged)
+  complete         closed     #6bc950   Task is done (PR merged)
 
 How to set up:
   1. Open your ClickUp list
@@ -166,7 +166,7 @@ CLICKUP_LIST_ID=
 # STATUS_IN_REVIEW=in review
 # STATUS_APPROVED=approved
 # STATUS_REQUIRE_INPUT=require input
-# STATUS_COMPLETED=completed
+# STATUS_COMPLETED=complete
 # STATUS_BLOCKED=blocked
 
 # How often to poll ClickUp for new tasks (milliseconds)

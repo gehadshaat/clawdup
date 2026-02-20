@@ -268,7 +268,7 @@ async function processApprovedTask(task: ClickUpTask): Promise<void> {
       log("info", `PR already merged for task ${taskId}: ${prUrl}`);
       await addTaskComment(
         taskId,
-        `✅ PR was already merged: ${prUrl}\n\nMoving task to completed.`,
+        `✅ PR was already merged: ${prUrl}\n\nMoving task to complete.`,
       );
       await updateTaskStatus(taskId, STATUS.COMPLETED);
       return;
@@ -288,7 +288,7 @@ async function processApprovedTask(task: ClickUpTask): Promise<void> {
     // Merge the PR
     await mergePullRequest(prUrl);
 
-    // Move task to completed
+    // Move task to complete
     await updateTaskStatus(taskId, STATUS.COMPLETED);
     await addTaskComment(
       taskId,

@@ -95,7 +95,7 @@ export async function runSetup(): Promise<void> {
       "approved",
       "require input",
       "blocked",
-      "completed",
+      "complete",
     ];
     const missing = recommended.filter((s) => !existing.includes(s));
 

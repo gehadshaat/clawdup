@@ -46,7 +46,7 @@ clawup
                                                                ┌──────────────┐
                                                                │  Automation  │
                                                                │  merges PR   │
-                                                               │ → "completed"│
+                                                               │ → "complete" │
                                                                └──────────────┘
 ```
 
@@ -184,7 +184,7 @@ If your project has a `CLAUDE.md` file (used by Claude Code for project context)
 | `STATUS_IN_REVIEW`     | No       | `in review`     | ClickUp status: in review           |
 | `STATUS_APPROVED`      | No       | `approved`      | ClickUp status: approved            |
 | `STATUS_REQUIRE_INPUT` | No       | `require input` | ClickUp status: require input       |
-| `STATUS_COMPLETED`     | No       | `completed`     | ClickUp status: completed           |
+| `STATUS_COMPLETED`     | No       | `complete`      | ClickUp status: complete            |
 | `STATUS_BLOCKED`       | No       | `blocked`       | ClickUp status: blocked             |
 
 ## ClickUp List Statuses
@@ -199,10 +199,10 @@ Set up these statuses in your ClickUp list:
 | `approved`      | active | `#2ecd6f` | Approved — automation will merge the PR    |
 | `require input` | active | `#f9d900` | Needs clarification (comment explains why) |
 | `blocked`       | active | `#f44336` | Automation hit an error                    |
-| `completed`     | closed | `#6bc950` | Done — PR merged                           |
+| `complete`      | closed | `#6bc950` | Done — PR merged                           |
 
 ```
-to do → in progress → in review → approved → completed
+to do → in progress → in review → approved → complete
              │              │                    ▲
              ├→ require input → to do (retry)    │
              └→ blocked ─────────────────────────┘

@@ -103,7 +103,7 @@ export const STATUS = {
   IN_REVIEW: process.env.STATUS_IN_REVIEW || "in review",
   APPROVED: process.env.STATUS_APPROVED || "approved",
   REQUIRE_INPUT: process.env.STATUS_REQUIRE_INPUT || "require input",
-  COMPLETED: process.env.STATUS_COMPLETED || "completed",
+  COMPLETED: process.env.STATUS_COMPLETED || "complete",
   BLOCKED: process.env.STATUS_BLOCKED || "blocked",
 } as const;
 
