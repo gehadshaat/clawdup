@@ -20,6 +20,11 @@ export {
   commitChanges,
   pushBranch,
   createPullRequest,
+  createEmptyCommit,
+  markPRReady,
+  closePullRequest,
+  updatePullRequest,
+  findExistingPR,
   mergePullRequest,
   getPRState,
 } from "./git-ops.js";

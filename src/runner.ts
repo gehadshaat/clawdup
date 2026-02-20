@@ -24,6 +24,11 @@ import {
   commitChanges,
   pushBranch,
   createPullRequest,
+  createEmptyCommit,
+  markPRReady,
+  closePullRequest,
+  updatePullRequest,
+  findExistingPR,
   returnToBaseBranch,
   deleteLocalBranch,
   isWorkingTreeClean,
@@ -89,12 +94,15 @@ async function processTodoFile(): Promise<void> {
 
 /**
  * Process a single ClickUp task end-to-end.
+ * Always starts from the latest base branch and creates a PR immediately
+ * so that work is visible from the start.
  */
 async function processTask(task: ClickUpTask): Promise<void> {
   const taskId = task.id;
   const taskName = task.name;
   const slug = slugify(taskName);
   let branchName: string | null = null;
+  let prUrl: string | null = null;
 
   log("info", `\n${"=".repeat(60)}`);
   log("info", `Processing task: ${taskName} (${taskId})`);
@@ -104,34 +112,60 @@ async function processTask(task: ClickUpTask): Promise<void> {
   try {
     // Step 1: Move task to "In Progress"
     await updateTaskStatus(taskId, STATUS.IN_PROGRESS);
-    await addTaskComment(
-      taskId,
-      `🤖 Automation picked up this task and is now working on it.`,
-    );
 
-    // Step 2: Create a feature branch
+    // Step 2: Create a feature branch from the latest base branch
     branchName = await createTaskBranch(taskId, slug);
     log("info", `Working on branch: ${branchName}`);
 
-    // Step 3: Fetch comments, format the task for Claude, and run it
+    // Step 3: Create a PR immediately so work is visible from the start.
+    // Check if a PR already exists for this branch (e.g. from a previous run).
+    prUrl = await findExistingPR(branchName);
+
+    if (!prUrl) {
+      // Create an empty commit so we can push and open a draft PR
+      await createEmptyCommit(
+        `[CU-${taskId}] Starting work on: ${taskName}`,
+      );
+      await pushBranch(branchName);
+      prUrl = await createPullRequest({
+        title: `[CU-${taskId}] ${taskName}`,
+        body:
+          `🤖 Automation is working on this task.\n\n` +
+          `**Task:** ${task.url}\n\n` +
+          `This PR will be updated with changes once implementation is complete.`,
+        branchName,
+        baseBranch: BASE_BRANCH,
+        draft: true,
+      });
+      log("info", `Draft PR created: ${prUrl}`);
+    } else {
+      log("info", `Existing PR found: ${prUrl}`);
+    }
+
+    await addTaskComment(
+      taskId,
+      `🤖 Automation picked up this task and is now working on it.\n\nPR: ${prUrl}`,
+    );
+
+    // Step 4: Fetch comments, format the task for Claude, and run it
     const comments = await getTaskComments(taskId);
     const taskPrompt = formatTaskForClaude(task, comments);
     const result = await runClaudeOnTask(taskPrompt, taskId);
 
-    // Step 4: Handle the result
+    // Step 5: Handle the result
     if (result.needsInput) {
       // Claude needs more information
-      await handleNeedsInput(task, result, branchName);
+      await handleNeedsInput(task, result, branchName, prUrl);
       return;
     }
 
     if (!result.success) {
       // Claude encountered an error
-      await handleError(task, result, branchName);
+      await handleError(task, result, branchName, prUrl);
       return;
     }
 
-    // Step 5: Check if Claude actually made changes
+    // Step 6: Check if Claude actually made changes
     const changed = await hasChanges();
     if (!changed) {
       log(
@@ -148,30 +182,26 @@ async function processTask(task: ClickUpTask): Promise<void> {
           `Please review and provide more specific instructions if needed.`,
       );
       await updateTaskStatus(taskId, STATUS.REQUIRE_INPUT);
-      await cleanupBranch(branchName);
+      await closePRAndCleanup(prUrl, branchName);
       return;
     }
 
-    // Step 6: Commit, push, and create PR
+    // Step 7: Commit, push, and update the PR
     const commitMsg = generateCommitMessage(task, result.output);
     await commitChanges(commitMsg);
-
     await pushBranch(branchName);
 
+    // Update the PR body with full details and mark it as ready for review
     const { files } = await getChangesSummary();
     const prBody = generatePRBody(task, result.output, files);
-    const prUrl = await createPullRequest({
-      title: `[CU-${taskId}] ${taskName}`,
-      body: prBody,
-      branchName,
-      baseBranch: BASE_BRANCH,
-    });
+    await updatePullRequest(prUrl, { body: prBody });
+    await markPRReady(prUrl);
 
-    // Step 7: Update ClickUp task
+    // Step 8: Update ClickUp task
     await updateTaskStatus(taskId, STATUS.IN_REVIEW);
     await addTaskComment(
       taskId,
-      `✅ Automation completed! A pull request has been created:\n\n` +
+      `✅ Automation completed! The pull request is ready for review:\n\n` +
         `${prUrl}\n\n` +
         `Branch: \`${branchName}\`\n` +
         `Files changed: ${files.length}\n\n` +
@@ -187,7 +217,8 @@ async function processTask(task: ClickUpTask): Promise<void> {
         taskId,
         task.creator,
         `❌ Automation encountered an error:\n\n\`\`\`\n${(err as Error).message}\n\`\`\`\n\n` +
-          `The task has been moved to "Blocked". Please investigate and retry.`,
+          `The task has been moved to "Blocked". Please investigate and retry.` +
+          (prUrl ? `\n\nPR: ${prUrl}` : ""),
       );
       await updateTaskStatus(taskId, STATUS.BLOCKED);
     } catch (commentErr) {
@@ -198,6 +229,14 @@ async function processTask(task: ClickUpTask): Promise<void> {
     }
 
     if (branchName) {
+      // If there's a PR but no useful work, close it and cleanup
+      if (prUrl) {
+        try {
+          await closePullRequest(prUrl);
+        } catch {
+          log("debug", "Could not close PR during error cleanup");
+        }
+      }
       await cleanupBranch(branchName);
     }
   } finally {
@@ -219,6 +258,7 @@ async function handleNeedsInput(
   task: ClickUpTask,
   result: ClaudeResult,
   branchName: string,
+  prUrl: string | null,
 ): Promise<void> {
   const reason = extractNeedsInputReason(result.output);
 
@@ -232,8 +272,8 @@ async function handleNeedsInput(
   );
   await updateTaskStatus(task.id, STATUS.REQUIRE_INPUT);
 
-  // Clean up the branch since no work was done
-  await cleanupBranch(branchName);
+  // Close the draft PR and clean up the branch since no work was done
+  await closePRAndCleanup(prUrl, branchName);
 }
 
 /**
@@ -243,6 +283,7 @@ async function handleError(
   task: ClickUpTask,
   result: ClaudeResult,
   branchName: string,
+  prUrl: string | null,
 ): Promise<void> {
   const errorMsg = result.error || "Unknown error";
 
@@ -252,7 +293,7 @@ async function handleError(
   const changed = await hasChanges();
 
   if (changed) {
-    // There are partial changes - commit them to a branch for review
+    // There are partial changes - commit them and push (PR already exists)
     try {
       await commitChanges(
         `[CU-${task.id}] WIP: ${task.name} (partial - automation error)`,
@@ -263,7 +304,8 @@ async function handleError(
         task.creator,
         `⚠️ Automation encountered an error but made partial changes.\n\n` +
           `Error: \`${errorMsg}\`\n\n` +
-          `Partial changes have been pushed to branch \`${branchName}\` for manual review.\n` +
+          `Partial changes have been pushed to the PR for manual review.\n` +
+          (prUrl ? `PR: ${prUrl}\n` : `Branch: \`${branchName}\`\n`) +
           `Please complete the work manually or provide more details and retry.`,
       );
     } catch (pushErr) {
@@ -271,10 +313,11 @@ async function handleError(
         "error",
         `Failed to push partial changes: ${(pushErr as Error).message}`,
       );
-      await cleanupBranch(branchName);
+      await closePRAndCleanup(prUrl, branchName);
     }
   } else {
-    await cleanupBranch(branchName);
+    // No partial changes - close the draft PR and clean up
+    await closePRAndCleanup(prUrl, branchName);
   }
 
   await updateTaskStatus(task.id, STATUS.BLOCKED);
@@ -290,6 +333,23 @@ async function cleanupBranch(branchName: string): Promise<void> {
   } catch {
     log("debug", `Cleanup of branch ${branchName} failed (non-critical)`);
   }
+}
+
+/**
+ * Close a PR and clean up the associated branch.
+ */
+async function closePRAndCleanup(
+  prUrl: string | null,
+  branchName: string,
+): Promise<void> {
+  if (prUrl) {
+    try {
+      await closePullRequest(prUrl);
+    } catch {
+      log("debug", "Could not close PR during cleanup (non-critical)");
+    }
+  }
+  await cleanupBranch(branchName);
 }
 
 /**
