@@ -191,9 +191,24 @@ export async function createTask(
   });
 }
 
+// Maximum lengths for task content sent to Claude
+const MAX_DESCRIPTION_LENGTH = 5000;
+const MAX_COMMENT_LENGTH = 2000;
+const MAX_COMMENTS_COUNT = 10;
+const MAX_CHECKLIST_ITEM_LENGTH = 500;
+
+/**
+ * Truncate a string to a maximum length, appending "... (truncated)" if needed.
+ */
+function truncate(text: string, maxLength: number): string {
+  if (text.length <= maxLength) return text;
+  return text.slice(0, maxLength) + "... (truncated)";
+}
+
 /**
  * Extract a clean task description from ClickUp task data.
  * Combines title, description, and any checklist items.
+ * Applies length limits and content boundaries to prevent prompt injection.
  */
 export function formatTaskForClaude(
   task: ClickUpTask,
@@ -201,7 +216,7 @@ export function formatTaskForClaude(
 ): string {
   const parts: string[] = [];
 
-  parts.push(`# Task: ${task.name}`);
+  parts.push(`# Task: ${truncate(task.name, 200)}`);
   parts.push(`Task ID: ${task.id}`);
   parts.push(`URL: ${task.url}`);
 
@@ -217,11 +232,11 @@ export function formatTaskForClaude(
 
   if (task.text_content) {
     parts.push("## Description");
-    parts.push(task.text_content);
+    parts.push(truncate(task.text_content, MAX_DESCRIPTION_LENGTH));
     parts.push("");
   } else if (task.description) {
     parts.push("## Description");
-    parts.push(task.description);
+    parts.push(truncate(task.description, MAX_DESCRIPTION_LENGTH));
     parts.push("");
   }
 
@@ -229,10 +244,10 @@ export function formatTaskForClaude(
   if (task.checklists && task.checklists.length > 0) {
     parts.push("## Checklist");
     for (const checklist of task.checklists) {
-      parts.push(`### ${checklist.name}`);
+      parts.push(`### ${truncate(checklist.name, MAX_CHECKLIST_ITEM_LENGTH)}`);
       for (const item of checklist.items || []) {
         const check = item.resolved ? "[x]" : "[ ]";
-        parts.push(`- ${check} ${item.name}`);
+        parts.push(`- ${check} ${truncate(item.name, MAX_CHECKLIST_ITEM_LENGTH)}`);
       }
     }
     parts.push("");
@@ -243,15 +258,19 @@ export function formatTaskForClaude(
     parts.push("## Subtasks");
     for (const sub of task.subtasks) {
       const done = sub.status?.status === STATUS.COMPLETED ? "[x]" : "[ ]";
-      parts.push(`- ${done} ${sub.name}`);
+      parts.push(`- ${done} ${truncate(sub.name, MAX_CHECKLIST_ITEM_LENGTH)}`);
     }
     parts.push("");
   }
 
-  // Include comments if any
+  // Include comments if any (limited to most recent N)
   if (comments && comments.length > 0) {
+    const recentComments = comments.slice(-MAX_COMMENTS_COUNT);
     parts.push("## Comments");
-    for (const comment of comments) {
+    if (comments.length > MAX_COMMENTS_COUNT) {
+      parts.push(`(showing ${MAX_COMMENTS_COUNT} most recent of ${comments.length} comments)`);
+    }
+    for (const comment of recentComments) {
       const text = comment.comment_text || "";
       if (!text.trim()) continue;
       const user = comment.user?.username || "Unknown";
@@ -259,7 +278,7 @@ export function formatTaskForClaude(
         ? new Date(parseInt(comment.date)).toISOString().split("T")[0]
         : "";
       const header = date ? `**${user}** (${date}):` : `**${user}**:`;
-      parts.push(`${header}\n${text}\n`);
+      parts.push(`${header}\n${truncate(text, MAX_COMMENT_LENGTH)}\n`);
     }
   }
 
