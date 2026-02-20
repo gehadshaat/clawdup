@@ -98,6 +98,7 @@ export async function runClaudeOnTask(
 
     const args = [
       "-p", // print mode (non-interactive)
+      systemPrompt,
       "--output-format",
       "text",
       "--max-turns",
@@ -113,12 +114,9 @@ export async function runClaudeOnTask(
     const proc = spawn(CLAUDE_COMMAND, args, {
       cwd: PROJECT_ROOT,
       env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: "cli" },
-      stdio: ["pipe", "pipe", "pipe"],
+      stdio: ["ignore", "pipe", "pipe"],
       timeout: CLAUDE_TIMEOUT_MS,
     });
-
-    proc.stdin.write(systemPrompt);
-    proc.stdin.end();
 
     proc.stdout.on("data", (chunk: Buffer) => {
       const text = chunk.toString();
