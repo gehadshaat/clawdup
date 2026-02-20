@@ -1,3 +1,7 @@
 dist/
 node_modules/
 .idea/
+.clawup.env
+.env.clickup
+.clawup.todo.json
+*.tgz
