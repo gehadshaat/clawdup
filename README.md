@@ -262,5 +262,3 @@ For best results, write ClickUp tasks with:
 ## License
 
 MIT
-# clawup
->>>>>>> 1077fb7 (first commit)
