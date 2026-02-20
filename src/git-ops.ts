@@ -2,7 +2,7 @@
 
 import { execFile } from "child_process";
 import { promisify } from "util";
-import { BASE_BRANCH, BRANCH_PREFIX, GIT_ROOT, log } from "./config.js";
+import { BASE_BRANCH, BRANCH_PREFIX, MERGE_STRATEGY, GIT_ROOT, log } from "./config.js";
 import type { PullRequestOptions } from "./types.js";
 
 const execFileAsync = promisify(execFile);
@@ -295,11 +295,15 @@ export async function deleteLocalBranch(branchName: string): Promise<void> {
 
 /**
  * Merge a pull request by its URL using the gh CLI.
- * Uses squash merge by default for a clean history.
+ * Merge strategy is configurable via MERGE_STRATEGY env var (squash, merge, rebase).
  */
 export async function mergePullRequest(prUrl: string): Promise<void> {
-  log("info", `Merging PR: ${prUrl}`);
-  await gh("pr", "merge", prUrl, "--squash", "--delete-branch", "--admin");
+  const strategyFlag = MERGE_STRATEGY === "rebase" ? "--rebase"
+    : MERGE_STRATEGY === "merge" ? "--merge"
+    : "--squash";
+
+  log("info", `Merging PR (${MERGE_STRATEGY}): ${prUrl}`);
+  await gh("pr", "merge", prUrl, strategyFlag, "--delete-branch", "--admin");
   log("info", `PR merged successfully: ${prUrl}`);
 }
 

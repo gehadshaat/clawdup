@@ -36,6 +36,8 @@ export interface ClickUpStatus {
 
 export interface ClickUpComment {
   comment_text?: string;
+  comment_by?: string;
+  date?: string;
 }
 
 export interface ClaudeResult {

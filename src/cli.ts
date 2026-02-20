@@ -13,7 +13,17 @@ import { existsSync, writeFileSync } from "fs";
 const args = process.argv.slice(2);
 
 async function main(): Promise<void> {
-  // --init and --statuses don't need config loaded
+  // --version, --init, and --statuses don't need config loaded
+  if (args.includes("--version") || args.includes("-v")) {
+    const { readFileSync } = await import("fs");
+    const { resolve, dirname } = await import("path");
+    const { fileURLToPath } = await import("url");
+    const __dirname = dirname(fileURLToPath(import.meta.url));
+    const pkg = JSON.parse(readFileSync(resolve(__dirname, "../package.json"), "utf-8"));
+    console.log(`clawup v${pkg.version}`);
+    process.exit(0);
+  }
+
   if (args.includes("--help") || args.includes("-h")) {
     printUsage();
     process.exit(0);
@@ -37,11 +47,16 @@ async function main(): Promise<void> {
 
   // Everything below requires config to be loaded
   const { startRunner, runSingleTask } = await import("./runner.js");
-  const { validateStatuses, getListInfo } = await import("./clickup-api.js");
+  const { validateStatuses, getListInfo, getTasksByStatus } = await import("./clickup-api.js");
   const { detectGitHubRepo } = await import("./git-ops.js");
 
   if (args.includes("--check")) {
     await runChecks({ validateStatuses, getListInfo, detectGitHubRepo });
+    process.exit(0);
+  }
+
+  if (args.includes("--dry-run")) {
+    await runDryRun({ getTasksByStatus, getListInfo, detectGitHubRepo });
     process.exit(0);
   }
 
@@ -73,9 +88,11 @@ Usage:
   clawup                     Start continuous polling
   clawup --once <task-id>    Process a single task
   clawup --check             Validate configuration
+  clawup --dry-run           Simulate a poll cycle without making changes
   clawup --statuses          Show recommended ClickUp statuses
   clawup --setup             Interactive setup wizard
   clawup --init              Create config files in current directory
+  clawup --version           Show version
   clawup --help              Show this help
 
 Configuration:
@@ -183,6 +200,9 @@ CLICKUP_LIST_ID=
 
 # Git branch prefix
 # BRANCH_PREFIX=clickup
+
+# Merge strategy for PRs: squash | merge | rebase
+# MERGE_STRATEGY=squash
 
 # Log level: debug | info | warn | error
 # LOG_LEVEL=info
@@ -331,6 +351,67 @@ async function runChecks({
     console.log("Some checks failed. Please fix the issues above.");
     process.exit(1);
   }
+}
+
+interface DryRunDeps {
+  getTasksByStatus: (status: string) => Promise<{ id: string; name: string; priority?: { priority: string } }[]>;
+  getListInfo: () => Promise<{
+    name: string;
+    id: string;
+    task_count: number;
+    statuses: { status: string }[];
+  }>;
+  detectGitHubRepo: () => Promise<string>;
+}
+
+async function runDryRun({ getTasksByStatus, getListInfo, detectGitHubRepo }: DryRunDeps): Promise<void> {
+  const { STATUS } = await import("./config.js");
+
+  console.log("Dry run — simulating a poll cycle (no changes will be made)\n");
+
+  // Show config
+  try {
+    const repo = await detectGitHubRepo();
+    const list = await getListInfo();
+    console.log(`  List: "${list.name}" (${list.id})`);
+    console.log(`  Repo: ${repo}\n`);
+  } catch (err) {
+    console.error(`  Config error: ${(err as Error).message}\n`);
+  }
+
+  // Show approved tasks
+  const approved = await getTasksByStatus(STATUS.APPROVED);
+  if (approved.length > 0) {
+    console.log(`Approved tasks (would merge PRs):`);
+    for (const t of approved) {
+      console.log(`  - [${t.id}] ${t.name}`);
+    }
+    console.log("");
+  }
+
+  // Show TODO tasks
+  const todos = await getTasksByStatus(STATUS.TODO);
+  if (todos.length > 0) {
+    console.log(`TODO tasks (would pick highest priority):`);
+    for (const t of todos) {
+      const pri = t.priority ? ` (${t.priority.priority})` : "";
+      console.log(`  - [${t.id}] ${t.name}${pri}`);
+    }
+    console.log(`\n  → Would process: [${todos[0]!.id}] ${todos[0]!.name}`);
+  } else {
+    console.log("No TODO tasks found. Nothing to process.");
+  }
+
+  // Show in-progress (orphaned) tasks
+  const inProgress = await getTasksByStatus(STATUS.IN_PROGRESS);
+  if (inProgress.length > 0) {
+    console.log(`\nOrphaned in-progress tasks (would attempt recovery):`);
+    for (const t of inProgress) {
+      console.log(`  - [${t.id}] ${t.name}`);
+    }
+  }
+
+  console.log("\nDry run complete. No changes were made.");
 }
 
 main().catch((err: Error) => {

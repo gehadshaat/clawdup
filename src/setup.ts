@@ -121,6 +121,7 @@ export async function runSetup(): Promise<void> {
 
   const baseBranch = await ask("Base git branch", "main");
   const branchPrefix = await ask("Branch prefix for task branches", "clickup");
+  const mergeStrategy = await ask("PR merge strategy (squash/merge/rebase)", "squash");
   const pollInterval = await ask("Poll interval in seconds", "30");
   const claudeTimeout = await ask("Claude timeout per task in seconds", "600");
   const maxTurns = await ask("Max Claude turns per task", "50");
@@ -135,6 +136,7 @@ CLICKUP_LIST_ID=${listId}
 # Git
 BASE_BRANCH=${baseBranch}
 BRANCH_PREFIX=${branchPrefix}
+MERGE_STRATEGY=${mergeStrategy}
 
 # Polling
 POLL_INTERVAL_MS=${parseInt(pollInterval) * 1000}

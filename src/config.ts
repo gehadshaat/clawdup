@@ -127,6 +127,9 @@ export const CLAUDE_MAX_TURNS: number = parseInt(
 // Branch naming
 export const BRANCH_PREFIX: string = process.env.BRANCH_PREFIX || "clickup";
 
+// Merge strategy: "squash" | "merge" | "rebase"
+export const MERGE_STRATEGY: string = process.env.MERGE_STRATEGY || "squash";
+
 // Logging
 export const LOG_LEVEL: string = process.env.LOG_LEVEL || "info";
 

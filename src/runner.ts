@@ -1,12 +1,13 @@
 // Main task runner - orchestrates the full ClickUp -> Claude -> GitHub pipeline
 
-import { existsSync, readFileSync, unlinkSync } from "fs";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import { POLL_INTERVAL_MS, STATUS, BASE_BRANCH, PROJECT_ROOT, log } from "./config.js";
 import {
   getTasksByStatus,
   updateTaskStatus,
   addTaskComment,
+  getTaskComments,
   formatTaskForClaude,
   slugify,
   validateStatuses,
@@ -44,6 +45,57 @@ let isShuttingDown = false;
 let isProcessing = false;
 
 const TODO_FILE_PATH = resolve(PROJECT_ROOT, ".clawup.todo.json");
+const LOCK_FILE_PATH = resolve(PROJECT_ROOT, ".clawup.lock");
+
+/**
+ * Acquire a lock to prevent multiple clawup instances from running simultaneously.
+ * The lock file contains the PID of the owning process.
+ * Returns true if the lock was acquired, false if another instance is running.
+ */
+function acquireLock(): boolean {
+  if (existsSync(LOCK_FILE_PATH)) {
+    try {
+      const content = readFileSync(LOCK_FILE_PATH, "utf-8").trim();
+      const pid = parseInt(content, 10);
+      if (pid && isProcessRunning(pid)) {
+        return false; // another instance is actually running
+      }
+      // Stale lock file — previous process died without cleanup
+      log("warn", `Removing stale lock file (PID ${content} is no longer running)`);
+    } catch {
+      // Corrupted lock file, remove it
+      log("warn", "Removing corrupted lock file");
+    }
+  }
+
+  writeFileSync(LOCK_FILE_PATH, String(process.pid));
+  return true;
+}
+
+/**
+ * Release the lock file.
+ */
+function releaseLock(): void {
+  try {
+    if (existsSync(LOCK_FILE_PATH)) {
+      unlinkSync(LOCK_FILE_PATH);
+    }
+  } catch {
+    log("debug", "Could not remove lock file");
+  }
+}
+
+/**
+ * Check if a process with the given PID is still running.
+ */
+function isProcessRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0); // signal 0 = check if process exists
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Process the .clawup.todo.json file if it exists.
@@ -111,8 +163,9 @@ async function processTask(task: ClickUpTask): Promise<void> {
     branchName = await createTaskBranch(taskId, slug);
     log("info", `Working on branch: ${branchName}`);
 
-    // Step 3: Format the task for Claude and run it
-    const taskPrompt = formatTaskForClaude(task);
+    // Step 3: Fetch comments for context (useful for retried tasks) and run Claude
+    const comments = await getTaskComments(taskId);
+    const taskPrompt = formatTaskForClaude(task, comments);
     const result = await runClaudeOnTask(taskPrompt, taskId);
 
     // Step 4: Handle the result
@@ -552,6 +605,13 @@ export async function runSingleTask(taskId: string): Promise<void> {
  * Start the continuous polling loop.
  */
 export async function startRunner(): Promise<void> {
+  // Acquire concurrency lock
+  if (!acquireLock()) {
+    log("error", "Another clawup instance is already running. Exiting.");
+    log("error", `If this is incorrect, delete the lock file: ${LOCK_FILE_PATH}`);
+    process.exit(1);
+  }
+
   log("info", "=== ClickUp Task Automation Runner ===");
   log("info", `Polling interval: ${POLL_INTERVAL_MS / 1000}s`);
   log("info", `Base branch: ${BASE_BRANCH}`);
@@ -582,17 +642,16 @@ export async function startRunner(): Promise<void> {
   await recoverOrphanedTasks();
 
   // Set up graceful shutdown
-  process.on("SIGINT", () => {
-    log("info", "\nReceived SIGINT. Shutting down gracefully...");
+  const shutdown = (signal: string) => {
+    log("info", `\nReceived ${signal}. Shutting down gracefully...`);
     isShuttingDown = true;
+    releaseLock();
     if (!isProcessing) process.exit(0);
-  });
+  };
 
-  process.on("SIGTERM", () => {
-    log("info", "\nReceived SIGTERM. Shutting down gracefully...");
-    isShuttingDown = true;
-    if (!isProcessing) process.exit(0);
-  });
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("exit", () => releaseLock());
 
   log("info", "Runner started. Polling for tasks...\n");
 

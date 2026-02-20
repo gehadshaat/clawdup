@@ -6,6 +6,9 @@ import type { ClickUpTask, ClickUpList, ClickUpComment } from "./types.js";
 
 const BASE_URL = "https://api.clickup.com/api/v2";
 
+const MAX_RETRIES = 3;
+const RETRY_DELAYS = [1000, 2000, 4000]; // exponential backoff
+
 async function request<T>(
   method: string,
   path: string,
@@ -23,18 +26,40 @@ async function request<T>(
     opts.body = JSON.stringify(body);
   }
 
-  log("debug", `ClickUp API: ${method} ${path}`);
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    log("debug", `ClickUp API: ${method} ${path}${attempt > 0 ? ` (retry ${attempt})` : ""}`);
 
-  const res = await fetch(url, opts);
-  const text = await res.text();
+    const res = await fetch(url, opts);
 
-  if (!res.ok) {
-    throw new Error(
-      `ClickUp API error ${res.status} ${method} ${path}: ${text}`,
-    );
+    // Handle rate limiting (429)
+    if (res.status === 429) {
+      const retryAfter = res.headers.get("retry-after");
+      const waitMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : RETRY_DELAYS[attempt] || 4000;
+      log("warn", `ClickUp API rate limited. Waiting ${waitMs / 1000}s before retry...`);
+      await new Promise((r) => setTimeout(r, waitMs));
+      continue;
+    }
+
+    // Retry on server errors (5xx)
+    if (res.status >= 500 && attempt < MAX_RETRIES) {
+      const delay = RETRY_DELAYS[attempt] || 4000;
+      log("warn", `ClickUp API server error ${res.status}. Retrying in ${delay / 1000}s...`);
+      await new Promise((r) => setTimeout(r, delay));
+      continue;
+    }
+
+    const text = await res.text();
+
+    if (!res.ok) {
+      throw new Error(
+        `ClickUp API error ${res.status} ${method} ${path}: ${text}`,
+      );
+    }
+
+    return text ? (JSON.parse(text) as T) : (null as T);
   }
 
-  return text ? (JSON.parse(text) as T) : (null as T);
+  throw new Error(`ClickUp API: max retries exceeded for ${method} ${path}`);
 }
 
 /**
@@ -155,9 +180,9 @@ export async function createTask(
 
 /**
  * Extract a clean task description from ClickUp task data.
- * Combines title, description, and any checklist items.
+ * Combines title, description, checklist items, and optionally recent comments.
  */
-export function formatTaskForClaude(task: ClickUpTask): string {
+export function formatTaskForClaude(task: ClickUpTask, comments?: ClickUpComment[]): string {
   const parts: string[] = [];
 
   parts.push(`# Task: ${task.name}`);
@@ -205,6 +230,21 @@ export function formatTaskForClaude(task: ClickUpTask): string {
       parts.push(`- ${done} ${sub.name}`);
     }
     parts.push("");
+  }
+
+  // Include recent comments (useful context for retried tasks)
+  if (comments && comments.length > 0) {
+    // Show the most recent comments (up to 10) so Claude has context
+    const recent = comments.slice(-10);
+    parts.push("## Comments");
+    parts.push(`(showing ${recent.length} most recent of ${comments.length} comments)`);
+    for (const c of recent) {
+      if (c.comment_text) {
+        parts.push(`**${c.comment_by || "Unknown"}** (${c.date || "unknown date"}):`);
+        parts.push(c.comment_text);
+        parts.push("");
+      }
+    }
   }
 
   return parts.join("\n");
