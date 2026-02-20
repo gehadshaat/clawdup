@@ -50,7 +50,8 @@ IMPORTANT RULES:
 4. Follow the project's existing coding standards and conventions.
 5. If you do NOT have enough information to complete the task, output "NEEDS_MORE_INFO:" followed by a clear description of what information is missing. Do not guess or make assumptions about unclear requirements.
 6. Do NOT commit or push changes - the automation will handle that.
-7. Do NOT create new branches - you're already on the correct branch.`);
+7. Do NOT create new branches - you're already on the correct branch.
+8. If you discover issues that need manual attention or follow-up tasks, create a file called ".clawup.todo.json" in the project root with an array of objects: [{"title": "Short task title", "description": "Detailed description of what needs to be done"}]. These will be automatically created as new tasks in the project tracker.`);
 
   // Project context from CLAUDE.md
   // In a monorepo, check both the package directory and the repo root.

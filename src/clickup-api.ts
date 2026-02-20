@@ -139,6 +139,21 @@ export async function findPRUrlInComments(
 }
 
 /**
+ * Create a new task in the ClickUp list.
+ */
+export async function createTask(
+  name: string,
+  description?: string,
+): Promise<ClickUpTask> {
+  log("info", `Creating new task: "${name}"`);
+  return request<ClickUpTask>("POST", `/list/${CLICKUP_LIST_ID}/task`, {
+    name,
+    description: description || "",
+    status: STATUS.TODO,
+  });
+}
+
+/**
  * Extract a clean task description from ClickUp task data.
  * Combines title, description, and any checklist items.
  */

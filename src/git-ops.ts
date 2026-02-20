@@ -197,6 +197,83 @@ export async function isWorkingTreeClean(): Promise<boolean> {
 }
 
 /**
+ * Find an existing branch for a task by its ClickUp ID.
+ * Checks local branches first, then remote.
+ * Returns the branch name (without "origin/" prefix) or null.
+ */
+export async function findBranchForTask(
+  taskId: string,
+): Promise<string | null> {
+  // Check local branches
+  const localResult = await git(
+    "branch",
+    "--list",
+    `${BRANCH_PREFIX}/CU-${taskId}-*`,
+  );
+  if (localResult) {
+    // git branch output has leading whitespace and possibly a * for current branch
+    const branch = localResult
+      .split("\n")[0]!
+      .trim()
+      .replace(/^\*\s*/, "");
+    return branch;
+  }
+
+  // Check remote branches
+  const remoteResult = await git(
+    "branch",
+    "-r",
+    "--list",
+    `origin/${BRANCH_PREFIX}/CU-${taskId}-*`,
+  );
+  if (remoteResult) {
+    const remoteBranch = remoteResult.split("\n")[0]!.trim();
+    // Strip "origin/" prefix to return the branch name
+    return remoteBranch.replace(/^origin\//, "");
+  }
+
+  return null;
+}
+
+/**
+ * Checkout an existing branch (local or from remote tracking).
+ */
+export async function checkoutExistingBranch(
+  branchName: string,
+): Promise<void> {
+  log("info", `Checking out existing branch: ${branchName}`);
+  try {
+    // Try checking out as a local branch first
+    await git("checkout", branchName);
+  } catch {
+    // If local checkout fails, create a tracking branch from remote
+    await git("checkout", "-b", branchName, `origin/${branchName}`);
+  }
+}
+
+/**
+ * Check if the current branch has commits ahead of the base branch.
+ */
+export async function branchHasCommitsAheadOfBase(): Promise<boolean> {
+  const output = await git("log", `${BASE_BRANCH}..HEAD`, "--oneline");
+  return output.length > 0;
+}
+
+/**
+ * Check if a branch has been pushed to the remote.
+ */
+export async function branchHasBeenPushed(
+  branchName: string,
+): Promise<boolean> {
+  try {
+    await git("rev-parse", "--verify", `origin/${branchName}`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Clean up: go back to base branch.
  */
 export async function returnToBaseBranch(): Promise<void> {

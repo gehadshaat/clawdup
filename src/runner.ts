@@ -1,6 +1,8 @@
 // Main task runner - orchestrates the full ClickUp -> Claude -> GitHub pipeline
 
-import { POLL_INTERVAL_MS, STATUS, BASE_BRANCH, log } from "./config.js";
+import { existsSync, readFileSync, unlinkSync } from "fs";
+import { resolve } from "path";
+import { POLL_INTERVAL_MS, STATUS, BASE_BRANCH, PROJECT_ROOT, log } from "./config.js";
 import {
   getTasksByStatus,
   updateTaskStatus,
@@ -9,6 +11,7 @@ import {
   slugify,
   validateStatuses,
   findPRUrlInComments,
+  createTask,
 } from "./clickup-api.js";
 import {
   detectGitHubRepo,
@@ -24,6 +27,10 @@ import {
   isWorkingTreeClean,
   mergePullRequest,
   getPRState,
+  findBranchForTask,
+  checkoutExistingBranch,
+  branchHasCommitsAheadOfBase,
+  branchHasBeenPushed,
 } from "./git-ops.js";
 import {
   runClaudeOnTask,
@@ -35,6 +42,48 @@ import type { ClickUpTask, ClaudeResult } from "./types.js";
 
 let isShuttingDown = false;
 let isProcessing = false;
+
+const TODO_FILE_PATH = resolve(PROJECT_ROOT, ".clawup.todo.json");
+
+/**
+ * Process the .clawup.todo.json file if it exists.
+ * Creates new ClickUp tasks for each entry and deletes the file afterward.
+ */
+async function processTodoFile(): Promise<void> {
+  if (!existsSync(TODO_FILE_PATH)) return;
+
+  try {
+    const raw = readFileSync(TODO_FILE_PATH, "utf-8");
+    const items = JSON.parse(raw) as Array<{ title?: string; description?: string }>;
+
+    if (!Array.isArray(items)) {
+      log("warn", ".clawup.todo.json does not contain an array, skipping");
+      return;
+    }
+
+    for (const item of items) {
+      if (!item.title) {
+        log("warn", "Skipping todo entry with no title");
+        continue;
+      }
+      try {
+        const created = await createTask(item.title, item.description);
+        log("info", `Created follow-up task: "${item.title}" (${created.id})`);
+      } catch (err) {
+        log("error", `Failed to create follow-up task "${item.title}": ${(err as Error).message}`);
+      }
+    }
+  } catch (err) {
+    log("error", `Failed to process .clawup.todo.json: ${(err as Error).message}`);
+  } finally {
+    try {
+      unlinkSync(TODO_FILE_PATH);
+      log("debug", "Deleted .clawup.todo.json");
+    } catch {
+      // ignore if already gone
+    }
+  }
+}
 
 /**
  * Process a single ClickUp task end-to-end.
@@ -153,6 +202,8 @@ async function processTask(task: ClickUpTask): Promise<void> {
     } catch {
       log("warn", "Could not return to base branch");
     }
+    // Pick up any follow-up tasks Claude created
+    await processTodoFile();
   }
 }
 
@@ -319,6 +370,140 @@ async function processApprovedTask(task: ClickUpTask): Promise<void> {
 }
 
 /**
+ * Recover tasks that were left "in progress" from a previous crash.
+ * For each orphaned task, checks for an existing branch and resumes
+ * from the appropriate point in the pipeline.
+ */
+async function recoverOrphanedTasks(): Promise<void> {
+  const inProgressTasks = await getTasksByStatus(STATUS.IN_PROGRESS);
+
+  if (inProgressTasks.length === 0) {
+    log("debug", "No orphaned in-progress tasks found.");
+    return;
+  }
+
+  log(
+    "info",
+    `Found ${inProgressTasks.length} orphaned in-progress task(s). Recovering...`,
+  );
+
+  for (const task of inProgressTasks) {
+    const taskId = task.id;
+    const taskName = task.name;
+
+    log("info", `Recovering task: ${taskName} (${taskId})`);
+
+    try {
+      const branchName = await findBranchForTask(taskId);
+
+      if (!branchName) {
+        // No branch exists — reset task so it gets picked up fresh
+        log("info", `No branch found for task ${taskId}. Resetting to TODO.`);
+        await updateTaskStatus(taskId, STATUS.TODO);
+        await addTaskComment(
+          taskId,
+          `🔄 Automation restarted — no prior work found. Retrying task.`,
+        );
+        continue;
+      }
+
+      log("info", `Found existing branch for task ${taskId}: ${branchName}`);
+
+      // Ensure base is up to date before checking out the task branch
+      await syncBaseBranch();
+      await checkoutExistingBranch(branchName);
+
+      const hasCommits = await branchHasCommitsAheadOfBase();
+      const wasPushed = await branchHasBeenPushed(branchName);
+
+      if (hasCommits) {
+        // Branch has work — finalize it (push + PR if needed)
+        if (!wasPushed) {
+          log("info", `Pushing unpushed branch ${branchName}`);
+          await pushBranch(branchName);
+        }
+
+        // Check if a PR already exists
+        const existingPrUrl = await findPRUrlInComments(taskId);
+
+        if (existingPrUrl) {
+          log(
+            "info",
+            `PR already exists for task ${taskId}: ${existingPrUrl}. Moving to in review.`,
+          );
+        } else {
+          // Create a PR
+          const { files } = await getChangesSummary();
+          const prUrl = await createPullRequest({
+            title: `[CU-${taskId}] ${taskName}`,
+            body:
+              `Recovered from interrupted automation run.\n\n` +
+              `Files changed: ${files.length}\n\n` +
+              `Branch: \`${branchName}\``,
+            branchName,
+            baseBranch: BASE_BRANCH,
+          });
+
+          await addTaskComment(
+            taskId,
+            `🔄 Automation restarted and recovered prior work.\n\n` +
+              `PR created: ${prUrl}\n` +
+              `Branch: \`${branchName}\`\n\n` +
+              `Please review the PR.`,
+          );
+          log("info", `Created recovery PR for task ${taskId}: ${prUrl}`);
+        }
+
+        await updateTaskStatus(taskId, STATUS.IN_REVIEW);
+      } else {
+        // Branch exists but has no commits — re-run Claude on it
+        log(
+          "info",
+          `Branch ${branchName} has no commits ahead of base. Re-processing task ${taskId}.`,
+        );
+        await addTaskComment(
+          taskId,
+          `🔄 Automation restarted — found empty branch from prior run. Re-processing task.`,
+        );
+        // Return to base and clean up the empty branch, then process fresh
+        await returnToBaseBranch();
+        await deleteLocalBranch(branchName);
+        await processTask(task);
+        continue; // processTask handles its own return-to-base
+      }
+
+      // Return to base branch for the next task
+      await returnToBaseBranch();
+    } catch (err) {
+      log(
+        "error",
+        `Failed to recover task ${taskId}: ${(err as Error).message}`,
+      );
+      try {
+        await addTaskComment(
+          taskId,
+          `⚠️ Automation restarted but failed to recover this task:\n\n` +
+            `\`\`\`\n${(err as Error).message}\n\`\`\`\n\n` +
+            `Moving to blocked.`,
+        );
+        await updateTaskStatus(taskId, STATUS.BLOCKED);
+      } catch {
+        log("error", `Could not update task ${taskId} after recovery failure`);
+      }
+
+      // Best-effort return to base
+      try {
+        await returnToBaseBranch();
+      } catch {
+        log("warn", "Could not return to base branch during recovery");
+      }
+    }
+  }
+
+  log("info", "Orphaned task recovery complete.");
+}
+
+/**
  * Main polling loop.
  */
 async function pollForTasks(): Promise<void> {
@@ -392,6 +577,9 @@ export async function startRunner(): Promise<void> {
     );
     process.exit(1);
   }
+
+  // Recover any tasks left "in progress" from a previous crash
+  await recoverOrphanedTasks();
 
   // Set up graceful shutdown
   process.on("SIGINT", () => {
