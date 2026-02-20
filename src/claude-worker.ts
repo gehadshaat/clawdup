@@ -32,6 +32,49 @@ const NEEDS_INPUT_MARKERS = [
   "the task description is unclear",
 ];
 
+// --- Interactive input queue ---
+// Allows users to type messages while Claude is running.
+// Messages are queued and sent as continuation turns after Claude's current turn.
+let inputQueue: string[] = [];
+let inputResolve: (() => void) | null = null;
+
+/**
+ * Queue a user message to send to Claude in the next continuation turn.
+ */
+export function queueUserInput(message: string): void {
+  inputQueue.push(message);
+  if (inputResolve) {
+    inputResolve();
+    inputResolve = null;
+  }
+}
+
+/**
+ * Clear the input queue (called at the start/end of each task).
+ */
+export function clearInputQueue(): void {
+  inputQueue = [];
+  inputResolve = null;
+}
+
+/**
+ * Wait briefly for user input to arrive.
+ * Returns true if input was received within the timeout.
+ */
+function waitForInput(timeoutMs: number): Promise<boolean> {
+  if (inputQueue.length > 0) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      inputResolve = null;
+      resolve(false);
+    }, timeoutMs);
+    inputResolve = () => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+  });
+}
+
 /**
  * Build the system prompt for Claude.
  * Combines base rules + project context (CLAUDE.md) + user config.
@@ -115,18 +158,13 @@ function formatToolUse(
 }
 
 /**
- * Run Claude Code on a task.
- * Uses stream-json output for structured JSONL events, which avoids
- * the empty "[tool]: Edit" lines that verbose text mode can produce.
+ * Spawn a single Claude Code process and wait for it to complete.
+ * When isContinuation is true, uses --continue to resume the conversation.
  */
-export async function runClaudeOnTask(
-  taskPrompt: string,
-  taskId: string,
+function spawnClaudeProcess(
+  prompt: string,
+  isContinuation: boolean,
 ): Promise<ClaudeResult> {
-  const systemPrompt = buildSystemPrompt(taskPrompt);
-
-  log("info", `Running Claude Code on task ${taskId}...`);
-
   return new Promise((resolve) => {
     let output = "";
     let timedOut = false;
@@ -139,7 +177,7 @@ export async function runClaudeOnTask(
 
     const args = [
       "-p", // print mode (non-interactive)
-      systemPrompt,
+      prompt,
       "--verbose",
       "--output-format",
       "stream-json",
@@ -154,6 +192,10 @@ export async function runClaudeOnTask(
       "Grep",
       "Bash",
     ];
+
+    if (isContinuation) {
+      args.push("--continue");
+    }
 
     // Allow user config to append extra CLI args
     if (userConfig.claudeArgs && Array.isArray(userConfig.claudeArgs)) {
@@ -309,21 +351,14 @@ export async function runClaudeOnTask(
         output.toLowerCase().includes(marker.toLowerCase()),
       );
 
-      if (needsInput) {
-        log("info", `Claude indicated it needs more input for task ${taskId}`);
-        resolve({
-          success: false,
-          output,
-          needsInput: true,
-        });
-        return;
-      }
-
       resolve({
         success: code === 0 || code === null,
         output,
-        needsInput: false,
-        error: code !== 0 ? `Exited with code ${code}` : undefined,
+        needsInput,
+        error:
+          !needsInput && code !== 0 && code !== null
+            ? `Exited with code ${code}`
+            : undefined,
       });
     });
 
@@ -338,6 +373,52 @@ export async function runClaudeOnTask(
       });
     });
   });
+}
+
+/**
+ * Run Claude Code on a task, with support for interactive user input.
+ * After the initial prompt completes, any queued user messages are
+ * sent as continuation turns using --continue.
+ */
+export async function runClaudeOnTask(
+  taskPrompt: string,
+  taskId: string,
+): Promise<ClaudeResult> {
+  const systemPrompt = buildSystemPrompt(taskPrompt);
+  clearInputQueue();
+
+  log("info", `Running Claude Code on task ${taskId}...`);
+
+  // Initial run
+  let result = await spawnClaudeProcess(systemPrompt, false);
+  let combinedOutput = result.output;
+
+  // Process any queued user input as continuation turns
+  while (result.success && !result.needsInput) {
+    if (inputQueue.length === 0) {
+      // Brief grace period for any last-minute input
+      const hasInput = await waitForInput(2000);
+      if (!hasInput) break;
+    }
+
+    const userMessage = inputQueue.shift()!;
+    log("info", `Sending user input to Claude for task ${taskId}`);
+    process.stdout.write(`\n${"─".repeat(50)}\n`);
+    process.stdout.write(`Sending your message to Claude...\n`);
+    process.stdout.write(`${"─".repeat(50)}\n\n`);
+
+    result = await spawnClaudeProcess(userMessage, true);
+    combinedOutput += "\n" + result.output;
+  }
+
+  if (result.needsInput) {
+    log("info", `Claude indicated it needs more input for task ${taskId}`);
+  }
+
+  return {
+    ...result,
+    output: combinedOutput,
+  };
 }
 
 /**

@@ -2,6 +2,7 @@
 
 import { existsSync, readFileSync, unlinkSync } from "fs";
 import { resolve } from "path";
+import { createInterface } from "readline";
 import { POLL_INTERVAL_MS, STATUS, BASE_BRANCH, PROJECT_ROOT, log } from "./config.js";
 import {
   getTasksByStatus,
@@ -44,6 +45,8 @@ import {
   extractNeedsInputReason,
   generateCommitMessage,
   generatePRBody,
+  queueUserInput,
+  clearInputQueue,
 } from "./claude-worker.js";
 import type { ClickUpTask, ClaudeResult } from "./types.js";
 
@@ -51,6 +54,35 @@ let isShuttingDown = false;
 let isProcessing = false;
 
 const TODO_FILE_PATH = resolve(PROJECT_ROOT, ".clawup.todo.json");
+
+/**
+ * Set up interactive terminal input during Claude execution.
+ * Returns a cleanup function, or null if stdin is not a TTY.
+ */
+function setupInteractiveInput(): (() => void) | null {
+  if (!process.stdin.isTTY) return null;
+
+  const rl = createInterface({ input: process.stdin, terminal: false });
+
+  rl.on("line", (line: string) => {
+    const trimmed = line.trim();
+    if (trimmed) {
+      queueUserInput(trimmed);
+      process.stdout.write(
+        `\n[Queued] Your message will be sent to Claude after the current turn.\n\n`,
+      );
+    }
+  });
+
+  process.stdout.write(
+    `\nInteractive mode: Type a message and press Enter to send additional input to Claude.\n\n`,
+  );
+
+  return () => {
+    rl.close();
+    clearInputQueue();
+  };
+}
 
 /**
  * Process the .clawup.todo.json file if it exists.
@@ -150,7 +182,11 @@ async function processTask(task: ClickUpTask): Promise<void> {
     // Step 4: Fetch comments, format the task for Claude, and run it
     const comments = await getTaskComments(taskId);
     const taskPrompt = formatTaskForClaude(task, comments);
+
+    // Set up interactive input so the user can send messages to Claude
+    const cleanupInput = setupInteractiveInput();
     const result = await runClaudeOnTask(taskPrompt, taskId);
+    if (cleanupInput) cleanupInput();
 
     // Step 4b: Process any follow-up tasks Claude created BEFORE committing.
     // This must happen before commitChanges() because git add -A would
