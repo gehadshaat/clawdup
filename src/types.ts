@@ -36,6 +36,8 @@ export interface ClickUpStatus {
 
 export interface ClickUpComment {
   comment_text?: string;
+  user?: { username?: string };
+  date?: string;
 }
 
 export interface ClaudeResult {

@@ -157,7 +157,10 @@ export async function createTask(
  * Extract a clean task description from ClickUp task data.
  * Combines title, description, and any checklist items.
  */
-export function formatTaskForClaude(task: ClickUpTask): string {
+export function formatTaskForClaude(
+  task: ClickUpTask,
+  comments?: ClickUpComment[],
+): string {
   const parts: string[] = [];
 
   parts.push(`# Task: ${task.name}`);
@@ -205,6 +208,21 @@ export function formatTaskForClaude(task: ClickUpTask): string {
       parts.push(`- ${done} ${sub.name}`);
     }
     parts.push("");
+  }
+
+  // Include comments if any
+  if (comments && comments.length > 0) {
+    parts.push("## Comments");
+    for (const comment of comments) {
+      const text = comment.comment_text || "";
+      if (!text.trim()) continue;
+      const user = comment.user?.username || "Unknown";
+      const date = comment.date
+        ? new Date(parseInt(comment.date)).toISOString().split("T")[0]
+        : "";
+      const header = date ? `**${user}** (${date}):` : `**${user}**:`;
+      parts.push(`${header}\n${text}\n`);
+    }
   }
 
   return parts.join("\n");
