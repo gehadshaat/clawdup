@@ -227,6 +227,8 @@ export async function runClaudeOnTask(
       }
     }
 
+    log("info", `$ ${CLAUDE_COMMAND} ${args.join(" ")}`);
+
     const proc = spawn(CLAUDE_COMMAND, args, {
       cwd: PROJECT_ROOT,
       env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: "cli" },
