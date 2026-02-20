@@ -6,17 +6,38 @@
   "bin": {
     "clawup": "./bin/clawup.js"
   },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./dist/index.js",
-    "./config": "./dist/config.js",
-    "./clickup-api": "./dist/clickup-api.js",
-    "./git-ops": "./dist/git-ops.js",
-    "./claude-worker": "./dist/claude-worker.js",
-    "./runner": "./dist/runner.js"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./config": {
+      "types": "./dist/config.d.ts",
+      "default": "./dist/config.js"
+    },
+    "./clickup-api": {
+      "types": "./dist/clickup-api.d.ts",
+      "default": "./dist/clickup-api.js"
+    },
+    "./git-ops": {
+      "types": "./dist/git-ops.d.ts",
+      "default": "./dist/git-ops.js"
+    },
+    "./claude-worker": {
+      "types": "./dist/claude-worker.d.ts",
+      "default": "./dist/claude-worker.js"
+    },
+    "./runner": {
+      "types": "./dist/runner.d.ts",
+      "default": "./dist/runner.js"
+    }
   },
   "files": [
     "bin/",
     "dist/",
+    "LICENSE",
     "README.md"
   ],
   "scripts": {
@@ -41,9 +62,14 @@
     "task-automation",
     "devops"
   ],
+  "author": "Gehad Shaat",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/gehadshaat/clawup.git"
+    "url": "git+https://github.com/gehadshaat/clawup.git"
+  },
+  "homepage": "https://github.com/gehadshaat/clawup#readme",
+  "bugs": {
+    "url": "https://github.com/gehadshaat/clawup/issues"
   }
 }
