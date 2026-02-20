@@ -152,6 +152,11 @@ async function processTask(task: ClickUpTask): Promise<void> {
     const taskPrompt = formatTaskForClaude(task, comments);
     const result = await runClaudeOnTask(taskPrompt, taskId);
 
+    // Step 4b: Process any follow-up tasks Claude created BEFORE committing.
+    // This must happen before commitChanges() because git add -A would
+    // include the file, and switching branches later would remove it.
+    await processTodoFile();
+
     // Step 5: Handle the result
     if (result.needsInput) {
       // Claude needs more information
