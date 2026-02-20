@@ -65,4 +65,5 @@ export interface PullRequestOptions {
   body: string;
   branchName: string;
   baseBranch?: string;
+  draft?: boolean;
 }

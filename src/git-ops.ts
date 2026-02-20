@@ -178,9 +178,10 @@ export async function createPullRequest({
   body,
   branchName,
   baseBranch,
+  draft,
 }: PullRequestOptions): Promise<string> {
-  log("info", `Creating PR: "${title}"`);
-  const prUrl = await gh(
+  log("info", `Creating PR: "${title}"${draft ? " (draft)" : ""}`);
+  const args = [
     "pr",
     "create",
     "--title",
@@ -191,9 +192,78 @@ export async function createPullRequest({
     baseBranch || BASE_BRANCH,
     "--head",
     branchName,
-  );
+  ];
+  if (draft) {
+    args.push("--draft");
+  }
+  const prUrl = await gh(...args);
   log("info", `PR created: ${prUrl}`);
   return prUrl;
+}
+
+/**
+ * Create an empty commit (used to enable early PR creation).
+ */
+export async function createEmptyCommit(message: string): Promise<void> {
+  log("info", "Creating empty initial commit for early PR");
+  await git("commit", "--allow-empty", "-m", message);
+}
+
+/**
+ * Mark a draft PR as ready for review.
+ */
+export async function markPRReady(prUrl: string): Promise<void> {
+  log("info", `Marking PR as ready for review: ${prUrl}`);
+  await gh("pr", "ready", prUrl);
+}
+
+/**
+ * Close a pull request without merging.
+ */
+export async function closePullRequest(prUrl: string): Promise<void> {
+  log("info", `Closing PR: ${prUrl}`);
+  await gh("pr", "close", prUrl);
+}
+
+/**
+ * Update a pull request's title and/or body.
+ */
+export async function updatePullRequest(
+  prUrl: string,
+  { title, body }: { title?: string; body?: string },
+): Promise<void> {
+  log("info", `Updating PR: ${prUrl}`);
+  const args = ["pr", "edit", prUrl];
+  if (title) {
+    args.push("--title", title);
+  }
+  if (body) {
+    args.push("--body", body);
+  }
+  await gh(...args);
+}
+
+/**
+ * Find an existing open PR for a branch.
+ * Returns the PR URL or null if none exists.
+ */
+export async function findExistingPR(
+  branchName: string,
+): Promise<string | null> {
+  try {
+    const prUrl = await gh(
+      "pr",
+      "view",
+      branchName,
+      "--json",
+      "url",
+      "--jq",
+      ".url",
+    );
+    return prUrl || null;
+  } catch {
+    return null;
+  }
 }
 
 /**
