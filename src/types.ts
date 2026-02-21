@@ -17,6 +17,7 @@ export interface ClickUpTask {
   checklists?: ClickUpChecklist[];
   subtasks?: ClickUpTask[];
   status?: { status: string };
+  list?: { id: string };
 }
 
 export interface ClickUpChecklist {

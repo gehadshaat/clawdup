@@ -1,7 +1,7 @@
 // ClickUp API v2 client
 // Docs: https://clickup.com/api
 
-import { CLICKUP_API_TOKEN, CLICKUP_LIST_ID, STATUS, log } from "./config.js";
+import { CLICKUP_API_TOKEN, CLICKUP_LIST_ID, CLICKUP_PARENT_TASK_ID, STATUS, log } from "./config.js";
 import type { ClickUpTask, ClickUpUser, ClickUpList, ClickUpComment } from "./types.js";
 
 const BASE_URL = "https://api.clickup.com/api/v2";
@@ -37,11 +37,51 @@ async function request<T>(
   return text ? (JSON.parse(text) as T) : (null as T);
 }
 
+// Cache the resolved list ID when using parent task mode
+let resolvedListId: string | null = null;
+
 /**
- * Get all tasks in the list with a specific status.
+ * Get the effective list ID.
+ * In list mode, returns CLICKUP_LIST_ID directly.
+ * In parent task mode, fetches the parent task to determine its list.
+ */
+async function getEffectiveListId(): Promise<string> {
+  if (CLICKUP_LIST_ID) return CLICKUP_LIST_ID;
+  if (resolvedListId) return resolvedListId;
+
+  const parent = await request<ClickUpTask>(
+    "GET",
+    `/task/${CLICKUP_PARENT_TASK_ID}`,
+  );
+  if (!parent.list?.id) {
+    throw new Error(
+      "Could not determine list ID from parent task. Ensure the parent task exists.",
+    );
+  }
+  resolvedListId = parent.list.id;
+  return resolvedListId;
+}
+
+/**
+ * Sort tasks by priority (urgent first) then by date created (oldest first).
+ */
+function sortByPriorityAndDate(tasks: ClickUpTask[]): void {
+  tasks.sort((a, b) => {
+    const pa = a.priority ? parseInt(a.priority.id) : 99;
+    const pb = b.priority ? parseInt(b.priority.id) : 99;
+    if (pa !== pb) return pa - pb;
+    const da = a.date_created ? parseInt(a.date_created) : 0;
+    const db = b.date_created ? parseInt(b.date_created) : 0;
+    return da - db;
+  });
+}
+
+/**
+ * Get all tasks in the configured list with a specific status.
  * Returns tasks sorted by priority (urgent first) then by date created.
  */
-export async function getTasksByStatus(status: string): Promise<ClickUpTask[]> {
+async function getListTasksByStatus(status: string): Promise<ClickUpTask[]> {
+  const listId = await getEffectiveListId();
   const params = new URLSearchParams({
     include_closed: "false",
     subtasks: "true",
@@ -52,26 +92,60 @@ export async function getTasksByStatus(status: string): Promise<ClickUpTask[]> {
 
   const data = await request<{ tasks: ClickUpTask[] }>(
     "GET",
-    `/list/${CLICKUP_LIST_ID}/task?${params.toString()}`,
+    `/list/${listId}/task?${params.toString()}`,
   );
   const tasks = data.tasks || [];
-
-  // Sort by priority (1=urgent, 2=high, 3=normal, 4=low, null=no priority),
-  // then by creation date (oldest first) within the same priority
-  tasks.sort((a, b) => {
-    const pa = a.priority ? parseInt(a.priority.id) : 99;
-    const pb = b.priority ? parseInt(b.priority.id) : 99;
-    if (pa !== pb) return pa - pb;
-    const da = a.date_created ? parseInt(a.date_created) : 0;
-    const db = b.date_created ? parseInt(b.date_created) : 0;
-    return da - db;
-  });
+  sortByPriorityAndDate(tasks);
 
   log(
     "info",
-    `Found ${tasks.length} task(s) with status "${status}" in list ${CLICKUP_LIST_ID}`,
+    `Found ${tasks.length} task(s) with status "${status}" in list ${listId}`,
   );
   return tasks;
+}
+
+/**
+ * Get subtasks of the configured parent task that match a specific status.
+ * Fetches the parent task with subtasks, filters by status, then fetches
+ * full details for each matching subtask.
+ */
+async function getParentSubtasksByStatus(status: string): Promise<ClickUpTask[]> {
+  const parent = await request<ClickUpTask>(
+    "GET",
+    `/task/${CLICKUP_PARENT_TASK_ID}?include_subtasks=true`,
+  );
+
+  const subtasks = parent.subtasks || [];
+  const matching = subtasks.filter(
+    (s) => s.status?.status?.toLowerCase() === status.toLowerCase(),
+  );
+
+  // Fetch full details for each matching subtask
+  const fullTasks: ClickUpTask[] = [];
+  for (const sub of matching) {
+    const task = await getTask(sub.id);
+    fullTasks.push(task);
+  }
+
+  sortByPriorityAndDate(fullTasks);
+
+  log(
+    "info",
+    `Found ${fullTasks.length} subtask(s) with status "${status}" under parent task ${CLICKUP_PARENT_TASK_ID}`,
+  );
+  return fullTasks;
+}
+
+/**
+ * Get tasks with a specific status.
+ * In list mode, queries the configured list.
+ * In parent task mode, queries subtasks of the configured parent task.
+ */
+export async function getTasksByStatus(status: string): Promise<ClickUpTask[]> {
+  if (CLICKUP_PARENT_TASK_ID) {
+    return getParentSubtasksByStatus(status);
+  }
+  return getListTasksByStatus(status);
 }
 
 /**
@@ -178,17 +252,23 @@ export async function findPRUrlInComments(
 
 /**
  * Create a new task in the ClickUp list.
+ * In parent task mode, creates the task as a subtask of the configured parent.
  */
 export async function createTask(
   name: string,
   description?: string,
 ): Promise<ClickUpTask> {
+  const listId = await getEffectiveListId();
   log("info", `Creating new task: "${name}"`);
-  return request<ClickUpTask>("POST", `/list/${CLICKUP_LIST_ID}/task`, {
+  const body: Record<string, unknown> = {
     name,
     description: description || "",
     status: STATUS.TODO,
-  });
+  };
+  if (CLICKUP_PARENT_TASK_ID) {
+    body.parent = CLICKUP_PARENT_TASK_ID;
+  }
+  return request<ClickUpTask>("POST", `/list/${listId}/task`, body);
 }
 
 /**
@@ -353,9 +433,11 @@ export function slugify(text: string): string {
 
 /**
  * Get the list info including available statuses.
+ * In parent task mode, resolves the list from the parent task.
  */
 export async function getListInfo(): Promise<ClickUpList> {
-  return request<ClickUpList>("GET", `/list/${CLICKUP_LIST_ID}`);
+  const listId = await getEffectiveListId();
+  return request<ClickUpList>("GET", `/list/${listId}`);
 }
 
 /**
