@@ -59,8 +59,13 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  // Default: start the continuous polling runner
-  await startRunner({ interactive });
+  // Default: start the continuous polling runner with periodic relaunch
+  while (true) {
+    const shouldRelaunch = await startRunner({ interactive });
+    if (!shouldRelaunch) break;
+    const { log } = await import("./config.js");
+    log("info", "Relaunching runner...\n");
+  }
 }
 
 function printUsage(): void {
