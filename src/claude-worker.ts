@@ -36,7 +36,7 @@ const NEEDS_INPUT_MARKERS = [
  * Build the system prompt for Claude.
  * Combines base rules + project context (CLAUDE.md) + user config.
  */
-function buildSystemPrompt(taskPrompt: string): string {
+function buildSystemPrompt(taskPrompt: string, taskId: string): string {
   const parts: string[] = [];
 
   // Base automation rules (always present)
@@ -49,7 +49,9 @@ IMPORTANT RULES:
 3. Make the minimal changes needed to complete the task.
 4. Follow the project's existing coding standards and conventions.
 5. If you do NOT have enough information to complete the task, output "NEEDS_MORE_INFO:" followed by a clear description of what information is missing. Do not guess or make assumptions about unclear requirements.
-6. Do NOT commit or push changes - the automation will handle that.
+6. After completing ALL your changes, stage and commit them in a single commit:
+   git add -A && git commit -m '[CU-${taskId}] <short summary of changes>'
+   Do NOT push — the automation handles pushing and PR management.
 7. Do NOT create new branches - you're already on the correct branch.
 8. ONLY after completing your main work, if you discovered issues that need manual attention or follow-up tasks that are outside the scope of the current task, create a file called ".clawup.todo.json" in the project root with an array of objects: [{"title": "Short task title", "description": "Detailed description of what needs to be done"}]. These will be automatically created as new tasks. Do NOT create this file if there are no follow-up items.
 
@@ -125,7 +127,7 @@ export async function runClaudeOnTask(
   taskPrompt: string,
   taskId: string,
 ): Promise<ClaudeResult> {
-  const systemPrompt = buildSystemPrompt(taskPrompt);
+  const systemPrompt = buildSystemPrompt(taskPrompt, taskId);
 
   log("info", `Running Claude Code on task ${taskId}...`);
 
@@ -377,8 +379,10 @@ INSTRUCTIONS:
 2. Each file will contain Git conflict markers (<<<<<<< HEAD, =======, >>>>>>> origin/...).
 3. Resolve each conflict by keeping the correct combination of both sides. Prefer preserving the intent of the feature branch changes while incorporating any necessary updates from the base branch.
 4. Remove ALL conflict markers from each file.
-5. Do NOT commit or push — just edit the files to resolve the conflicts.
-6. Do NOT create new files or make any changes beyond resolving the conflicts.`;
+5. Do NOT create new files or make any changes beyond resolving the conflicts.
+6. After resolving all conflicts, commit the merge resolution:
+   git add -A && git commit --no-edit
+7. Do NOT push — the automation handles pushing.`;
 
   log("info", `Running Claude Code to resolve ${conflictedFiles.length} conflicted file(s)...`);
 

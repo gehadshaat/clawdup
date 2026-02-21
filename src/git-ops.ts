@@ -116,14 +116,23 @@ export async function hasChanges(): Promise<boolean> {
 }
 
 /**
- * Get a summary of changes (for PR description).
+ * Get the current HEAD commit hash (full SHA).
+ * Used to detect if Claude committed changes via Bash.
+ */
+export async function getHeadHash(): Promise<string> {
+  return git("rev-parse", "HEAD");
+}
+
+/**
+ * Get a summary of changes between the base branch and HEAD (for PR description).
+ * Diffs BASE_BRANCH...HEAD so it works correctly after commits have been made.
  */
 export async function getChangesSummary(): Promise<{
   stat: string;
   files: string[];
 }> {
-  const diffStat = await git("diff", "--stat", "HEAD");
-  const filesChanged = await git("diff", "--name-only", "HEAD");
+  const diffStat = await git("diff", "--stat", `${BASE_BRANCH}...HEAD`);
+  const filesChanged = await git("diff", "--name-only", `${BASE_BRANCH}...HEAD`);
   return {
     stat: diffStat,
     files: filesChanged.split("\n").filter(Boolean),

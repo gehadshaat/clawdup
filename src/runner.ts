@@ -21,6 +21,7 @@ import {
   syncBaseBranch,
   createTaskBranch,
   hasChanges,
+  getHeadHash,
   getChangesSummary,
   commitChanges,
   pushBranch,
@@ -163,9 +164,13 @@ async function processTask(task: ClickUpTask): Promise<void> {
     );
 
     // Step 4: Fetch comments, format the task for Claude, and run it
+    // Save HEAD hash before Claude runs so we can detect if Claude commits via Bash
+    const headBefore = await getHeadHash();
     const comments = await getTaskComments(taskId);
     const taskPrompt = formatTaskForClaude(task, comments);
     const result = await runClaudeOnTask(taskPrompt, taskId);
+    const headAfter = await getHeadHash();
+    const claudeCommitted = headBefore !== headAfter;
 
     // Step 4b: Process any follow-up tasks Claude created BEFORE committing.
     // This must happen before commitChanges() because git add -A would
@@ -181,13 +186,13 @@ async function processTask(task: ClickUpTask): Promise<void> {
 
     if (!result.success) {
       // Claude encountered an error
-      await handleError(task, result, branchName, prUrl);
+      await handleError(task, result, branchName, prUrl, claudeCommitted);
       return;
     }
 
     // Step 6: Check if Claude actually made changes
-    const changed = await hasChanges();
-    if (!changed) {
+    const uncommittedChanges = await hasChanges();
+    if (!uncommittedChanges && !claudeCommitted) {
       log(
         "warn",
         `Claude completed but made no file changes for task ${taskId}`,
@@ -206,9 +211,12 @@ async function processTask(task: ClickUpTask): Promise<void> {
       return;
     }
 
-    // Step 7: Commit, push, and update the PR
-    const commitMsg = generateCommitMessage(task, result.output);
-    await commitChanges(commitMsg);
+    // Step 7: Commit (fallback if Claude didn't), push, and update the PR
+    if (uncommittedChanges) {
+      log("warn", "Claude left uncommitted changes — committing as fallback");
+      const commitMsg = generateCommitMessage(task, result.output);
+      await commitChanges(commitMsg);
+    }
     await pushBranch(branchName);
 
     // Update the PR body with full details and mark it as ready for review
@@ -305,16 +313,17 @@ async function handleError(
   result: ClaudeResult,
   branchName: string,
   prUrl: string | null,
+  claudeCommitted: boolean = false,
 ): Promise<void> {
   const errorMsg = result.error || "Unknown error";
 
   log("error", `Task ${task.id} failed: ${errorMsg}`);
 
   // Check if there were partial changes
-  const changed = await hasChanges();
+  const uncommittedChanges = await hasChanges();
 
-  if (changed) {
-    // There are partial changes - commit them and push (PR already exists)
+  if (uncommittedChanges) {
+    // There are uncommitted partial changes - commit them and push
     try {
       await commitChanges(
         `[CU-${task.id}] WIP: ${task.name} (partial - automation error)`,
@@ -333,6 +342,26 @@ async function handleError(
       log(
         "error",
         `Failed to push partial changes: ${(pushErr as Error).message}`,
+      );
+      await closePRAndCleanup(prUrl, branchName);
+    }
+  } else if (claudeCommitted) {
+    // Claude committed before erroring — push what's there
+    try {
+      await pushBranch(branchName);
+      await notifyTaskCreator(
+        task.id,
+        task.creator,
+        `⚠️ Automation encountered an error but Claude made partial commits.\n\n` +
+          `Error: \`${errorMsg}\`\n\n` +
+          `Partial commits have been pushed to the PR for manual review.\n` +
+          (prUrl ? `PR: ${prUrl}\n` : `Branch: \`${branchName}\`\n`) +
+          `Please complete the work manually or provide more details and retry.`,
+      );
+    } catch (pushErr) {
+      log(
+        "error",
+        `Failed to push partial commits: ${(pushErr as Error).message}`,
       );
       await closePRAndCleanup(prUrl, branchName);
     }
@@ -423,11 +452,16 @@ async function resolveConflictsWithMerge(
     );
 
     // Use Claude to resolve the conflicts
+    const headBeforeMerge = await getHeadHash();
     const result = await runClaudeOnConflictResolution(conflictedFiles, branchName);
+    const headAfterMerge = await getHeadHash();
+    const claudeCommittedMerge = headBeforeMerge !== headAfterMerge;
 
     if (!result.success) {
       log("error", `Claude failed to resolve conflicts for task ${taskId}`);
-      await abortMerge();
+      if (!claudeCommittedMerge) {
+        await abortMerge();
+      }
       await notifyTaskCreator(
         taskId,
         task.creator,
@@ -445,7 +479,9 @@ async function resolveConflictsWithMerge(
     const remainingConflicts = await getConflictedFiles();
     if (remainingConflicts.length > 0) {
       log("warn", `Still ${remainingConflicts.length} conflicted file(s) after Claude resolution`);
-      await abortMerge();
+      if (!claudeCommittedMerge) {
+        await abortMerge();
+      }
       await notifyTaskCreator(
         taskId,
         task.creator,
@@ -458,8 +494,13 @@ async function resolveConflictsWithMerge(
       return false;
     }
 
-    // Commit the merge resolution and push
-    await commitMergeResolution();
+    // Commit the merge resolution (fallback if Claude didn't) and push
+    if (claudeCommittedMerge) {
+      log("info", "Claude already committed the merge resolution");
+    } else {
+      log("warn", "Claude did not commit the merge resolution — committing as fallback");
+      await commitMergeResolution();
+    }
     await pushBranch(branchName);
 
     log("info", `Conflicts resolved and pushed for task ${taskId}`);
