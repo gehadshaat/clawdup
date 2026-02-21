@@ -1,7 +1,13 @@
 // ClickUp API v2 client
 // Docs: https://clickup.com/api
 
-import { CLICKUP_API_TOKEN, CLICKUP_LIST_ID, STATUS, log } from "./config.js";
+import {
+  CLICKUP_API_TOKEN,
+  CLICKUP_LIST_ID,
+  CLICKUP_PARENT_TASK_ID,
+  STATUS,
+  log,
+} from "./config.js";
 import type { ClickUpTask, ClickUpUser, ClickUpList, ClickUpComment } from "./types.js";
 
 const BASE_URL = "https://api.clickup.com/api/v2";
@@ -38,10 +44,44 @@ async function request<T>(
 }
 
 /**
+ * Lazy-resolved list ID.
+ * In parent task mode, the list ID is derived from the parent task on first use.
+ */
+let resolvedListId: string | null = null;
+
+/**
+ * Get the effective list ID, resolving it from the parent task if needed.
+ */
+export async function getEffectiveListId(): Promise<string> {
+  if (resolvedListId) return resolvedListId;
+
+  if (CLICKUP_LIST_ID) {
+    resolvedListId = CLICKUP_LIST_ID;
+    return resolvedListId;
+  }
+
+  if (CLICKUP_PARENT_TASK_ID) {
+    const parentTask = await request<{ list: { id: string } }>(
+      "GET",
+      `/task/${CLICKUP_PARENT_TASK_ID}`,
+    );
+    resolvedListId = parentTask.list.id;
+    log("info", `Resolved list ID from parent task: ${resolvedListId}`);
+    return resolvedListId;
+  }
+
+  throw new Error(
+    "Either CLICKUP_LIST_ID or CLICKUP_PARENT_TASK_ID must be set",
+  );
+}
+
+/**
  * Get all tasks in the list with a specific status.
+ * In parent task mode, only subtasks of the configured parent task are returned.
  * Returns tasks sorted by priority (urgent first) then by date created.
  */
 export async function getTasksByStatus(status: string): Promise<ClickUpTask[]> {
+  const listId = await getEffectiveListId();
   const params = new URLSearchParams({
     include_closed: "false",
     subtasks: "true",
@@ -52,9 +92,14 @@ export async function getTasksByStatus(status: string): Promise<ClickUpTask[]> {
 
   const data = await request<{ tasks: ClickUpTask[] }>(
     "GET",
-    `/list/${CLICKUP_LIST_ID}/task?${params.toString()}`,
+    `/list/${listId}/task?${params.toString()}`,
   );
-  const tasks = data.tasks || [];
+  let tasks = data.tasks || [];
+
+  // In parent task mode, filter to only subtasks of the configured parent task
+  if (CLICKUP_PARENT_TASK_ID) {
+    tasks = tasks.filter((t) => t.parent === CLICKUP_PARENT_TASK_ID);
+  }
 
   // Sort by priority (1=urgent, 2=high, 3=normal, 4=low, null=no priority),
   // then by creation date (oldest first) within the same priority
@@ -67,9 +112,12 @@ export async function getTasksByStatus(status: string): Promise<ClickUpTask[]> {
     return da - db;
   });
 
+  const source = CLICKUP_PARENT_TASK_ID
+    ? `parent task ${CLICKUP_PARENT_TASK_ID}`
+    : `list ${listId}`;
   log(
     "info",
-    `Found ${tasks.length} task(s) with status "${status}" in list ${CLICKUP_LIST_ID}`,
+    `Found ${tasks.length} task(s) with status "${status}" in ${source}`,
   );
   return tasks;
 }
@@ -178,17 +226,25 @@ export async function findPRUrlInComments(
 
 /**
  * Create a new task in the ClickUp list.
+ * In parent task mode, the task is created as a subtask of the configured parent.
  */
 export async function createTask(
   name: string,
   description?: string,
 ): Promise<ClickUpTask> {
+  const listId = await getEffectiveListId();
   log("info", `Creating new task: "${name}"`);
-  return request<ClickUpTask>("POST", `/list/${CLICKUP_LIST_ID}/task`, {
+  const body: Record<string, unknown> = {
     name,
     description: description || "",
     status: STATUS.TODO,
-  });
+  };
+
+  if (CLICKUP_PARENT_TASK_ID) {
+    body.parent = CLICKUP_PARENT_TASK_ID;
+  }
+
+  return request<ClickUpTask>("POST", `/list/${listId}/task`, body);
 }
 
 /**
@@ -353,9 +409,11 @@ export function slugify(text: string): string {
 
 /**
  * Get the list info including available statuses.
+ * In parent task mode, returns the list that the parent task belongs to.
  */
 export async function getListInfo(): Promise<ClickUpList> {
-  return request<ClickUpList>("GET", `/list/${CLICKUP_LIST_ID}`);
+  const listId = await getEffectiveListId();
+  return request<ClickUpList>("GET", `/list/${listId}`);
 }
 
 /**

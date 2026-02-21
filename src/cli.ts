@@ -37,11 +37,19 @@ async function main(): Promise<void> {
 
   // Everything below requires config to be loaded
   const { startRunner, runSingleTask } = await import("./runner.js");
-  const { validateStatuses, getListInfo } = await import("./clickup-api.js");
+  const { validateStatuses, getListInfo, getEffectiveListId } = await import(
+    "./clickup-api.js"
+  );
   const { detectGitHubRepo } = await import("./git-ops.js");
+  const { CLICKUP_PARENT_TASK_ID } = await import("./config.js");
 
   if (args.includes("--check")) {
-    await runChecks({ validateStatuses, getListInfo, detectGitHubRepo });
+    await runChecks({
+      validateStatuses,
+      getListInfo,
+      detectGitHubRepo,
+      parentTaskId: CLICKUP_PARENT_TASK_ID,
+    });
     process.exit(0);
   }
 
@@ -81,13 +89,15 @@ Usage:
 Configuration:
   Create a .clawup.env file in your project root with:
     CLICKUP_API_TOKEN=pk_xxx
-    CLICKUP_LIST_ID=xxx
+    CLICKUP_LIST_ID=xxx          (poll an entire list)
+    -- OR --
+    CLICKUP_PARENT_TASK_ID=xxx   (poll subtasks of a parent task)
 
   Optionally create clawup.config.mjs for custom Claude prompts.
   Run --init to generate example config files.
 
 Flow:
-  1. Polls ClickUp list for tasks with "to do" status
+  1. Polls ClickUp list (or parent task subtasks) for tasks with "to do" status
   2. Picks highest-priority task
   3. Creates a git branch: clickup/CU-{task-id}-{slug} (auto-links to ClickUp)
   4. Runs Claude Code to implement the task (reads your CLAUDE.md for context)
@@ -150,7 +160,11 @@ async function initProject(): Promise<void> {
 CLICKUP_API_TOKEN=pk_xxx
 
 # ClickUp List ID (from the list URL in ClickUp)
+# Use EITHER CLICKUP_LIST_ID or CLICKUP_PARENT_TASK_ID (not both)
 CLICKUP_LIST_ID=
+
+# OR: ClickUp Parent Task ID (polls subtasks of this task instead of a whole list)
+# CLICKUP_PARENT_TASK_ID=
 
 # === OPTIONAL ===
 
@@ -235,15 +249,24 @@ interface CheckDeps {
     statuses: { status: string }[];
   }>;
   detectGitHubRepo: () => Promise<string>;
+  parentTaskId: string;
 }
 
 async function runChecks({
   validateStatuses,
   getListInfo,
   detectGitHubRepo,
+  parentTaskId,
 }: CheckDeps): Promise<void> {
   console.log("Running configuration checks...\n");
   let allGood = true;
+
+  // Show mode
+  if (parentTaskId) {
+    console.log(`  Mode: Parent task (${parentTaskId})`);
+  } else {
+    console.log("  Mode: List");
+  }
 
   // Check ClickUp API
   try {

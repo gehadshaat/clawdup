@@ -2,7 +2,15 @@
 
 import { existsSync, readFileSync, unlinkSync } from "fs";
 import { resolve } from "path";
-import { POLL_INTERVAL_MS, STATUS, BASE_BRANCH, PROJECT_ROOT, log } from "./config.js";
+import {
+  POLL_INTERVAL_MS,
+  STATUS,
+  BASE_BRANCH,
+  PROJECT_ROOT,
+  CLICKUP_LIST_ID,
+  CLICKUP_PARENT_TASK_ID,
+  log,
+} from "./config.js";
 import {
   getTasksByStatus,
   getTaskComments,
@@ -783,6 +791,11 @@ export async function runSingleTask(taskId: string): Promise<void> {
  */
 export async function startRunner(): Promise<void> {
   log("info", "=== ClickUp Task Automation Runner ===");
+  if (CLICKUP_PARENT_TASK_ID) {
+    log("info", `Mode: Parent task subtasks (${CLICKUP_PARENT_TASK_ID})`);
+  } else {
+    log("info", `Mode: List (${CLICKUP_LIST_ID})`);
+  }
   log("info", `Polling interval: ${POLL_INTERVAL_MS / 1000}s`);
   log("info", `Base branch: ${BASE_BRANCH}`);
 

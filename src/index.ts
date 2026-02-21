@@ -14,6 +14,7 @@ export {
   isValidTaskId,
   detectInjectionPatterns,
   getListInfo,
+  getEffectiveListId,
   validateStatuses,
 } from "./clickup-api.js";
 export {
@@ -31,7 +32,13 @@ export {
   getPRState,
 } from "./git-ops.js";
 export { runClaudeOnTask } from "./claude-worker.js";
-export { STATUS, PROJECT_ROOT, GIT_ROOT, log } from "./config.js";
+export {
+  STATUS,
+  PROJECT_ROOT,
+  GIT_ROOT,
+  CLICKUP_PARENT_TASK_ID,
+  log,
+} from "./config.js";
 export type {
   ClickUpTask,
   ClickUpUser,
