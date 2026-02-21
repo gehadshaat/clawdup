@@ -438,6 +438,93 @@ export function generateCommitMessage(
 }
 
 /**
+ * Generate a human-readable summary of the work done from Claude's output.
+ * Extracts substantive lines (skipping code blocks, tool output, and short lines)
+ * and returns a concise summary suitable for a ClickUp comment.
+ */
+export function generateWorkSummary(
+  claudeOutput: string,
+  diffStat: string,
+  changedFiles: string[],
+): string {
+  const parts: string[] = [];
+
+  // Extract meaningful summary lines from Claude's output
+  const summaryLines = extractSummaryLines(claudeOutput);
+  if (summaryLines.length > 0) {
+    parts.push("**What was done:**");
+    parts.push(summaryLines.join("\n"));
+    parts.push("");
+  }
+
+  // Include changed files
+  if (changedFiles.length > 0) {
+    parts.push("**Files changed:**");
+    for (const f of changedFiles) {
+      parts.push(`- \`${f}\``);
+    }
+    parts.push("");
+  }
+
+  // Include diff stats
+  if (diffStat) {
+    parts.push("**Diff stats:**");
+    parts.push(`\`\`\`\n${diffStat}\n\`\`\``);
+  }
+
+  return parts.join("\n");
+}
+
+/**
+ * Extract the most meaningful summary lines from Claude's text output.
+ * Filters out code fences, tool-use markers, blank lines, and very short lines.
+ * Focuses on the last substantive paragraph which typically describes what was done.
+ */
+function extractSummaryLines(output: string): string[] {
+  const lines = output.split("\n");
+
+  // Filter out code blocks, tool markers, and noise
+  const substantive: string[] = [];
+  let inCodeBlock = false;
+
+  for (const line of lines) {
+    if (line.trim().startsWith("```")) {
+      inCodeBlock = !inCodeBlock;
+      continue;
+    }
+    if (inCodeBlock) continue;
+
+    const trimmed = line.trim();
+
+    // Skip empty, very short, or tool-output lines
+    if (!trimmed) continue;
+    if (trimmed.length < 15) continue;
+    if (trimmed.startsWith("[") && trimmed.endsWith("]")) continue; // [tool] markers
+    if (trimmed.startsWith("$")) continue; // shell commands
+    if (trimmed.startsWith("Co-Authored-By:")) continue;
+
+    substantive.push(trimmed);
+  }
+
+  if (substantive.length === 0) return [];
+
+  // Take the last meaningful block (up to 10 lines) as it's usually the summary
+  const MAX_SUMMARY_LINES = 10;
+  const MAX_TOTAL_LENGTH = 1000;
+  const result: string[] = [];
+  let totalLength = 0;
+
+  for (let i = substantive.length - 1; i >= 0 && result.length < MAX_SUMMARY_LINES; i--) {
+    const line = substantive[i]!;
+    if (totalLength + line.length > MAX_TOTAL_LENGTH) break;
+    result.unshift(line);
+    totalLength += line.length;
+  }
+
+  return result;
+}
+
+/**
  * Generate a PR body from the task info and Claude's output.
  */
 export function generatePRBody(

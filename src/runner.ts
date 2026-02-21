@@ -51,6 +51,7 @@ import {
   extractNeedsInputReason,
   generateCommitMessage,
   generatePRBody,
+  generateWorkSummary,
 } from "./claude-worker.js";
 import type { ClickUpTask, ClaudeResult } from "./types.js";
 
@@ -211,19 +212,20 @@ async function processTask(task: ClickUpTask): Promise<void> {
     await pushBranch(branchName);
 
     // Update the PR body with full details and mark it as ready for review
-    const { files } = await getChangesSummary();
+    const { stat, files } = await getChangesSummary();
     const prBody = generatePRBody(task, result.output, files);
     await updatePullRequest(prUrl, { body: prBody });
     await markPRReady(prUrl);
 
-    // Step 8: Update ClickUp task
+    // Step 8: Update ClickUp task with a summary of the work done
+    const workSummary = generateWorkSummary(result.output, stat, files);
     await updateTaskStatus(taskId, STATUS.IN_REVIEW);
     await addTaskComment(
       taskId,
       `✅ Automation completed! The pull request is ready for review:\n\n` +
         `${prUrl}\n\n` +
-        `Branch: \`${branchName}\`\n` +
-        `Files changed: ${files.length}\n\n` +
+        `Branch: \`${branchName}\`\n\n` +
+        `${workSummary}\n\n` +
         `Please review the PR. When ready, move this task to "${STATUS.APPROVED}" and the automation will merge it.`,
     );
 

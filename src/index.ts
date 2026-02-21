@@ -30,7 +30,7 @@ export {
   mergePullRequest,
   getPRState,
 } from "./git-ops.js";
-export { runClaudeOnTask } from "./claude-worker.js";
+export { runClaudeOnTask, generateWorkSummary } from "./claude-worker.js";
 export { STATUS, PROJECT_ROOT, GIT_ROOT, log } from "./config.js";
 export type {
   ClickUpTask,
