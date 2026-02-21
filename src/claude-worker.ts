@@ -356,6 +356,36 @@ export async function runClaudeOnTask(
 }
 
 /**
+ * Run Claude Code to resolve merge conflicts.
+ * Gives Claude the list of conflicted files and asks it to resolve
+ * the conflict markers, keeping the intent of both sides.
+ */
+export async function runClaudeOnConflictResolution(
+  conflictedFiles: string[],
+  branchName: string,
+): Promise<ClaudeResult> {
+  const fileList = conflictedFiles.map((f) => `- ${f}`).join("\n");
+
+  const prompt = `You are resolving merge conflicts in the branch "${branchName}".
+
+The base branch was merged into this feature branch and the following files have merge conflicts:
+
+${fileList}
+
+INSTRUCTIONS:
+1. Read each conflicted file listed above.
+2. Each file will contain Git conflict markers (<<<<<<< HEAD, =======, >>>>>>> origin/...).
+3. Resolve each conflict by keeping the correct combination of both sides. Prefer preserving the intent of the feature branch changes while incorporating any necessary updates from the base branch.
+4. Remove ALL conflict markers from each file.
+5. Do NOT commit or push — just edit the files to resolve the conflicts.
+6. Do NOT create new files or make any changes beyond resolving the conflicts.`;
+
+  log("info", `Running Claude Code to resolve ${conflictedFiles.length} conflicted file(s)...`);
+
+  return runClaudeOnTask(prompt, `conflict-resolution-${branchName}`);
+}
+
+/**
  * Extract the "needs input" reason from Claude's output.
  */
 export function extractNeedsInputReason(output: string): string {

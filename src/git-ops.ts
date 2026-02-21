@@ -382,6 +382,74 @@ export async function mergePullRequest(prUrl: string): Promise<void> {
 }
 
 /**
+ * Check if the PR is mergeable (no conflicts with base branch).
+ * Returns "MERGEABLE", "CONFLICTING", or "UNKNOWN".
+ */
+export async function getPRMergeability(prUrl: string): Promise<string> {
+  try {
+    const result = await gh(
+      "pr",
+      "view",
+      prUrl,
+      "--json",
+      "mergeable",
+      "--jq",
+      ".mergeable",
+    );
+    return result.toUpperCase();
+  } catch {
+    return "UNKNOWN";
+  }
+}
+
+/**
+ * Attempt to merge the base branch into the current branch.
+ * Returns true if merge completed cleanly, false if there are conflicts.
+ */
+export async function mergeBaseBranch(): Promise<boolean> {
+  log("info", `Merging ${BASE_BRANCH} into current branch`);
+  await git("fetch", "origin", BASE_BRANCH);
+  try {
+    await git("merge", `origin/${BASE_BRANCH}`, "--no-edit");
+    log("info", "Merge completed cleanly — no conflicts");
+    return true;
+  } catch (err) {
+    const message = (err as Error).message;
+    if (message.includes("CONFLICT") || message.includes("Automatic merge failed")) {
+      log("warn", "Merge resulted in conflicts");
+      return false;
+    }
+    // If the error is not about conflicts, rethrow
+    throw err;
+  }
+}
+
+/**
+ * Get the list of files with merge conflicts.
+ */
+export async function getConflictedFiles(): Promise<string[]> {
+  const output = await git("diff", "--name-only", "--diff-filter=U");
+  return output.split("\n").filter(Boolean);
+}
+
+/**
+ * Abort an in-progress merge.
+ */
+export async function abortMerge(): Promise<void> {
+  log("info", "Aborting merge");
+  await git("merge", "--abort");
+}
+
+/**
+ * Stage resolved files and commit the merge.
+ */
+export async function commitMergeResolution(): Promise<void> {
+  log("info", "Committing merge resolution");
+  await git("add", "-A");
+  await git("commit", "--no-edit");
+}
+
+/**
  * Get the status of a pull request (open, closed, merged).
  */
 export async function getPRState(prUrl: string): Promise<string> {

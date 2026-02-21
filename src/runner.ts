@@ -35,6 +35,11 @@ import {
   isWorkingTreeClean,
   mergePullRequest,
   getPRState,
+  getPRMergeability,
+  mergeBaseBranch,
+  getConflictedFiles,
+  abortMerge,
+  commitMergeResolution,
   findBranchForTask,
   checkoutExistingBranch,
   branchHasCommitsAheadOfBase,
@@ -42,6 +47,7 @@ import {
 } from "./git-ops.js";
 import {
   runClaudeOnTask,
+  runClaudeOnConflictResolution,
   extractNeedsInputReason,
   generateCommitMessage,
   generatePRBody,
@@ -365,6 +371,130 @@ async function closePRAndCleanup(
 }
 
 /**
+ * Resolve merge conflicts by merging the base branch into the feature branch
+ * and using Claude to fix any conflicted files.
+ *
+ * Returns true if conflicts were resolved, false if resolution failed.
+ */
+async function resolveConflictsWithMerge(
+  task: ClickUpTask,
+  prUrl: string,
+): Promise<boolean> {
+  const taskId = task.id;
+  const branchName = await findBranchForTask(taskId);
+
+  if (!branchName) {
+    log("error", `No branch found for task ${taskId} — cannot resolve conflicts`);
+    await notifyTaskCreator(
+      taskId,
+      task.creator,
+      `⚠️ PR has merge conflicts but no branch was found to resolve them.\n\nPR: ${prUrl}\n\nPlease resolve the conflicts manually.`,
+    );
+    await updateTaskStatus(taskId, STATUS.BLOCKED);
+    return false;
+  }
+
+  try {
+    // Checkout the feature branch
+    await syncBaseBranch();
+    await checkoutExistingBranch(branchName);
+
+    // Try merging the base branch into the feature branch
+    const mergedCleanly = await mergeBaseBranch();
+
+    if (mergedCleanly) {
+      // No conflicts after all — just push the updated branch
+      log("info", `Base branch merged cleanly into ${branchName}`);
+      await pushBranch(branchName);
+      return true;
+    }
+
+    // There are conflicts — get the list of conflicted files
+    const conflictedFiles = await getConflictedFiles();
+    log("info", `Conflicted files: ${conflictedFiles.join(", ")}`);
+
+    await addTaskComment(
+      taskId,
+      `🔀 PR has merge conflicts with \`${BASE_BRANCH}\`. Attempting automatic resolution using Claude.\n\n` +
+        `Conflicted files:\n${conflictedFiles.map((f) => `- \`${f}\``).join("\n")}`,
+    );
+
+    // Use Claude to resolve the conflicts
+    const result = await runClaudeOnConflictResolution(conflictedFiles, branchName);
+
+    if (!result.success) {
+      log("error", `Claude failed to resolve conflicts for task ${taskId}`);
+      await abortMerge();
+      await notifyTaskCreator(
+        taskId,
+        task.creator,
+        `❌ Automation could not resolve merge conflicts automatically.\n\n` +
+          `Conflicted files:\n${conflictedFiles.map((f) => `- \`${f}\``).join("\n")}\n\n` +
+          `Error: ${result.error || "Claude could not resolve the conflicts"}\n\n` +
+          `Please resolve the conflicts manually.\nPR: ${prUrl}`,
+      );
+      await updateTaskStatus(taskId, STATUS.BLOCKED);
+      await returnToBaseBranch();
+      return false;
+    }
+
+    // Check if there are still conflict markers in the files
+    const remainingConflicts = await getConflictedFiles();
+    if (remainingConflicts.length > 0) {
+      log("warn", `Still ${remainingConflicts.length} conflicted file(s) after Claude resolution`);
+      await abortMerge();
+      await notifyTaskCreator(
+        taskId,
+        task.creator,
+        `⚠️ Claude attempted to resolve merge conflicts but some files still have conflicts:\n\n` +
+          `${remainingConflicts.map((f) => `- \`${f}\``).join("\n")}\n\n` +
+          `Please resolve the remaining conflicts manually.\nPR: ${prUrl}`,
+      );
+      await updateTaskStatus(taskId, STATUS.BLOCKED);
+      await returnToBaseBranch();
+      return false;
+    }
+
+    // Commit the merge resolution and push
+    await commitMergeResolution();
+    await pushBranch(branchName);
+
+    log("info", `Conflicts resolved and pushed for task ${taskId}`);
+    await addTaskComment(
+      taskId,
+      `✅ Merge conflicts resolved automatically. The PR is now ready to merge.`,
+    );
+
+    await returnToBaseBranch();
+    return true;
+  } catch (err) {
+    log("error", `Error resolving conflicts for task ${taskId}: ${(err as Error).message}`);
+
+    // Best-effort abort merge and return to base
+    try {
+      await abortMerge();
+    } catch {
+      log("debug", "Could not abort merge (may not be in merge state)");
+    }
+    try {
+      await returnToBaseBranch();
+    } catch {
+      log("debug", "Could not return to base branch after conflict resolution failure");
+    }
+
+    await notifyTaskCreator(
+      taskId,
+      task.creator,
+      `❌ Automation encountered an error while trying to resolve merge conflicts:\n\n` +
+        `\`\`\`\n${(err as Error).message}\n\`\`\`\n\n` +
+        `Please resolve the conflicts manually.\nPR: ${prUrl}`,
+    );
+    await updateTaskStatus(taskId, STATUS.BLOCKED);
+    return false;
+  }
+}
+
+/**
  * Process an approved task: find its PR and merge it.
  */
 async function processApprovedTask(task: ClickUpTask): Promise<void> {
@@ -420,6 +550,18 @@ async function processApprovedTask(task: ClickUpTask): Promise<void> {
       );
       await updateTaskStatus(taskId, STATUS.BLOCKED);
       return;
+    }
+
+    // Check if the PR has merge conflicts and resolve them if needed
+    const mergeability = await getPRMergeability(prUrl);
+    log("info", `PR mergeability for task ${taskId}: ${mergeability}`);
+
+    if (mergeability === "CONFLICTING") {
+      log("info", `PR has conflicts. Attempting to resolve for task ${taskId}`);
+      const resolved = await resolveConflictsWithMerge(task, prUrl);
+      if (!resolved) {
+        return; // resolveConflictsWithMerge handles status updates
+      }
     }
 
     // Merge the PR
