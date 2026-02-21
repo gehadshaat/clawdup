@@ -113,6 +113,12 @@ export const POLL_INTERVAL_MS: number = parseInt(
   10,
 );
 
+// Relaunch interval (default: 10 minutes). Set to 0 to disable.
+export const RELAUNCH_INTERVAL_MS: number = parseInt(
+  process.env.RELAUNCH_INTERVAL_MS || "600000",
+  10,
+);
+
 // Claude Code
 export const CLAUDE_COMMAND: string = process.env.CLAUDE_COMMAND || "claude";
 export const CLAUDE_TIMEOUT_MS: number = parseInt(

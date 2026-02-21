@@ -2,7 +2,7 @@
 
 import { existsSync, readFileSync, unlinkSync } from "fs";
 import { resolve } from "path";
-import { POLL_INTERVAL_MS, STATUS, BASE_BRANCH, PROJECT_ROOT, log } from "./config.js";
+import { POLL_INTERVAL_MS, RELAUNCH_INTERVAL_MS, STATUS, BASE_BRANCH, PROJECT_ROOT, log } from "./config.js";
 import {
   getTasksByStatus,
   getTaskComments,
@@ -56,6 +56,7 @@ import type { ClickUpTask, ClaudeResult } from "./types.js";
 
 let isShuttingDown = false;
 let isProcessing = false;
+let signalHandlersRegistered = false;
 
 const TODO_FILE_PATH = resolve(PROJECT_ROOT, ".clawup.todo.json");
 
@@ -780,11 +781,21 @@ export async function runSingleTask(taskId: string): Promise<void> {
 
 /**
  * Start the continuous polling loop.
+ * Returns true if the runner should be relaunched, false on normal shutdown.
  */
-export async function startRunner(): Promise<void> {
+export async function startRunner(): Promise<boolean> {
+  // Reset state for fresh run (supports relaunch loop)
+  isShuttingDown = false;
+  isProcessing = false;
+
   log("info", "=== ClickUp Task Automation Runner ===");
   log("info", `Polling interval: ${POLL_INTERVAL_MS / 1000}s`);
   log("info", `Base branch: ${BASE_BRANCH}`);
+
+  const relaunchEnabled = RELAUNCH_INTERVAL_MS > 0;
+  if (relaunchEnabled) {
+    log("info", `Relaunch interval: ${RELAUNCH_INTERVAL_MS / 1000 / 60}min`);
+  }
 
   // Validate configuration
   const repo = await detectGitHubRepo();
@@ -811,30 +822,64 @@ export async function startRunner(): Promise<void> {
   // Recover any tasks left "in progress" from a previous crash
   await recoverOrphanedTasks();
 
-  // Set up graceful shutdown
-  process.on("SIGINT", () => {
-    log("info", "\nReceived SIGINT. Shutting down gracefully...");
-    isShuttingDown = true;
-    if (!isProcessing) process.exit(0);
-  });
+  // Set up graceful shutdown (only register once to avoid duplicate listeners)
+  if (!signalHandlersRegistered) {
+    process.on("SIGINT", () => {
+      log("info", "\nReceived SIGINT. Shutting down gracefully...");
+      isShuttingDown = true;
+      if (!isProcessing) process.exit(0);
+    });
 
-  process.on("SIGTERM", () => {
-    log("info", "\nReceived SIGTERM. Shutting down gracefully...");
-    isShuttingDown = true;
-    if (!isProcessing) process.exit(0);
-  });
+    process.on("SIGTERM", () => {
+      log("info", "\nReceived SIGTERM. Shutting down gracefully...");
+      isShuttingDown = true;
+      if (!isProcessing) process.exit(0);
+    });
+
+    signalHandlersRegistered = true;
+  }
 
   log("info", "Runner started. Polling for tasks...\n");
+
+  const runnerStartTime = Date.now();
 
   // Initial poll
   await pollForTasks();
 
-  // Start polling loop
-  const interval = setInterval(async () => {
-    if (isShuttingDown) {
-      clearInterval(interval);
-      return;
+  // Check if relaunch is due right after initial poll
+  if (relaunchEnabled && !isProcessing && !isShuttingDown && Date.now() - runnerStartTime >= RELAUNCH_INTERVAL_MS) {
+    log("info", "Relaunch interval reached. Pulling base branch before relaunch...");
+    try {
+      await syncBaseBranch();
+    } catch (err) {
+      log("error", `Failed to sync base branch before relaunch: ${(err as Error).message}`);
     }
-    await pollForTasks();
-  }, POLL_INTERVAL_MS);
+    return true;
+  }
+
+  // Start polling loop
+  return new Promise<boolean>((resolve) => {
+    const interval = setInterval(async () => {
+      if (isShuttingDown) {
+        clearInterval(interval);
+        resolve(false);
+        return;
+      }
+
+      await pollForTasks();
+
+      // Check if it's time to relaunch (only when idle)
+      if (relaunchEnabled && !isProcessing && !isShuttingDown && Date.now() - runnerStartTime >= RELAUNCH_INTERVAL_MS) {
+        clearInterval(interval);
+        log("info", "Relaunch interval reached. Pulling base branch before relaunch...");
+        try {
+          await syncBaseBranch();
+        } catch (err) {
+          log("error", `Failed to sync base branch before relaunch: ${(err as Error).message}`);
+        }
+        resolve(true);
+        return;
+      }
+    }, POLL_INTERVAL_MS);
+  });
 }
