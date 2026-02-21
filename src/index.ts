@@ -11,6 +11,8 @@ export {
   findPRUrlInComments,
   formatTaskForClaude,
   slugify,
+  isValidTaskId,
+  detectInjectionPatterns,
   getListInfo,
   validateStatuses,
 } from "./clickup-api.js";
