@@ -45,6 +45,8 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
+  const interactive = args.includes("--interactive");
+
   if (args.includes("--once")) {
     const taskIdIndex = args.indexOf("--once") + 1;
     const taskId = args[taskIdIndex];
@@ -53,12 +55,12 @@ async function main(): Promise<void> {
       console.error("Usage: clawup --once <task-id>");
       process.exit(1);
     }
-    await runSingleTask(taskId);
+    await runSingleTask(taskId, { interactive });
     process.exit(0);
   }
 
   // Default: start the continuous polling runner
-  await startRunner();
+  await startRunner({ interactive });
 }
 
 function printUsage(): void {
@@ -76,6 +78,7 @@ Usage:
   clawup --statuses          Show recommended ClickUp statuses
   clawup --setup             Interactive setup wizard
   clawup --init              Create config files in current directory
+  clawup --interactive       Enable interactive mode (send input to Claude while running)
   clawup --help              Show this help
 
 Configuration:

@@ -52,6 +52,7 @@ import type { ClickUpTask, ClaudeResult } from "./types.js";
 
 let isShuttingDown = false;
 let isProcessing = false;
+let isInteractive = false;
 
 const TODO_FILE_PATH = resolve(PROJECT_ROOT, ".clawup.todo.json");
 
@@ -184,8 +185,8 @@ async function processTask(task: ClickUpTask): Promise<void> {
     const taskPrompt = formatTaskForClaude(task, comments);
 
     // Set up interactive input so the user can send messages to Claude
-    const cleanupInput = setupInteractiveInput();
-    const result = await runClaudeOnTask(taskPrompt, taskId);
+    const cleanupInput = isInteractive ? setupInteractiveInput() : null;
+    const result = await runClaudeOnTask(taskPrompt, taskId, isInteractive);
     if (cleanupInput) cleanupInput();
 
     // Step 4b: Process any follow-up tasks Claude created BEFORE committing.
@@ -654,7 +655,11 @@ async function pollForTasks(): Promise<void> {
 /**
  * Run a single task by ID (skip polling, process one task).
  */
-export async function runSingleTask(taskId: string): Promise<void> {
+export async function runSingleTask(
+  taskId: string,
+  options?: { interactive?: boolean },
+): Promise<void> {
+  isInteractive = options?.interactive ?? false;
   const { getTask } = await import("./clickup-api.js");
   const task = await getTask(taskId);
   await processTask(task);
@@ -663,7 +668,10 @@ export async function runSingleTask(taskId: string): Promise<void> {
 /**
  * Start the continuous polling loop.
  */
-export async function startRunner(): Promise<void> {
+export async function startRunner(options?: {
+  interactive?: boolean;
+}): Promise<void> {
+  isInteractive = options?.interactive ?? false;
   log("info", "=== ClickUp Task Automation Runner ===");
   log("info", `Polling interval: ${POLL_INTERVAL_MS / 1000}s`);
   log("info", `Base branch: ${BASE_BRANCH}`);

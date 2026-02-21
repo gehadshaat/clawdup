@@ -376,13 +376,15 @@ function spawnClaudeProcess(
 }
 
 /**
- * Run Claude Code on a task, with support for interactive user input.
- * After the initial prompt completes, any queued user messages are
- * sent as continuation turns using --continue.
+ * Run Claude Code on a task, with optional support for interactive user input.
+ * When interactive is true, queued user messages are sent as continuation
+ * turns using --continue after the initial prompt completes.
+ * When interactive is false (default), runs Claude once without waiting for input.
  */
 export async function runClaudeOnTask(
   taskPrompt: string,
   taskId: string,
+  interactive: boolean = false,
 ): Promise<ClaudeResult> {
   const systemPrompt = buildSystemPrompt(taskPrompt);
   clearInputQueue();
@@ -393,22 +395,24 @@ export async function runClaudeOnTask(
   let result = await spawnClaudeProcess(systemPrompt, false);
   let combinedOutput = result.output;
 
-  // Process any queued user input as continuation turns
-  while (result.success && !result.needsInput) {
-    if (inputQueue.length === 0) {
-      // Brief grace period for any last-minute input
-      const hasInput = await waitForInput(2000);
-      if (!hasInput) break;
+  // Process any queued user input as continuation turns (interactive mode only)
+  if (interactive) {
+    while (result.success && !result.needsInput) {
+      if (inputQueue.length === 0) {
+        // Brief grace period for any last-minute input
+        const hasInput = await waitForInput(2000);
+        if (!hasInput) break;
+      }
+
+      const userMessage = inputQueue.shift()!;
+      log("info", `Sending user input to Claude for task ${taskId}`);
+      process.stdout.write(`\n${"─".repeat(50)}\n`);
+      process.stdout.write(`Sending your message to Claude...\n`);
+      process.stdout.write(`${"─".repeat(50)}\n\n`);
+
+      result = await spawnClaudeProcess(userMessage, true);
+      combinedOutput += "\n" + result.output;
     }
-
-    const userMessage = inputQueue.shift()!;
-    log("info", `Sending user input to Claude for task ${taskId}`);
-    process.stdout.write(`\n${"─".repeat(50)}\n`);
-    process.stdout.write(`Sending your message to Claude...\n`);
-    process.stdout.write(`${"─".repeat(50)}\n\n`);
-
-    result = await spawnClaudeProcess(userMessage, true);
-    combinedOutput += "\n" + result.output;
   }
 
   if (result.needsInput) {
