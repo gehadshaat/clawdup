@@ -16,6 +16,7 @@ import {
   findPRUrlInComments,
   createTask,
   getNewReviewFeedback,
+  getCommentText,
 } from "./clickup-api.js";
 import {
   detectGitHubRepo,
@@ -689,7 +690,7 @@ async function collectReviewFeedback(
   if (clickupFeedback.length > 0) {
     feedbackParts.push("### ClickUp Review Comments");
     for (const comment of clickupFeedback) {
-      const text = comment.comment_text || "";
+      const text = getCommentText(comment);
       const user = comment.user?.username || "Unknown";
       const date = comment.date
         ? new Date(parseInt(comment.date)).toISOString().split("T")[0]

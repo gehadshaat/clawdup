@@ -43,8 +43,14 @@ export interface ClickUpStatus {
   type: string;
 }
 
+export interface ClickUpCommentBlock {
+  text?: string;
+  type?: string;
+}
+
 export interface ClickUpComment {
   comment_text?: string;
+  comment?: ClickUpCommentBlock[];
   user?: { username?: string };
   date?: string;
 }

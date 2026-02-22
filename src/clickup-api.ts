@@ -6,6 +6,24 @@ import type { ClickUpTask, ClickUpUser, ClickUpList, ClickUpComment } from "./ty
 
 const BASE_URL = "https://api.clickup.com/api/v2";
 
+/**
+ * Extract plain text from a ClickUp comment.
+ * Tries `comment_text` first, then falls back to extracting text
+ * from the `comment` rich-text block array.
+ */
+export function getCommentText(comment: ClickUpComment): string {
+  if (comment.comment_text && comment.comment_text.trim()) {
+    return comment.comment_text;
+  }
+  if (comment.comment && Array.isArray(comment.comment)) {
+    return comment.comment
+      .map((block) => block.text || "")
+      .join("")
+      .trim();
+  }
+  return "";
+}
+
 async function request<T>(
   method: string,
   path: string,
@@ -241,7 +259,7 @@ export async function findPRUrlInComments(
   // Search comments newest-first for a GitHub PR URL
   const prUrlPattern = /https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+/;
   for (let i = comments.length - 1; i >= 0; i--) {
-    const text = comments[i]!.comment_text || "";
+    const text = getCommentText(comments[i]!);
     const match = text.match(prUrlPattern);
     if (match) {
       return match[0]!;
@@ -330,7 +348,7 @@ export function formatTaskForClaude(
   const allContent = [
     task.name,
     task.text_content || task.description || "",
-    ...(comments || []).map((c) => c.comment_text || ""),
+    ...(comments || []).map((c) => getCommentText(c)),
   ].join("\n");
 
   const injectionMatches = detectInjectionPatterns(allContent);
@@ -398,7 +416,7 @@ export function formatTaskForClaude(
       parts.push(`(showing ${MAX_COMMENTS_COUNT} most recent of ${comments.length} comments)`);
     }
     for (const comment of recentComments) {
-      const text = comment.comment_text || "";
+      const text = getCommentText(comment);
       if (!text.trim()) continue;
       const user = comment.user?.username || "Unknown";
       const date = comment.date
@@ -446,20 +464,28 @@ export async function getNewReviewFeedback(
   // Find the index of the last automation comment
   let lastAutomationIdx = -1;
   for (let i = comments.length - 1; i >= 0; i--) {
-    const text = comments[i]!.comment_text || "";
+    const text = getCommentText(comments[i]!);
     if (isAutomationComment(text)) {
       lastAutomationIdx = i;
       break;
     }
   }
 
-  // If no automation comment found, there's no baseline — return empty
-  if (lastAutomationIdx === -1) return [];
+  // If no automation comment found, return all non-automation comments.
+  // This handles cases where the task was manually moved to IN REVIEW
+  // or where automation comments weren't detected.
+  if (lastAutomationIdx === -1) {
+    log("debug", `No automation comment found for task ${taskId}. Returning all non-automation comments.`);
+    return comments.filter((c) => {
+      const text = getCommentText(c);
+      return text.trim() !== "" && !isAutomationComment(text);
+    });
+  }
 
   // Return all non-automation comments after the last automation comment
   const newComments: ClickUpComment[] = [];
   for (let i = lastAutomationIdx + 1; i < comments.length; i++) {
-    const text = comments[i]!.comment_text || "";
+    const text = getCommentText(comments[i]!);
     if (text.trim() && !isAutomationComment(text)) {
       newComments.push(comments[i]!);
     }
