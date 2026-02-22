@@ -1,348 +1,523 @@
-# Clawup: The Billion-Dollar Vision for ClickUp
+# Clawup: The Autonomous Business Agent That Lives in ClickUp
 
-## From Project Management to Autonomous Software Delivery
+## The One-Liner
 
-**Thesis:** ClickUp is positioned to become the first project management platform that doesn't just *track* work — it *does* the work. Clawup is the proof-of-concept. The billion-dollar opportunity is making ClickUp the **operating system for AI-native software delivery**, where writing a task description is equivalent to writing code.
+**Clawup is an autonomous AI agent that picks up tasks from ClickUp, does the actual work, and reports back — not just for code, for everything a business does.**
 
----
-
-## The $1B Insight
-
-Every software company on Earth has the same bottleneck: **the gap between what someone wants built and the code that builds it.** Today, that gap is filled by expensive engineers translating Jira tickets, ClickUp tasks, and Linear issues into pull requests. This translation layer costs the global economy hundreds of billions of dollars per year in salaries, delays, miscommunication, and rework.
-
-Clawup eliminates that gap. A product manager writes a ClickUp task. Minutes later, a production-ready pull request appears. The review cycle is automated. Merge conflicts resolve themselves. Follow-up tasks are auto-created. The human only needs to approve.
-
-**This isn't a feature. It's a category.**
-
-No project management tool has this. Not Jira. Not Linear. Not Asana. Not Monday.com. The first platform to ship native AI execution — not just AI *suggestions* — captures a market that doesn't exist yet: **autonomous software delivery.**
-
-ClickUp is uniquely positioned because:
-1. It already has the task graph (dependencies, subtasks, checklists, priorities)
-2. It already has the status workflow engine (customizable state machines)
-3. It already has the user base (800K+ teams, millions of users)
-4. Clawup proves the architecture works **today** with zero runtime dependencies
+Write a task. The agent plans it, breaks it down, researches, drafts, contacts people, creates deliverables, and completes the work — all while you watch the progress in ClickUp and approve the decisions that matter.
 
 ---
 
-## Phase 1: ClickUp AutoDev (The Product — Year 1)
+## The Problem
 
-### What Ships
+Every business runs on tasks. Millions of tasks are created every day in project management tools. And then... humans have to do them. One by one. Manually.
 
-**ClickUp AutoDev** — a native ClickUp feature where any task can be assigned to an AI agent that implements it, creates a PR, responds to code review, and merges on approval.
+The project management industry spent 20 years optimizing how tasks get **tracked**. Nobody has solved how tasks get **done**.
 
-**User Experience:**
-```
-1. User creates a task: "Add dark mode toggle to settings page"
-2. User clicks "Assign to AutoDev" (or assigns to a virtual team member)
-3. AutoDev status appears: "Understanding codebase..." → "Implementing..." → "PR Created"
-4. Draft PR appears in GitHub/GitLab/Bitbucket within minutes
-5. Team reviews. Leaves comments. AutoDev addresses every comment.
-6. Tech lead approves. AutoDev merges. Task moves to Complete.
-```
+AI assistants like ChatGPT and Claude are powerful — but they're **reactive**. You have to sit in a chat window and drive the conversation. They don't pick up work on their own. They don't break down projects. They don't follow up. They don't remember what happened last week. They don't integrate into how your business actually operates.
 
-No CLI. No configuration files. No `npm install`. One click in the ClickUp UI.
-
-### Architecture (Built on Clawup's Foundation)
-
-Clawup has already solved the hard problems:
-- **Task-to-prompt translation** with security boundaries (`clickup-api.ts` → `formatTaskForClaude`)
-- **Multi-cycle review loops** (runner.ts processReviewTask → Claude → push → review again)
-- **Conflict resolution** (automated merge-base with Claude fallback)
-- **Follow-up task creation** (.clawup.todo.json → ClickUp subtasks)
-- **Prompt injection defense** (content sanitization, boundary markers, injection pattern detection)
-- **Graceful degradation** (partial changes committed, orphaned task recovery)
-
-What changes for the hosted product:
-- **Runner moves to ClickUp's cloud infrastructure** (Kubernetes pods per execution)
-- **Git operations use ClickUp's OAuth tokens** (GitHub/GitLab/Bitbucket apps)
-- **Claude invocation goes through ClickUp's API partnership** (dedicated capacity)
-- **Status updates are real-time** via ClickUp's existing WebSocket infrastructure
-- **Prompt context includes full project graph** (related tasks, past implementations, team conventions)
-
-### Revenue Model
-
-| Tier | Price | What You Get |
-|------|-------|-------------|
-| **Starter** | $49/seat/month | 50 AI-implemented tasks/month, basic review handling |
-| **Business** | $99/seat/month | Unlimited tasks, multi-repo support, custom coding standards |
-| **Enterprise** | Custom | Private cloud execution, SOC 2, custom model fine-tuning, SLA |
-
-**Revenue math:** ClickUp has 800K+ teams. If 10% adopt AutoDev at an average of $75/seat/month across 5 seats:
-- 80,000 teams × 5 seats × $75/month = **$360M ARR**
-- At 10x revenue multiple = **$3.6B enterprise value addition**
-
-Even at 3% adoption: **$108M ARR** — a transformative revenue line.
-
-### Competitive Moat
-
-The moat isn't the AI. The moat is **the workflow**.
-
-Anyone can call Claude's API. But only ClickUp has:
-- The task dependency graph that tells the AI *what order* to build things
-- The status workflow that orchestrates the *lifecycle* of AI work
-- The comment history that provides *institutional context*
-- The team structure that determines *who approves what*
-- The custom fields that encode *business rules*
-
-Clawup's architecture already leverages all of this. A competitor would need to build both the project management platform AND the AI execution engine. ClickUp only needs to ship the execution engine — and Clawup is the blueprint.
+**Clawup bridges this gap.** It turns ClickUp from a place where you *track* work into a place where work *gets done*.
 
 ---
 
-## Phase 2: The Autonomous Engineering Team (Year 2)
+## How It Works
 
-### Beyond Single Tasks: Orchestrated Work
+Clawup is a CLI tool that runs on a machine (yours, a server, or eventually hosted). It connects to a ClickUp list, polls for tasks, and hands them to Claude with the right tools and context to execute the work autonomously.
 
-Phase 1 handles individual tasks. Phase 2 handles **projects**.
+### The Core Loop
 
-**Feature Decomposition Engine:**
 ```
-Product Manager writes: "Build a user analytics dashboard"
-
-AutoDev decomposes into:
-├── Task 1: Design database schema for analytics events (Priority: Urgent)
-├── Task 2: Create event ingestion API endpoint (depends on: Task 1)
-├── Task 3: Build aggregation pipeline for metrics (depends on: Task 1)
-├── Task 4: Create React dashboard component (depends on: Task 3)
-├── Task 5: Add date range filtering and export (depends on: Task 4)
-└── Task 6: Write integration tests (depends on: Tasks 2-5)
+1. Human creates a task in ClickUp
+2. Clawup picks it up → moves to "in progress"
+3. Claude reads the task, thinks, and acts:
+   - Researches (web search, reads docs, gathers data)
+   - Plans (decomposes into subtasks, creates them in ClickUp)
+   - Executes (drafts emails, writes documents, builds code, contacts vendors)
+   - Reports (posts findings and deliverables as ClickUp comments)
+4. For actions that need permission (sending emails, spending money):
+   - Creates a subtask in "pending approval"
+   - Human reviews and approves
+   - Claude executes the approved action
+5. Task moves to "complete"
 ```
 
-Each task is implemented sequentially respecting dependencies. The parent task tracks overall progress. Humans can intervene at any checkpoint.
-
-This is already architecturally possible — Clawup's `.clawup.todo.json` follow-up task system creates subtasks in ClickUp. The evolution is making this **recursive and dependency-aware**.
-
-### Learning From Your Codebase
-
-**Project Memory:** Every task AutoDev completes becomes training data for your specific codebase.
-
-- "Last time we added a new API endpoint, we also needed to update the OpenAPI spec and add rate limiting."
-- "This team always uses Zustand for state management, never Redux."
-- "PR reviews from this tech lead always flag missing error boundaries."
-
-This context lives in ClickUp — in the comment history, the task patterns, the review feedback. No other platform has this data.
-
-### The Virtual Engineering Team
-
-AutoDev stops being a feature and becomes **team members**:
-
-- **AutoDev: Frontend** — Specializes in your React/Vue/Angular codebase. Knows your component library. Follows your design system.
-- **AutoDev: Backend** — Knows your API patterns, database schema, and service architecture.
-- **AutoDev: DevOps** — Handles CI/CD changes, infrastructure-as-code, and deployment configurations.
-- **AutoDev: QA** — Reads completed tasks and writes test cases. Reviews PRs for test coverage.
-
-Each "agent" is a ClickUp team member that appears in workload views, can be assigned tasks, and has capacity limits. Engineering managers see AI and human capacity in a single dashboard.
+**The key insight:** Claude doesn't just answer a question. It **does the work** and **creates more work** (subtasks) when the job is bigger than one step. The ClickUp task tree becomes the agent's visible plan, and status changes become the approval mechanism.
 
 ---
 
-## Phase 3: The Software Factory (Year 3)
+## The Event Planning Example
 
-### From Tasks to Intentions
+This is the scenario that makes the whole vision click.
 
-The interface evolves beyond task descriptions:
+**Task: "Plan a team offsite in DC for 50 people. Budget: $15K. Date: March 20."**
 
-**Natural Language Projects:**
 ```
-"We need to support multi-tenancy. Each customer should have isolated data,
-their own subdomain, and the ability to customize their branding. We're using
-PostgreSQL and our auth is through Clerk. Ship it incrementally — database
-isolation first, then subdomains, then branding."
+Claude picks up the task. Here's what happens:
+
+MINUTE 1-5: Planning & Research
+├── Claude posts a comment: "Breaking this down into venue, catering,
+│   logistics, and communications. Creating subtasks now."
+├── Creates subtask: "Research venue options in DC" → status: to do
+├── Creates subtask: "Research catering vendors" → status: to do
+├── Creates subtask: "Draft invitation email" → status: to do
+└── Creates subtask: "Create budget tracker" → status: to do
+
+MINUTE 5-15: Research Phase (parallel)
+├── "Research venues" → in progress
+│   Claude searches the web, reads venue sites, compares capacity/pricing
+│   Posts comment: "Found 4 strong options:
+│     1. The Hamilton — 75 cap, $3,200, downtown
+│     2. 600F Loft — 60 cap, $2,500, Penn Quarter
+│     3. Eastern Market — 100 cap, $1,800, outdoor covered
+│     4. The Lumen — 80 cap, $4,100, rooftop"
+│   Creates subtasks for each venue:
+│     "Contact The Hamilton for March 20 availability" → pending approval
+│     "Contact 600F Loft for March 20 availability" → pending approval
+│     "Contact Eastern Market for March 20 availability" → pending approval
+│   Moves "Research venues" → complete
+│
+├── "Research catering" → in progress
+│   Same pattern: research, comment findings, create contact subtasks
+│   Moves → complete
+│
+├── "Draft invitation email" → in progress
+│   Writes draft, posts in comment: "Here's the invite draft: ..."
+│   Moves → complete (it's a draft, human will review in the comment)
+│
+└── "Create budget tracker" → in progress
+    Creates a checklist on parent task:
+    ☐ Venue: $0 / $5,000 budget
+    ☐ Catering: $0 / $4,000 budget
+    ☐ AV/Equipment: $0 / $1,500 budget
+    ☐ Transportation: $0 / $2,000 budget
+    ☐ Misc: $0 / $2,500 budget
+    Moves → complete
+
+HUMAN REVIEWS (async, whenever they get to it)
+├── Sees the venue options in comments. Likes The Hamilton and 600F.
+├── Approves "Contact The Hamilton" → moves to approved
+├── Approves "Contact 600F Loft" → moves to approved
+├── Cancels Eastern Market (too far from hotel)
+└── Tweaks the invite draft in a comment: "Make it more casual"
+
+NEXT POLL CYCLE: Execution
+├── "Contact The Hamilton" → approved → in progress
+│   Claude drafts an email:
+│     To: events@thehamiltondc.com
+│     Subject: Venue inquiry — March 20, 50 guests
+│     Body: Professional inquiry about availability and pricing
+│   Sends the email (tool: send_email)
+│   Posts comment: "Email sent to The Hamilton. Will follow up if no
+│   reply by Thursday."
+│   Creates subtask: "Follow up with Hamilton if no reply" (due: Thursday)
+│   Moves → waiting
+│
+├── "Contact 600F Loft" → same pattern
+│
+└── Claude sees the comment about the invite being more casual
+    Updates the draft in a new comment with casual tone
+    "Updated invite draft (casual version): ..."
+
+THURSDAY: Follow-up
+├── "Follow up with Hamilton" becomes due → to do → in progress
+│   Claude checks inbox (tool: check_email)
+│   Hamilton replied! "Available March 20. $3,200 + $500 AV package."
+│   Posts comment with the reply details
+│   Creates subtask: "Confirm booking at The Hamilton — $3,700" → pending approval
+│   Moves follow-up → complete
+│   Moves "Contact The Hamilton" → complete
+
+HUMAN APPROVES booking → Claude sends confirmation email → done.
 ```
 
-AutoDev produces:
-1. A technical design document (as a ClickUp Doc)
-2. A task breakdown with estimates (as ClickUp tasks with time tracking)
-3. An implementation plan with milestones (as ClickUp milestones)
-4. Begins execution with human checkpoints at each milestone
+**Total human effort: ~10 minutes of reading comments and approving/rejecting subtasks.**
 
-**Bug Report → Fix → Deploy:**
-```
-Customer: "When I export to CSV, the dates are in the wrong timezone"
+**Work done: venue research, vendor research, email drafting, outreach, follow-ups, budget tracking, invitation writing.**
 
-AutoDev:
-  → Reads the bug report
-  → Finds the CSV export code
-  → Identifies the timezone handling issue
-  → Writes the fix + adds timezone tests
-  → Creates PR with before/after screenshots
-  → After approval, merges and triggers deploy
-  → Adds comment: "Fix deployed to production. Verified in staging."
-  → Moves task to Complete
-```
+That's a week of coordinator work compressed into an async approval flow.
 
-### ClickUp as the IDE
+---
 
-Here's the paradigm shift: **ClickUp becomes the IDE for non-engineers.**
+## The Architecture
 
-Product managers, designers, and founders don't learn VS Code. They don't learn Git. They don't learn terminal commands. They write tasks. The AI translates those tasks into production code. The review process ensures quality. The merge process ensures safety.
+### ClickUp Is the Brain
+
+All state lives in ClickUp. There is no external database, no separate dashboard, no "agent memory store." ClickUp IS the state:
+
+- **Task hierarchy** = the agent's plan
+- **Task statuses** = the agent's workflow state
+- **Comments** = the agent's work output and communication
+- **Checklists** = structured tracking (budgets, requirements, progress)
+- **Subtasks** = decomposed work items
+- **Assignees** = who's responsible (human or agent)
+- **Due dates** = deadlines and follow-up triggers
+- **Tags** = categorization and routing
 
 This means:
-- **Non-technical founders** can build and iterate on products by writing ClickUp tasks
-- **Product managers** can implement their own feature specs without engineering bottlenecks
-- **Design teams** can describe UI changes and see them built in their staging environment
-- **Customer success** can file bugs that fix themselves
+- Everything is auditable (ClickUp has full history)
+- Nothing is lost if Clawup restarts (state is in ClickUp, not in memory)
+- Multiple humans can observe and intervene at any time
+- The agent's "thinking" is visible as task structure and comments
 
-### The Marketplace
+### The Status Workflow
 
-**ClickUp AutoDev Marketplace:**
-- **Custom Agents** — Community-built specialized agents (security auditor, accessibility checker, performance optimizer)
-- **Coding Standards Packs** — Pre-configured rules for frameworks (Next.js, Rails, Django, Spring Boot)
-- **Workflow Templates** — "Bug Fix Flow", "Feature Sprint Flow", "Refactoring Flow" with pre-configured AutoDev stages
-- **Integration Packs** — AutoDev extensions for Datadog (auto-fix alerts), Sentry (auto-fix errors), PagerDuty (auto-resolve incidents)
+Users create a dedicated ClickUp Space (or List) with these statuses:
 
-Revenue share model with the community. ClickUp takes 30%.
+| Status | Type | Color | Purpose |
+|--------|------|-------|---------|
+| **to do** | open | `#d3d3d3` | Ready for the agent to pick up |
+| **in progress** | active | `#4194f6` | Agent is actively working |
+| **pending approval** | active | `#f9d900` | Agent prepared an action — needs human sign-off |
+| **approved** | active | `#2ecd6f` | Human approved — agent will execute |
+| **needs input** | active | `#a875ff` | Agent is stuck — needs human clarification |
+| **waiting** | active | `#ff7800` | Paused on external party (email reply, vendor, etc.) |
+| **complete** | closed | `#6bc950` | Done |
+| **cancelled** | closed | `#808080` | Not doing this |
+
+**Status flows by task type:**
+
+```
+Research/Analysis (autonomous):
+  to do → in progress → complete
+
+Action requiring approval (gated):
+  to do → in progress → pending approval → approved → complete
+
+Action with external dependency:
+  to do → in progress → pending approval → approved → waiting → complete
+
+Agent needs help:
+  to do → in progress → needs input → (human comments) → in progress → ...
+
+Human rejects an action:
+  pending approval → cancelled  (agent adapts, may create alternative)
+  pending approval → to do      (human adds feedback, agent retries)
+```
+
+**The critical design choice:** The agent auto-creates gated tasks directly in `pending approval` when it knows the action needs human sign-off (sending emails, contacting people, committing to something). Research and analysis tasks are created in `to do` and the agent picks them up and completes them autonomously.
+
+### The Tool System
+
+Clawup's power comes from the tools it gives Claude. Today, Claude Code has tools for code (Edit, Write, Read, Bash). Clawup extends this with **business tools** — implemented as MCP servers that plug into Claude.
+
+**Core tools (always available):**
+
+| Tool | What It Does |
+|------|-------------|
+| `clickup_create_task` | Create a subtask in ClickUp with name, description, status |
+| `clickup_update_task` | Update task status, add checklist items, set due dates |
+| `clickup_comment` | Post a comment on the current task or any task |
+| `clickup_get_tasks` | Read other tasks for context (related work, past decisions) |
+| `web_search` | Search the web for information |
+| `web_read` | Read and extract information from a URL |
+
+**Pluggable tools (configured per instance):**
+
+| Tool Pack | Tools Included | Use Case |
+|-----------|---------------|----------|
+| **Email** | `send_email`, `check_inbox`, `draft_reply` | Outreach, follow-ups, communications |
+| **Calendar** | `check_availability`, `create_event`, `send_invite` | Scheduling, event planning |
+| **Documents** | `create_doc`, `edit_doc`, `share_doc` | Reports, proposals, content |
+| **Code** | `git_branch`, `commit`, `create_pr`, `push` | Software development (existing Clawup capability) |
+| **Slack** | `send_message`, `post_channel`, `read_channel` | Internal communications |
+| **CRM** | `lookup_contact`, `update_deal`, `log_activity` | Sales operations |
+| **Spreadsheets** | `create_sheet`, `update_cells`, `add_chart` | Data, budgets, tracking |
+
+**The tools are the moat.** Every new tool pack makes Clawup useful for another business function. The core engine (poll → execute → report → approve) stays the same. The tools determine *what kind of work* the agent can do.
+
+**Tool permission model:** Some tools are auto-approved (research, creating ClickUp tasks, posting comments). Others require human approval via the `pending approval` status (sending emails, spending money, publishing content). This is configured in `clawup.config.mjs`:
+
+```javascript
+export default {
+  // Tools that require human approval before execution
+  gatedTools: ['send_email', 'create_event', 'send_invite', 'publish'],
+
+  // Tools that execute automatically
+  autoTools: ['web_search', 'web_read', 'clickup_create_task', 'clickup_comment'],
+};
+```
+
+### Task Expansion: The Recursive Engine
+
+This is the architecture's most powerful feature. When Claude encounters a complex task, it doesn't try to do everything in one pass. It **decomposes**:
+
+```
+processTask("Plan Q1 marketing campaign")
+  ↓
+Claude creates subtasks:
+  ├── "Analyze Q4 campaign performance" (to do — will auto-process)
+  ├── "Research competitor campaigns" (to do — will auto-process)
+  ├── "Draft campaign strategy doc" (to do — depends on research)
+  ├── "Create content calendar" (to do — depends on strategy)
+  └── "Draft launch email sequence" (to do — depends on calendar)
+  ↓
+Clawup sees new "to do" subtasks → picks them up → processes them
+  ↓
+Each subtask may create MORE subtasks
+  ↓
+Work cascades down the tree until everything is "complete"
+  ↓
+Parent task auto-completes when all children are done
+```
+
+**Depth control:** The agent has a configurable maximum depth (default: 3 levels). Beyond that, it comments "This needs further breakdown by a human" and moves to `needs input`. This prevents runaway expansion.
+
+**Priority inheritance:** Subtasks inherit the parent's priority. Urgent parent = urgent children. This means the agent works on the most important branches first.
+
+**Context threading:** When the agent works on a subtask, it reads the parent task and sibling tasks for context. It knows "Research catering" is part of "Plan event in DC" — it doesn't research catering in a vacuum.
 
 ---
 
-## Phase 4: The Platform (Year 4+)
+## Use Cases Across the Business
 
-### ClickUp Becomes the Orchestration Layer for All AI Work
-
-The insight that makes this a platform play: **the task → AI → review → approve → merge pattern works for everything, not just code.**
-
-**Content Teams:**
-- Task: "Write a blog post about our Q4 product updates"
-- AutoDev: Generates draft → Team reviews → Edits addressed → Published to CMS
-
-**Data Teams:**
-- Task: "Create a cohort analysis of users who churned in January"
-- AutoDev: Writes SQL → Generates visualizations → Creates Looker dashboard → Presents findings
-
-**Legal Teams:**
-- Task: "Update our Terms of Service for the new EU data residency feature"
-- AutoDev: Drafts changes → Legal reviews → Compliance checked → Published
-
-**Design Teams:**
-- Task: "Create a dark mode variant of the settings page"
-- AutoDev: Generates Figma designs → Team reviews → Code implementation follows
-
-The ClickUp status workflow engine — the same one Clawup uses today (`to do → in progress → in review → approved → complete`) — becomes the universal orchestration pattern for AI work across every department.
-
-### The Enterprise Nervous System
-
-For large enterprises, ClickUp + AutoDev becomes the **nervous system** that connects strategy to execution:
-
+### Operations & Event Planning
 ```
-CEO writes OKR: "Reduce customer onboarding time by 50%"
-    ↓
-VP Engineering creates Epic: "Streamline onboarding flow"
-    ↓
-AutoDev decomposes into features and tasks
-    ↓
-AutoDev implements each task with human checkpoints
-    ↓
-Metrics dashboard auto-updates with deployment data
-    ↓
-ClickUp shows OKR progress: "Onboarding time reduced 34% — 3 tasks remaining"
+"Plan the company holiday party for 200 people in Austin"
+→ Venue research, vendor outreach, budget tracking, invitation drafting,
+  RSVP management, logistics coordination — all as ClickUp subtasks
+  with human approval at decision points
 ```
 
-Strategy → Execution → Measurement. All in one platform. All partially automated.
+### Sales & Business Development
+```
+"Research and prepare outreach for 20 mid-market SaaS companies in healthcare"
+→ Company research, contact finding, personalized email drafting,
+  outreach tasks created in "pending approval", follow-up scheduling,
+  response tracking — CRM updated automatically
+```
+
+### Content & Marketing
+```
+"Create a 5-part blog series on our new product launch"
+→ Topic research, outline creation, draft writing for each post,
+  SEO optimization, social media snippet creation, editorial review
+  tasks — all posted as comments for review, published after approval
+```
+
+### HR & Recruiting
+```
+"Screen the 30 applications for Senior Product Manager"
+→ Resume analysis against job requirements, candidate scoring,
+  shortlist with rationale, interview question prep, scheduling
+  outreach tasks for top candidates (pending approval)
+```
+
+### Customer Success
+```
+"Investigate spike in churn among enterprise accounts this month"
+→ Data analysis, account review, pattern identification, risk assessment,
+  recommended actions for each at-risk account, outreach drafts for
+  CSMs to approve and send
+```
+
+### Finance & Procurement
+```
+"Find and evaluate 3 vendors for our new CRM system"
+→ Market research, feature comparison matrix, pricing analysis,
+  reference check outreach, summary recommendation doc,
+  meeting scheduling tasks for demos
+```
+
+### Software Development (existing capability, enhanced)
+```
+"Implement user authentication with OAuth"
+→ Code implementation via PR (existing Clawup flow), BUT ALSO:
+  documentation tasks, QA test plan tasks, security review tasks,
+  deployment checklist — the full lifecycle, not just the code
+```
 
 ---
 
-## Why ClickUp Wins This Race
+## The Clawup CLI Experience
 
-### 1. The Data Advantage
+### Setup
 
-ClickUp has **billions of tasks** across hundreds of thousands of teams. This is the largest dataset of "what humans want built" paired with "how it got done" on earth. This data can train specialized models that understand task decomposition, effort estimation, and implementation patterns better than any general-purpose AI.
+```bash
+# Install
+npm install -g clawup
 
-### 2. The Workflow Advantage
+# Interactive setup — creates a ClickUp Space with the right statuses,
+# configures API tokens, selects tool packs
+clawup --setup
 
-Clawup's architecture proves that ClickUp's customizable status workflows are the perfect orchestration primitive for AI work. The `to do → in progress → in review → approved → complete` state machine, combined with custom statuses, is a general-purpose AI execution engine. No competitor has this flexibility.
+# Validate configuration
+clawup --check
+```
 
-### 3. The Integration Advantage
+### Running
 
-ClickUp already integrates with GitHub, GitLab, Bitbucket, Figma, Slack, and 100+ other tools. Each integration is a channel through which AutoDev can observe context and take action. This integration surface area compounds the value of AI execution.
+```bash
+# Start the agent — polls ClickUp, processes tasks autonomously
+clawup
 
-### 4. The Trust Advantage
+# Process a single task (for testing)
+clawup --once CU-abc123
 
-Clawup's security model — prompt injection detection, content boundaries, task ID validation, blocked dangerous arguments — is production-hardened. Enterprise customers need to trust that AI won't delete their production database. ClickUp can ship this with confidence because the security architecture is already battle-tested.
+# With specific tool packs enabled
+clawup --tools email,calendar,documents
 
-### 5. The Speed Advantage
+# With verbose output to see the agent's reasoning
+clawup --verbose
+```
 
-Clawup works **today**. It's not a mockup or a pitch deck. It's a functioning pipeline that takes ClickUp tasks, runs Claude Code, creates PRs, handles review feedback, resolves merge conflicts, and merges approved work. The distance from "open-source CLI" to "native ClickUp feature" is an engineering sprint, not a research project.
+### Configuration (`clawup.config.mjs`)
+
+```javascript
+export default {
+  // Custom instructions for the agent
+  prompt: `
+    You are an operations assistant for Acme Corp.
+    Our company is a B2B SaaS startup with 50 employees in Austin, TX.
+    When contacting vendors, always mention we're a growing startup.
+    Budget approvals over $5,000 need CFO sign-off — create a separate
+    approval task assigned to @sarah.
+  `,
+
+  // Tool packs to enable
+  tools: ['email', 'calendar', 'documents', 'web'],
+
+  // Tools that require human approval
+  gatedTools: ['send_email', 'create_event', 'send_invite'],
+
+  // Maximum subtask depth
+  maxDepth: 3,
+
+  // Email configuration
+  email: {
+    from: 'ops@acmecorp.com',
+    signature: 'Best regards,\nAcme Corp Operations Team',
+  },
+};
+```
+
+---
+
+## Why This Is a Billion-Dollar Opportunity for ClickUp
+
+### 1. It Transforms ClickUp's Value Proposition
+
+**Today:** "ClickUp helps you manage your work."
+**Tomorrow:** "ClickUp does your work."
+
+Every competitor (Jira, Asana, Monday, Linear, Notion) is a tracking tool. ClickUp becomes the first project management platform where creating a task doesn't just *record* that work needs to happen — it **triggers the work happening**.
+
+This isn't an incremental improvement. It's a category change. ClickUp stops competing with other PM tools and starts competing with **hiring**.
+
+### 2. It Creates a New Revenue Category
+
+ClickUp currently charges per seat per month for humans. Clawup enables:
+
+- **Agent seats** — pay for the AI agent's capacity (tasks/month, tool access)
+- **Tool pack subscriptions** — email tools, CRM tools, calendar tools as add-ons
+- **Execution minutes** — metered AI compute time for heavy tasks
+- **Hosted Clawup** — managed infrastructure so users don't run their own
+
+This is net-new revenue that doesn't cannibalize existing seats. Companies don't replace human seats with agent seats — they **add agent capacity** on top of their human team.
+
+### 3. It Makes ClickUp Irreplaceable
+
+A PM tool is easy to switch. Export your tasks, import somewhere else. But once your business operations **run through** Clawup on ClickUp:
+
+- Your approval workflows are in ClickUp
+- Your agent's institutional knowledge is in ClickUp (comment history, past tasks)
+- Your tool configurations are in ClickUp
+- Your team's review patterns are in ClickUp
+
+Switching PM tools means losing your AI operations team's memory and workflow. The lock-in is organic — it comes from value, not vendor tricks.
+
+### 4. The Platform Flywheel
+
+```
+More tool packs → more use cases → more users → more tasks processed
+→ better agent performance (from patterns) → more tool packs built
+→ ... (flywheel)
+```
+
+**Community-built tool packs** are the App Store moment. When a HubSpot power user builds a CRM tool pack and shares it, every ClickUp + HubSpot customer benefits. When a real estate agent builds a property research tool pack, every real estate team on ClickUp gets autonomous listing research.
+
+ClickUp becomes the **marketplace for business agent capabilities**.
+
+### 5. The Data Moat
+
+Every task Clawup processes teaches it more about how businesses work:
+
+- How event planning breaks down into subtasks
+- What information salespeople need before outreach
+- How long vendor selection actually takes
+- What approval patterns work for different company sizes
+
+This data — the structure of how work gets decomposed and executed — is proprietary to ClickUp. No competitor has it because no competitor is executing the work.
 
 ---
 
 ## Competitive Landscape
 
-| Competitor | What They Have | What They're Missing |
-|-----------|---------------|---------------------|
-| **Jira + Atlassian Intelligence** | AI suggestions, JQL queries | No execution. AI summarizes; it doesn't build. |
-| **Linear** | Clean UX, AI triage | No code execution. No review loop. No merge automation. |
-| **GitHub Copilot Workspace** | Code generation from issues | No project management. No task orchestration. No multi-cycle review. |
-| **Devin / Cognition** | Autonomous coding agent | No project management integration. No team workflow. Standalone tool. |
-| **Cursor / Windsurf** | AI-powered IDE | Developer-only. No PM/designer access. No task lifecycle management. |
+| Competitor | What They Do | Why Clawup Is Different |
+|-----------|-------------|----------------------|
+| **ChatGPT / Claude** | Chat-based AI assistant | Reactive. You drive the conversation. No task tracking. No approval workflow. No autonomous execution. |
+| **Zapier / Make** | Workflow automation | Pre-defined rules. Can't reason. Can't decompose a novel task. Can't adapt to unexpected situations. |
+| **Virtual Assistants (human)** | Delegated task execution | $15-40/hr. Limited hours. Drops balls. Can't scale. Can't work on 10 things in parallel. |
+| **ClickUp AI / Copilot** | AI features within ClickUp | Suggestions and summaries. Doesn't execute. Doesn't create subtasks autonomously. Doesn't send emails or contact vendors. |
+| **Devin / Cursor** | AI coding agents | Code only. No business operations. No email. No vendor outreach. No event planning. |
+| **Custom GPTs / Agents** | Single-purpose AI bots | No project management. No approval workflow. No task decomposition. No state management. |
 
-**ClickUp AutoDev is the only product that combines:**
-- ✅ Task management (the *what*)
-- ✅ AI execution (the *how*)
-- ✅ Review workflow (the *quality gate*)
-- ✅ Team orchestration (the *who*)
-- ✅ Project tracking (the *progress*)
-
-Every competitor has 1-2 of these. ClickUp can have all 5.
-
----
-
-## The Endgame: Redefining "Productivity Software"
-
-The productivity software market is $80B+ and growing. It's defined by tools that help humans organize and track work. The next era redefines productivity software as tools that **do work alongside humans**.
-
-ClickUp's positioning as "the everything app for work" is prophetic in this context. When "the everything app" can also *execute* the work it tracks, it becomes the most valuable business software on the planet.
-
-The billion-dollar question isn't whether AI will implement tasks from project management tools. It's **who gets there first**. Clawup is the answer: ClickUp already has the working prototype.
+**Clawup is the only system that combines:**
+- Autonomous task execution (it does the work)
+- Recursive task decomposition (it plans the work)
+- Human-in-the-loop approval (it asks before acting)
+- Persistent state management (ClickUp is the memory)
+- Pluggable tool system (it adapts to any business function)
+- Full audit trail (every action is a ClickUp comment)
 
 ---
 
-## Immediate Next Steps
+## Roadmap
 
-### For the Clawup Open-Source Project
-1. **Ship a ClickUp Webhook listener** — Replace polling with real-time event-driven execution
-2. **Add GitLab and Bitbucket support** — Expand beyond GitHub
-3. **Build a web dashboard** — Real-time execution visibility without the terminal
-4. **Create a ClickUp App** — Native integration that appears in the ClickUp UI
-5. **Add metrics and telemetry** — Task completion rates, implementation quality scores, time-to-PR
+### Phase 1: Foundation (Now → 3 months)
+- Core ClickUp tools (create tasks, update status, post comments)
+- Web research tools (search, read pages, extract data)
+- Recursive task expansion with depth control
+- The 8-status workflow system
+- `clawup --setup` creates the ClickUp Space with correct statuses
+- Event planning, research, and analysis use cases work end-to-end
 
-### For ClickUp the Company
-1. **Acquire or partner on Clawup** — The architecture is proven and production-ready
-2. **Build the hosted execution environment** — Secure sandboxed containers for AI code execution
-3. **Ship AutoDev as a beta feature** — Start with 100 teams, measure completion rates and developer satisfaction
-4. **Announce the vision at ClickUp University** — "ClickUp doesn't just manage your work. It does your work."
-5. **File patents** — The task-to-PR lifecycle with multi-cycle AI review is novel and defensible
+### Phase 2: Communication (3 → 6 months)
+- Email tool pack (send, receive, draft, follow up)
+- Calendar tool pack (availability, scheduling, invites)
+- Gated tool approval pattern (pending approval → approved → execute)
+- "Waiting" status with follow-up task scheduling
+- Sales outreach and vendor management use cases work end-to-end
 
----
+### Phase 3: Documents & Deliverables (6 → 9 months)
+- Google Docs / Notion tool pack (create, edit, share)
+- Spreadsheet tool pack (budgets, trackers, reports)
+- File generation (PDF reports, presentations)
+- Attach deliverables to ClickUp tasks
+- Content creation and reporting use cases work end-to-end
 
-## Financial Model
+### Phase 4: Integrations & Platform (9 → 12 months)
+- Slack tool pack (messaging, channel updates)
+- CRM tool packs (Salesforce, HubSpot)
+- Community tool pack SDK (let anyone build tools)
+- Hosted Clawup (no CLI needed — runs in the cloud)
+- ClickUp native app integration (button in the ClickUp UI)
 
-### Conservative Case (3% adoption)
-- 24,000 teams × 5 seats × $75/month = **$108M ARR**
-- Gross margin: 60% (AI compute costs offset by seat pricing)
-- At 15x ARR = **$1.6B enterprise value addition**
-
-### Base Case (8% adoption)
-- 64,000 teams × 7 seats × $85/month = **$457M ARR**
-- At 15x ARR = **$6.8B enterprise value addition**
-
-### Bull Case (15% adoption + expansion to non-engineering)
-- 120,000 teams × 10 seats × $99/month = **$1.43B ARR**
-- At 20x ARR (category creator premium) = **$28.5B enterprise value addition**
-
-The bull case is realistic on a 5-year horizon because the product expands beyond engineering into every department that produces digital output.
-
----
-
-## Summary
-
-Clawup is not a CI/CD tool. It's not a code generation toy. It's the embryo of a new category: **autonomous work execution orchestrated by project management software.**
-
-The architecture is built. The security model is hardened. The multi-cycle review loop works. The merge automation works. The follow-up task creation works. The recovery and resilience patterns work.
-
-What remains is packaging this into a native ClickUp experience and shipping it to 800,000 teams who are *already paying for ClickUp* and would pay significantly more if their tasks could implement themselves.
-
-**The billion-dollar question has been answered. The answer is Clawup.**
+### Phase 5: Intelligence (12+ months)
+- Cross-task learning (agent gets better at decomposition over time)
+- Team-specific adaptation (learns your company's patterns)
+- Proactive suggestions ("Based on past events, you usually book catering 3 weeks before — should I start researching?")
+- Multi-agent coordination (sales agent hands off to onboarding agent)
 
 ---
 
-*"The best way to predict the future is to build it." — Alan Kay*
+## The Endgame
 
-*Clawup already built it. Now ClickUp needs to ship it.*
+Today, businesses hire people to do work and use software to track it.
+
+Tomorrow, businesses use software to do the work, and people make the decisions.
+
+ClickUp is "the everything app for work." Clawup makes it "the everything app that **does** the work."
+
+**The billion-dollar vision isn't about AI features bolted onto a PM tool. It's about the PM tool becoming the command center for an autonomous workforce — where every task is a work order, every status change is a decision, and every comment is a deliverable.**
+
+Clawup is the engine. ClickUp is the interface. The work gets done.
