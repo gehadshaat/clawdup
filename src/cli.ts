@@ -2,6 +2,7 @@
 // Usage:
 //   clawup              Start continuous polling
 //   clawup --once <id>  Process a single task by ID
+//   clawup --interactive  Run Claude in interactive mode (accepts user input)
 //   clawup --check      Validate config and exit
 //   clawup --statuses   Show recommended ClickUp statuses
 //   clawup --setup      Interactive setup wizard
@@ -46,6 +47,8 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
+  const interactive = args.includes("--interactive");
+
   if (args.includes("--once")) {
     const taskIdIndex = args.indexOf("--once") + 1;
     const taskId = args[taskIdIndex];
@@ -54,13 +57,13 @@ async function main(): Promise<void> {
       console.error("Usage: clawup --once <task-id>");
       process.exit(1);
     }
-    await runSingleTask(taskId);
+    await runSingleTask(taskId, { interactive });
     process.exit(0);
   }
 
   // Default: start the continuous polling runner with periodic relaunch
   while (true) {
-    const shouldRelaunch = await startRunner();
+    const shouldRelaunch = await startRunner({ interactive });
     if (!shouldRelaunch) break;
     const { log } = await import("./config.js");
     log("info", "Relaunching runner...\n");
@@ -78,6 +81,7 @@ them, creates GitHub PRs, and updates task statuses.
 Usage:
   clawup                     Start continuous polling
   clawup --once <task-id>    Process a single task
+  clawup --interactive       Run Claude in interactive mode (accepts user input)
   clawup --check             Validate configuration
   clawup --statuses          Show recommended ClickUp statuses
   clawup --setup             Interactive setup wizard
