@@ -261,6 +261,10 @@ For best results, write ClickUp tasks with:
 - **Acceptance criteria** — Use ClickUp checklists
 - **File hints** — Mention specific files or components if relevant
 
+## Disclaimer
+
+This project is a personal open-source tool created and maintained by a ClickUp engineer. It is **not** an official ClickUp product, nor is it endorsed, supported, or affiliated with ClickUp in any way. Use it at your own risk.
+
 ## License
 
 MIT
