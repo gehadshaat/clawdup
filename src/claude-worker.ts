@@ -5,18 +5,82 @@
 //   3. Custom prompt from clawup.config.mjs (if provided)
 
 import { spawn } from "child_process";
-import { existsSync, readFileSync } from "fs";
-import { resolve } from "path";
+import { existsSync, readFileSync, writeFileSync, unlinkSync } from "fs";
+import { resolve, dirname } from "path";
+import { tmpdir } from "os";
+import { fileURLToPath } from "url";
 import {
   CLAUDE_COMMAND,
   CLAUDE_TIMEOUT_MS,
   CLAUDE_MAX_TURNS,
+  CLICKUP_API_TOKEN,
+  CLICKUP_LIST_ID,
+  CLICKUP_PARENT_TASK_ID,
+  STATUS,
   PROJECT_ROOT,
   GIT_ROOT,
   userConfig,
   log,
 } from "./config.js";
 import type { ClickUpTask, ClaudeResult } from "./types.js";
+
+// Path to the compiled MCP server (sibling in dist/)
+const MCP_SERVER_PATH = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "mcp-server.js",
+);
+
+// MCP tool names that must be added to --allowedTools
+const MCP_TOOL_NAMES = [
+  "mcp__clawup__clickup_get_task",
+  "mcp__clawup__clickup_get_tasks_by_status",
+  "mcp__clawup__clickup_create_task",
+  "mcp__clawup__clickup_update_task_status",
+  "mcp__clawup__clickup_add_comment",
+  "mcp__clawup__clickup_get_comments",
+];
+
+/**
+ * Create a temporary MCP config file for Claude Code.
+ * Passes ClickUp credentials and config to the MCP server process.
+ * Returns the config file path and a cleanup function.
+ */
+function createMcpConfig(): { path: string; cleanup: () => void } {
+  const configPath = resolve(
+    tmpdir(),
+    `clawup-mcp-${process.pid}-${Date.now()}.json`,
+  );
+
+  const config = {
+    mcpServers: {
+      clawup: {
+        command: "node",
+        args: [MCP_SERVER_PATH],
+        env: {
+          CLICKUP_API_TOKEN,
+          CLICKUP_LIST_ID,
+          CLICKUP_PARENT_TASK_ID,
+          STATUS_TODO: STATUS.TODO,
+        },
+      },
+    },
+  };
+
+  writeFileSync(configPath, JSON.stringify(config, null, 2));
+  log("debug", `Created MCP config at ${configPath}`);
+
+  return {
+    path: configPath,
+    cleanup: () => {
+      try {
+        unlinkSync(configPath);
+        log("debug", `Cleaned up MCP config at ${configPath}`);
+      } catch {
+        // ignore if already deleted
+      }
+    },
+  };
+}
 
 const NEEDS_INPUT_MARKERS = [
   "NEEDS_MORE_INFO",
@@ -109,6 +173,7 @@ async function runClaudeInteractive(
   taskId: string,
 ): Promise<ClaudeResult> {
   const systemPrompt = buildSystemPrompt(taskPrompt, taskId);
+  const mcpConfig = createMcpConfig();
 
   log("info", `Running Claude Code interactively on task ${taskId}...`);
   log(
@@ -119,6 +184,8 @@ async function runClaudeInteractive(
   const args = [
     systemPrompt,
     "--verbose",
+    "--mcp-config",
+    mcpConfig.path,
     "--max-turns",
     String(CLAUDE_MAX_TURNS),
     "--allowedTools",
@@ -128,6 +195,7 @@ async function runClaudeInteractive(
     "Glob",
     "Grep",
     "Bash",
+    ...MCP_TOOL_NAMES,
   ];
 
   // Allow user config to append extra CLI args, but block dangerous flags
@@ -158,6 +226,7 @@ async function runClaudeInteractive(
     });
 
     proc.on("close", (code: number | null) => {
+      mcpConfig.cleanup();
       log("info", "\nClaude Code interactive session ended.");
 
       resolve({
@@ -172,6 +241,7 @@ async function runClaudeInteractive(
     });
 
     proc.on("error", (err: Error) => {
+      mcpConfig.cleanup();
       log("error", `Failed to spawn Claude Code: ${err.message}`);
       resolve({
         success: false,
@@ -218,6 +288,7 @@ export async function runClaudeOnTask(
   }
 
   const systemPrompt = buildSystemPrompt(taskPrompt, taskId);
+  const mcpConfig = createMcpConfig();
 
   log("info", `Running Claude Code on task ${taskId}...`);
 
@@ -238,6 +309,8 @@ export async function runClaudeOnTask(
       "--output-format",
       "stream-json",
       "--include-partial-messages",
+      "--mcp-config",
+      mcpConfig.path,
       "--max-turns",
       String(CLAUDE_MAX_TURNS),
       "--allowedTools",
@@ -247,6 +320,7 @@ export async function runClaudeOnTask(
       "Glob",
       "Grep",
       "Bash",
+      ...MCP_TOOL_NAMES,
     ];
 
     // Allow user config to append extra CLI args, but block dangerous flags
@@ -387,6 +461,7 @@ export async function runClaudeOnTask(
 
     proc.on("close", (code: number | null) => {
       clearTimeout(timeout);
+      mcpConfig.cleanup();
 
       // Flush any remaining buffer
       if (jsonBuffer.trim()) {
@@ -436,6 +511,7 @@ export async function runClaudeOnTask(
 
     proc.on("error", (err: Error) => {
       clearTimeout(timeout);
+      mcpConfig.cleanup();
       log("error", `Failed to spawn Claude Code: ${err.message}`);
       resolve({
         success: false,
