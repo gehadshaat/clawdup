@@ -55,6 +55,6 @@ There are no tests or linter configured. TypeScript strict mode is the primary c
 
 - **Zero runtime deps:** Everything uses Node built-ins and shelled-out CLI tools
 - **Stream-JSON parsing:** Claude Code output is consumed as JSONL for structured event processing
-- **Security-first:** Task content from ClickUp is treated as untrusted input — prompt injection detection, content sanitization, and boundary markers are enforced
+- **Security-first:** Task content from ClickUp is treated as untrusted input — prompt injection detection, content sanitization, and boundary markers are enforced (see [PROMPT_SAFETY.md](PROMPT_SAFETY.md) for full guidelines)
 - **Config cascade:** Environment variables → `.clawup.env` → `clawup.config.mjs` → defaults
 - **Monorepo aware:** Distinguishes PROJECT_ROOT (cwd) from GIT_ROOT (repo root) for monorepo support
