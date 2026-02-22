@@ -4,7 +4,8 @@
   "description": "Automated pipeline that polls ClickUp for tasks, uses Claude Code to implement them, and creates GitHub PRs",
   "type": "module",
   "bin": {
-    "clawup": "./bin/clawup.js"
+    "clawup": "./bin/clawup.js",
+    "clawup-mcp": "./bin/clawup-mcp.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -32,6 +33,10 @@
     "./runner": {
       "types": "./dist/runner.d.ts",
       "default": "./dist/runner.js"
+    },
+    "./mcp-server": {
+      "types": "./dist/mcp-server.d.ts",
+      "default": "./dist/mcp-server.js"
     }
   },
   "files": [

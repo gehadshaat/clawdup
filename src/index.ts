@@ -31,6 +31,7 @@ export {
   getPRState,
 } from "./git-ops.js";
 export { runClaudeOnTask, generateWorkSummary } from "./claude-worker.js";
+export { MCP_TOOL_NAMES } from "./mcp-server.js";
 export { STATUS, PROJECT_ROOT, GIT_ROOT, log } from "./config.js";
 export type {
   ClickUpTask,
