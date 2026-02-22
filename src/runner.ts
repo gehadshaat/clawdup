@@ -2,7 +2,8 @@
 
 import { existsSync, readFileSync, unlinkSync } from "fs";
 import { resolve } from "path";
-import { POLL_INTERVAL_MS, RELAUNCH_INTERVAL_MS, STATUS, BASE_BRANCH, PROJECT_ROOT, CLICKUP_LIST_ID, CLICKUP_PARENT_TASK_ID, log } from "./config.js";
+import { POLL_INTERVAL_MS, RELAUNCH_INTERVAL_MS, STATUS, BASE_BRANCH, PROJECT_ROOT, CLICKUP_LIST_ID, CLICKUP_PARENT_TASK_ID } from "./config.js";
+import { log, startTimer } from "./logger.js";
 import {
   getTasksByStatus,
   getTaskComments,
@@ -120,9 +121,10 @@ async function processTask(task: ClickUpTask): Promise<void> {
   const slug = slugify(taskName);
   let branchName: string | null = null;
   let prUrl: string | null = null;
+  const timer = startTimer();
 
   log("info", `\n${"=".repeat(60)}`);
-  log("info", `Processing task: ${taskName} (${taskId})`);
+  log("info", `Processing task: ${taskName} (${taskId})`, { taskId });
   log("info", `URL: ${task.url}`);
   log("info", `${"=".repeat(60)}\n`);
 
@@ -244,9 +246,9 @@ async function processTask(task: ClickUpTask): Promise<void> {
         `Please review the PR. When ready, move this task to "${STATUS.APPROVED}" and the automation will merge it.`,
     );
 
-    log("info", `Task ${taskId} completed successfully! PR: ${prUrl}`);
+    log("info", `Task ${taskId} completed successfully! PR: ${prUrl}`, { taskId, elapsed: timer() });
   } catch (err) {
-    log("error", `Error processing task ${taskId}: ${(err as Error).message}`);
+    log("error", `Error processing task ${taskId}: ${(err as Error).message}`, { taskId, elapsed: timer() });
 
     try {
       await notifyTaskCreator(
@@ -551,9 +553,10 @@ async function resolveConflictsWithMerge(
 async function processApprovedTask(task: ClickUpTask): Promise<void> {
   const taskId = task.id;
   const taskName = task.name;
+  const timer = startTimer();
 
   log("info", `\n${"=".repeat(60)}`);
-  log("info", `Merging approved task: ${taskName} (${taskId})`);
+  log("info", `Merging approved task: ${taskName} (${taskId})`, { taskId });
   log("info", `${"=".repeat(60)}\n`);
 
   if (!isValidTaskId(taskId)) {
@@ -625,7 +628,7 @@ async function processApprovedTask(task: ClickUpTask): Promise<void> {
       `🎉 PR merged successfully!\n\n${prUrl}\n\nTask is now complete.`,
     );
 
-    log("info", `Task ${taskId} approved and merged: ${prUrl}`);
+    log("info", `Task ${taskId} approved and merged: ${prUrl}`, { taskId, elapsed: timer() });
   } catch (err) {
     log(
       "error",
@@ -723,9 +726,10 @@ async function collectReviewFeedback(
 async function processReviewTask(task: ClickUpTask): Promise<void> {
   const taskId = task.id;
   const taskName = task.name;
+  const timer = startTimer();
 
   log("info", `\n${"=".repeat(60)}`);
-  log("info", `Processing review feedback: ${taskName} (${taskId})`);
+  log("info", `Processing review feedback: ${taskName} (${taskId})`, { taskId });
   log("info", `${"=".repeat(60)}\n`);
 
   if (!isValidTaskId(taskId)) {
@@ -924,7 +928,7 @@ async function processReviewTask(task: ClickUpTask): Promise<void> {
         `Please review the updated PR. When ready, move this task to "${STATUS.APPROVED}" and the automation will merge it.`,
     );
 
-    log("info", `Review feedback addressed for task ${taskId}. PR updated: ${prUrl}`);
+    log("info", `Review feedback addressed for task ${taskId}. PR updated: ${prUrl}`, { taskId, elapsed: timer() });
   } catch (err) {
     log("error", `Error processing review feedback for task ${taskId}: ${(err as Error).message}`);
 
@@ -958,9 +962,10 @@ async function processReviewTask(task: ClickUpTask): Promise<void> {
 async function processReturningTask(task: ClickUpTask, prUrl: string): Promise<void> {
   const taskId = task.id;
   const taskName = task.name;
+  const timer = startTimer();
 
   log("info", `\n${"=".repeat(60)}`);
-  log("info", `Processing returning task: ${taskName} (${taskId})`);
+  log("info", `Processing returning task: ${taskName} (${taskId})`, { taskId });
   log("info", `Existing PR: ${prUrl}`);
   log("info", `${"=".repeat(60)}\n`);
 
@@ -1169,7 +1174,7 @@ async function processReturningTask(task: ClickUpTask, prUrl: string): Promise<v
         `Please review the PR. When ready, move this task to "${STATUS.APPROVED}" and the automation will merge it.`,
     );
 
-    log("info", `Returning task ${taskId} completed successfully! PR: ${prUrl}`);
+    log("info", `Returning task ${taskId} completed successfully! PR: ${prUrl}`, { taskId, elapsed: timer() });
   } catch (err) {
     log("error", `Error processing returning task ${taskId}: ${(err as Error).message}`);
 
@@ -1201,6 +1206,7 @@ async function processReturningTask(task: ClickUpTask, prUrl: string): Promise<v
  * from the appropriate point in the pipeline.
  */
 async function recoverOrphanedTasks(): Promise<void> {
+  const recoveryTimer = startTimer();
   const inProgressTasks = await getTasksByStatus(STATUS.IN_PROGRESS);
 
   if (inProgressTasks.length === 0) {
@@ -1327,7 +1333,7 @@ async function recoverOrphanedTasks(): Promise<void> {
     }
   }
 
-  log("info", "Orphaned task recovery complete.");
+  log("info", "Orphaned task recovery complete.", { elapsed: recoveryTimer() });
 }
 
 /**
@@ -1336,6 +1342,7 @@ async function recoverOrphanedTasks(): Promise<void> {
 async function pollForTasks(): Promise<void> {
   if (isShuttingDown || isProcessing) return;
 
+  const pollTimer = startTimer();
   try {
     isProcessing = true;
 
@@ -1379,6 +1386,7 @@ async function pollForTasks(): Promise<void> {
     log("error", `Polling error: ${(err as Error).message}`);
   } finally {
     isProcessing = false;
+    log("debug", "Poll cycle completed", { elapsed: pollTimer() });
   }
 }
 

@@ -2,7 +2,8 @@
 
 import { execFile } from "child_process";
 import { promisify } from "util";
-import { BASE_BRANCH, BRANCH_PREFIX, GIT_ROOT, log } from "./config.js";
+import { BASE_BRANCH, BRANCH_PREFIX, GIT_ROOT } from "./config.js";
+import { log } from "./logger.js";
 import type { PullRequestOptions } from "./types.js";
 
 const execFileAsync = promisify(execFile);
@@ -12,7 +13,7 @@ const execFileAsync = promisify(execFile);
  * Uses GIT_ROOT (repo root) so git operations work correctly in monorepos.
  */
 async function git(...args: string[]): Promise<string> {
-  log("info", `$ git ${args.join(" ")}`);
+  log("debug", `$ git ${args.join(" ")}`);
   try {
     const { stdout, stderr } = await execFileAsync("git", args, {
       cwd: GIT_ROOT,
@@ -35,7 +36,7 @@ async function git(...args: string[]): Promise<string> {
  * Run a gh (GitHub CLI) command from the repository root.
  */
 async function gh(...args: string[]): Promise<string> {
-  log("info", `$ gh ${args.join(" ")}`);
+  log("debug", `$ gh ${args.join(" ")}`);
   try {
     const { stdout } = await execFileAsync("gh", args, {
       cwd: GIT_ROOT,
