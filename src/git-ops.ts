@@ -473,3 +473,75 @@ export async function getPRState(prUrl: string): Promise<string> {
   );
   return state.toLowerCase();
 }
+
+/**
+ * Get the review decision for a pull request.
+ * Returns "CHANGES_REQUESTED", "APPROVED", "REVIEW_REQUIRED", or "NONE".
+ * "NONE" means no reviews have been submitted yet.
+ */
+export async function getPRReviewDecision(prUrl: string): Promise<string> {
+  try {
+    const result = await gh(
+      "pr",
+      "view",
+      prUrl,
+      "--json",
+      "reviewDecision",
+      "--jq",
+      ".reviewDecision",
+    );
+    return result ? result.toUpperCase() : "NONE";
+  } catch {
+    return "NONE";
+  }
+}
+
+/**
+ * Get review comments from a pull request.
+ * Returns an array of review comments with author, body, and creation date.
+ */
+export async function getPRReviewComments(
+  prUrl: string,
+): Promise<Array<{ author: string; body: string; createdAt: string }>> {
+  try {
+    const result = await gh(
+      "pr",
+      "view",
+      prUrl,
+      "--json",
+      "reviews",
+      "--jq",
+      '[.reviews[] | select(.body != "") | {author: .author.login, body: .body, createdAt: .submittedAt}]',
+    );
+    if (!result || result === "[]") return [];
+    return JSON.parse(result) as Array<{ author: string; body: string; createdAt: string }>;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Get inline review comments (code-level comments) from a pull request.
+ * Uses the GitHub API via gh to fetch review comments on the diff.
+ */
+export async function getPRInlineComments(
+  prUrl: string,
+): Promise<Array<{ author: string; body: string; path: string; line: number | null; createdAt: string }>> {
+  try {
+    // Extract owner/repo and PR number from the URL
+    const match = prUrl.match(/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/);
+    if (!match) return [];
+    const [, repo, prNumber] = match;
+
+    const result = await gh(
+      "api",
+      `repos/${repo}/pulls/${prNumber}/comments`,
+      "--jq",
+      '[.[] | {author: .user.login, body: .body, path: .path, line: .line, createdAt: .created_at}]',
+    );
+    if (!result || result === "[]") return [];
+    return JSON.parse(result) as Array<{ author: string; body: string; path: string; line: number | null; createdAt: string }>;
+  } catch {
+    return [];
+  }
+}

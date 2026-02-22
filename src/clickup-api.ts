@@ -413,6 +413,62 @@ export function formatTaskForClaude(
 }
 
 /**
+ * Automation comment markers used to identify comments posted by this automation.
+ * Used to determine which comments are "new" (posted after the automation last acted).
+ */
+const AUTOMATION_COMMENT_MARKERS = [
+  "🤖 Automation",
+  "✅ Automation completed",
+  "⚠️ Automation",
+  "❌ Automation",
+  "🔄 Automation",
+  "🔀 PR has merge conflicts",
+  "🔍 Automation needs",
+];
+
+/**
+ * Check if a comment was posted by the automation.
+ */
+function isAutomationComment(commentText: string): boolean {
+  return AUTOMATION_COMMENT_MARKERS.some((marker) => commentText.includes(marker));
+}
+
+/**
+ * Get new ClickUp comments on a task that were posted after the automation's
+ * last comment. These represent human review feedback.
+ * Returns only non-automation comments that appeared after the last automation comment.
+ */
+export async function getNewReviewFeedback(
+  taskId: string,
+): Promise<ClickUpComment[]> {
+  const comments = await getTaskComments(taskId);
+
+  // Find the index of the last automation comment
+  let lastAutomationIdx = -1;
+  for (let i = comments.length - 1; i >= 0; i--) {
+    const text = comments[i]!.comment_text || "";
+    if (isAutomationComment(text)) {
+      lastAutomationIdx = i;
+      break;
+    }
+  }
+
+  // If no automation comment found, there's no baseline — return empty
+  if (lastAutomationIdx === -1) return [];
+
+  // Return all non-automation comments after the last automation comment
+  const newComments: ClickUpComment[] = [];
+  for (let i = lastAutomationIdx + 1; i < comments.length; i++) {
+    const text = comments[i]!.comment_text || "";
+    if (text.trim() && !isAutomationComment(text)) {
+      newComments.push(comments[i]!);
+    }
+  }
+
+  return newComments;
+}
+
+/**
  * Validate that a task ID matches the expected ClickUp format (alphanumeric).
  * Prevents injection through malformed task IDs.
  */

@@ -15,6 +15,7 @@ import {
   validateStatuses,
   findPRUrlInComments,
   createTask,
+  getNewReviewFeedback,
 } from "./clickup-api.js";
 import {
   detectGitHubRepo,
@@ -45,10 +46,14 @@ import {
   checkoutExistingBranch,
   branchHasCommitsAheadOfBase,
   branchHasBeenPushed,
+  getPRReviewDecision,
+  getPRReviewComments,
+  getPRInlineComments,
 } from "./git-ops.js";
 import {
   runClaudeOnTask,
   runClaudeOnConflictResolution,
+  runClaudeOnReviewFeedback,
   extractNeedsInputReason,
   generateCommitMessage,
   generatePRBody,
@@ -644,6 +649,307 @@ async function processApprovedTask(task: ClickUpTask): Promise<void> {
 }
 
 /**
+ * Collect all review feedback for a task from both GitHub PR and ClickUp comments.
+ * Returns a formatted string of all feedback, or null if there's nothing actionable.
+ */
+async function collectReviewFeedback(
+  task: ClickUpTask,
+  prUrl: string,
+): Promise<string | null> {
+  const feedbackParts: string[] = [];
+
+  // Check GitHub PR review decision
+  const reviewDecision = await getPRReviewDecision(prUrl);
+  const changesRequested = reviewDecision === "CHANGES_REQUESTED";
+
+  // Get GitHub PR review comments (top-level review bodies)
+  const prReviewComments = await getPRReviewComments(prUrl);
+  if (prReviewComments.length > 0) {
+    feedbackParts.push("### GitHub PR Reviews");
+    for (const comment of prReviewComments) {
+      const date = comment.createdAt
+        ? new Date(comment.createdAt).toISOString().split("T")[0]
+        : "";
+      feedbackParts.push(`**${comment.author}** (${date}):\n${comment.body}\n`);
+    }
+  }
+
+  // Get GitHub inline (code-level) review comments
+  const inlineComments = await getPRInlineComments(prUrl);
+  if (inlineComments.length > 0) {
+    feedbackParts.push("### GitHub Inline Code Comments");
+    for (const comment of inlineComments) {
+      const location = comment.line ? `${comment.path}:${comment.line}` : comment.path;
+      feedbackParts.push(`**${comment.author}** on \`${location}\`:\n${comment.body}\n`);
+    }
+  }
+
+  // Get new ClickUp comments (posted after automation's last comment)
+  const clickupFeedback = await getNewReviewFeedback(task.id);
+  if (clickupFeedback.length > 0) {
+    feedbackParts.push("### ClickUp Review Comments");
+    for (const comment of clickupFeedback) {
+      const text = comment.comment_text || "";
+      const user = comment.user?.username || "Unknown";
+      const date = comment.date
+        ? new Date(parseInt(comment.date)).toISOString().split("T")[0]
+        : "";
+      feedbackParts.push(`**${user}** (${date}):\n${text}\n`);
+    }
+  }
+
+  // Determine if there's actionable feedback
+  const hasGitHubFeedback = prReviewComments.length > 0 || inlineComments.length > 0;
+  const hasClickUpFeedback = clickupFeedback.length > 0;
+
+  if (!hasGitHubFeedback && !hasClickUpFeedback) {
+    // No feedback from either source
+    if (changesRequested) {
+      // Changes requested but no comments — reviewer may have only used the status
+      return "Changes were requested on the PR but no specific comments were provided. Please review the code and address any issues.";
+    }
+    return null;
+  }
+
+  return feedbackParts.join("\n\n");
+}
+
+/**
+ * Process a task that is in review and has actionable feedback.
+ * Checks out the existing branch, runs Claude with the review feedback,
+ * and pushes the updated changes to the existing PR.
+ */
+async function processReviewTask(task: ClickUpTask): Promise<void> {
+  const taskId = task.id;
+  const taskName = task.name;
+
+  log("info", `\n${"=".repeat(60)}`);
+  log("info", `Processing review feedback: ${taskName} (${taskId})`);
+  log("info", `${"=".repeat(60)}\n`);
+
+  if (!isValidTaskId(taskId)) {
+    log("error", `Invalid task ID format: ${taskId}. Skipping.`);
+    return;
+  }
+
+  // Find the PR URL from the task's comments
+  const prUrl = await findPRUrlInComments(taskId);
+  if (!prUrl) {
+    log("debug", `No PR URL found for in-review task ${taskId}. Skipping.`);
+    return;
+  }
+
+  // Check if the PR is still open
+  const prState = await getPRState(prUrl);
+  if (prState !== "open") {
+    log("debug", `PR is ${prState} for in-review task ${taskId}. Skipping.`);
+    return;
+  }
+
+  // Collect all review feedback
+  const feedback = await collectReviewFeedback(task, prUrl);
+  if (!feedback) {
+    log("debug", `No actionable review feedback for task ${taskId}. Skipping.`);
+    return;
+  }
+
+  log("info", `Found review feedback for task ${taskId}. Addressing it...`);
+
+  // Find the existing branch for this task
+  const branchName = await findBranchForTask(taskId);
+  if (!branchName) {
+    log("error", `No branch found for in-review task ${taskId}`);
+    await notifyTaskCreator(
+      taskId,
+      task.creator,
+      `⚠️ Review feedback was detected but no branch was found to apply changes.\n\n` +
+        `Please resolve this manually.\nPR: ${prUrl}`,
+    );
+    await updateTaskStatus(taskId, STATUS.BLOCKED);
+    return;
+  }
+
+  try {
+    // Move task to in progress while we work on it
+    await updateTaskStatus(taskId, STATUS.IN_PROGRESS);
+
+    await addTaskComment(
+      taskId,
+      `🤖 Automation detected review feedback and is now addressing it.\n\nPR: ${prUrl}`,
+    );
+
+    // Checkout the existing branch
+    await syncBaseBranch();
+    await checkoutExistingBranch(branchName);
+
+    // Merge base branch to get latest changes (handle conflicts if any)
+    const mergedCleanly = await mergeBaseBranch();
+    if (!mergedCleanly) {
+      // There are merge conflicts — try to resolve them first
+      const conflictedFiles = await getConflictedFiles();
+      log("info", `Branch has conflicts with base: ${conflictedFiles.join(", ")}`);
+
+      const conflictResult = await runClaudeOnConflictResolution(conflictedFiles, branchName);
+      if (!conflictResult.success) {
+        await abortMerge();
+        await notifyTaskCreator(
+          taskId,
+          task.creator,
+          `⚠️ Automation detected review feedback but the branch has merge conflicts that could not be resolved automatically.\n\n` +
+            `Conflicted files:\n${conflictedFiles.map((f) => `- \`${f}\``).join("\n")}\n\n` +
+            `Please resolve conflicts manually, then the automation can address the review feedback.\nPR: ${prUrl}`,
+        );
+        await updateTaskStatus(taskId, STATUS.BLOCKED);
+        await returnToBaseBranch();
+        return;
+      }
+
+      // Check if conflicts are truly resolved
+      const remaining = await getConflictedFiles();
+      if (remaining.length > 0) {
+        await abortMerge();
+        await notifyTaskCreator(
+          taskId,
+          task.creator,
+          `⚠️ Some merge conflicts remain after automatic resolution:\n${remaining.map((f) => `- \`${f}\``).join("\n")}\n\nPlease resolve manually.\nPR: ${prUrl}`,
+        );
+        await updateTaskStatus(taskId, STATUS.BLOCKED);
+        await returnToBaseBranch();
+        return;
+      }
+
+      // Commit the merge resolution if Claude didn't already
+      if (await hasChanges()) {
+        await commitMergeResolution();
+      }
+    }
+
+    // Run Claude with the review feedback context
+    const headBefore = await getHeadHash();
+    const comments = await getTaskComments(taskId);
+    const taskPrompt = formatTaskForClaude(task, comments);
+    const result = await runClaudeOnReviewFeedback(
+      taskPrompt,
+      taskId,
+      feedback,
+      { interactive: interactiveMode },
+    );
+    const headAfter = await getHeadHash();
+    const claudeCommitted = headBefore !== headAfter;
+
+    // Process any follow-up tasks
+    await processTodoFile();
+
+    // Handle needs-input case
+    if (result.needsInput) {
+      const reason = extractNeedsInputReason(result.output);
+      log("info", `Review task ${taskId} requires more input: ${reason}`);
+      await notifyTaskCreator(
+        taskId,
+        task.creator,
+        `🔍 Automation needs more information to address the review feedback:\n\n${reason}\n\n` +
+          `Please provide the requested details.\nPR: ${prUrl}`,
+      );
+      await updateTaskStatus(taskId, STATUS.IN_REVIEW);
+      await returnToBaseBranch();
+      return;
+    }
+
+    if (!result.success) {
+      log("error", `Review task ${taskId} failed: ${result.error}`);
+      // If there were partial changes, commit and push them
+      const uncommittedChanges = await hasChanges();
+      if (uncommittedChanges || claudeCommitted) {
+        if (uncommittedChanges) {
+          await commitChanges(`[CU-${taskId}] WIP: review feedback (partial - automation error)`);
+        }
+        await pushBranch(branchName);
+        await notifyTaskCreator(
+          taskId,
+          task.creator,
+          `⚠️ Automation encountered an error while addressing review feedback but made partial changes.\n\n` +
+            `Error: \`${result.error}\`\n\n` +
+            `Partial changes have been pushed to the PR.\nPR: ${prUrl}`,
+        );
+      } else {
+        await notifyTaskCreator(
+          taskId,
+          task.creator,
+          `❌ Automation failed to address review feedback:\n\n\`${result.error}\`\n\n` +
+            `Please address the feedback manually.\nPR: ${prUrl}`,
+        );
+      }
+      await updateTaskStatus(taskId, STATUS.IN_REVIEW);
+      await returnToBaseBranch();
+      return;
+    }
+
+    // Check if Claude actually made changes
+    const uncommittedChanges = await hasChanges();
+    if (!uncommittedChanges && !claudeCommitted) {
+      log("warn", `Claude completed review but made no file changes for task ${taskId}`);
+      await notifyTaskCreator(
+        taskId,
+        task.creator,
+        `⚠️ Automation processed the review feedback but no code changes were produced.\n\n` +
+          `This may mean the feedback was already addressed or Claude couldn't determine what changes to make.\n\n` +
+          `PR: ${prUrl}`,
+      );
+      await updateTaskStatus(taskId, STATUS.IN_REVIEW);
+      await returnToBaseBranch();
+      return;
+    }
+
+    // Commit (fallback if Claude didn't), push, and update the PR
+    if (uncommittedChanges) {
+      log("warn", "Claude left uncommitted changes — committing as fallback");
+      await commitChanges(`[CU-${taskId}] Address review feedback`);
+    }
+    await pushBranch(branchName);
+
+    // Update the PR body with updated details
+    const { stat, files } = await getChangesSummary();
+    const prBody = generatePRBody(task, result.output, files);
+    await updatePullRequest(prUrl, { body: prBody });
+
+    // Move back to in review
+    const workSummary = generateWorkSummary(result.output, stat, files);
+    await updateTaskStatus(taskId, STATUS.IN_REVIEW);
+    await addTaskComment(
+      taskId,
+      `✅ Automation addressed the review feedback! The PR has been updated:\n\n` +
+        `${prUrl}\n\n` +
+        `${workSummary}\n\n` +
+        `Please review the updated PR. When ready, move this task to "${STATUS.APPROVED}" and the automation will merge it.`,
+    );
+
+    log("info", `Review feedback addressed for task ${taskId}. PR updated: ${prUrl}`);
+  } catch (err) {
+    log("error", `Error processing review feedback for task ${taskId}: ${(err as Error).message}`);
+
+    try {
+      await notifyTaskCreator(
+        taskId,
+        task.creator,
+        `❌ Automation encountered an error while addressing review feedback:\n\n` +
+          `\`\`\`\n${(err as Error).message}\n\`\`\`\n\n` +
+          `Please address the feedback manually.\nPR: ${prUrl}`,
+      );
+      await updateTaskStatus(taskId, STATUS.IN_REVIEW);
+    } catch (commentErr) {
+      log("error", `Failed to update task status: ${(commentErr as Error).message}`);
+    }
+  } finally {
+    try {
+      await returnToBaseBranch();
+    } catch {
+      log("warn", "Could not return to base branch after review processing");
+    }
+    await processTodoFile();
+  }
+}
+
+/**
  * Recover tasks that were left "in progress" from a previous crash.
  * For each orphaned task, checks for an existing branch and resumes
  * from the appropriate point in the pipeline.
@@ -792,6 +1098,15 @@ async function pollForTasks(): Promise<void> {
     for (const task of approvedTasks) {
       if (isShuttingDown) break;
       await processApprovedTask(task);
+    }
+
+    if (isShuttingDown) return;
+
+    // Second, check for in-review tasks that have actionable feedback
+    const reviewTasks = await getTasksByStatus(STATUS.IN_REVIEW);
+    for (const task of reviewTasks) {
+      if (isShuttingDown) break;
+      await processReviewTask(task);
     }
 
     if (isShuttingDown) return;
