@@ -253,7 +253,8 @@ async function processTask(task: ClickUpTask): Promise<void> {
         taskId,
         task.creator,
         `❌ Automation encountered an error:\n\n\`\`\`\n${(err as Error).message}\n\`\`\`\n\n` +
-          `The task has been moved to "Blocked". Please investigate and retry.` +
+          `The task has been moved to "Blocked". Please investigate and retry.\n\n` +
+          `See the [Troubleshooting Guide](https://github.com/gehadshaat/clawup/blob/main/TROUBLESHOOTING.md#blocked-tasks-automation-error) for recovery steps.` +
           (prUrl ? `\n\nPR: ${prUrl}` : ""),
       );
       await updateTaskStatus(taskId, STATUS.BLOCKED);
@@ -304,7 +305,8 @@ async function handleNeedsInput(
     task.id,
     task.creator,
     `🔍 Automation needs more information to complete this task:\n\n${reason}\n\n` +
-      `Please add the requested details and move this task back to "${STATUS.TODO}" to retry.`,
+      `Please add the requested details and move this task back to "${STATUS.TODO}" to retry.\n\n` +
+      `See the [Troubleshooting Guide](https://github.com/gehadshaat/clawup/blob/main/TROUBLESHOOTING.md#claude-needs-more-input) for tips on writing better task descriptions.`,
   );
   await updateTaskStatus(task.id, STATUS.REQUIRE_INPUT);
 
@@ -475,7 +477,8 @@ async function resolveConflictsWithMerge(
         `❌ Automation could not resolve merge conflicts automatically.\n\n` +
           `Conflicted files:\n${conflictedFiles.map((f) => `- \`${f}\``).join("\n")}\n\n` +
           `Error: ${result.error || "Claude could not resolve the conflicts"}\n\n` +
-          `Please resolve the conflicts manually.\nPR: ${prUrl}`,
+          `Please resolve the conflicts manually.\nPR: ${prUrl}\n\n` +
+          `See the [Troubleshooting Guide](https://github.com/gehadshaat/clawup/blob/main/TROUBLESHOOTING.md#merge-conflicts) for recovery steps.`,
       );
       await updateTaskStatus(taskId, STATUS.BLOCKED);
       await returnToBaseBranch();
@@ -1429,7 +1432,7 @@ export async function startRunner(options?: { interactive?: boolean }): Promise<
   if (!(await isWorkingTreeClean())) {
     log(
       "error",
-      "Working tree is not clean. Please commit or stash changes before running.",
+      "Working tree is not clean. Please commit or stash changes before running. See TROUBLESHOOTING.md for details.",
     );
     process.exit(1);
   }
