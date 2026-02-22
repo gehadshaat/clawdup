@@ -59,6 +59,7 @@ import type { ClickUpTask, ClaudeResult } from "./types.js";
 let isShuttingDown = false;
 let isProcessing = false;
 let signalHandlersRegistered = false;
+let interactiveMode = false;
 
 const TODO_FILE_PATH = resolve(PROJECT_ROOT, ".clawup.todo.json");
 
@@ -168,7 +169,7 @@ async function processTask(task: ClickUpTask): Promise<void> {
     const headBefore = await getHeadHash();
     const comments = await getTaskComments(taskId);
     const taskPrompt = formatTaskForClaude(task, comments);
-    const result = await runClaudeOnTask(taskPrompt, taskId);
+    const result = await runClaudeOnTask(taskPrompt, taskId, { interactive: interactiveMode });
     const headAfter = await getHeadHash();
     const claudeCommitted = headBefore !== headAfter;
 
@@ -816,7 +817,8 @@ async function pollForTasks(): Promise<void> {
 /**
  * Run a single task by ID (skip polling, process one task).
  */
-export async function runSingleTask(taskId: string): Promise<void> {
+export async function runSingleTask(taskId: string, options?: { interactive?: boolean }): Promise<void> {
+  interactiveMode = options?.interactive ?? false;
   const { getTask } = await import("./clickup-api.js");
   const task = await getTask(taskId);
   await processTask(task);
@@ -826,10 +828,11 @@ export async function runSingleTask(taskId: string): Promise<void> {
  * Start the continuous polling loop.
  * Returns true if the runner should be relaunched, false on normal shutdown.
  */
-export async function startRunner(): Promise<boolean> {
+export async function startRunner(options?: { interactive?: boolean }): Promise<boolean> {
   // Reset state for fresh run (supports relaunch loop)
   isShuttingDown = false;
   isProcessing = false;
+  interactiveMode = options?.interactive ?? false;
 
   log("info", "=== ClickUp Task Automation Runner ===");
   log("info", `Polling interval: ${POLL_INTERVAL_MS / 1000}s`);
