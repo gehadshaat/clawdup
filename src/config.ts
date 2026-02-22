@@ -90,7 +90,18 @@ function required(name: string): string {
 
 // ClickUp
 export const CLICKUP_API_TOKEN: string = required("CLICKUP_API_TOKEN");
-export const CLICKUP_LIST_ID: string = required("CLICKUP_LIST_ID");
+export const CLICKUP_LIST_ID: string = process.env.CLICKUP_LIST_ID || "";
+export const CLICKUP_PARENT_TASK_ID: string = process.env.CLICKUP_PARENT_TASK_ID || "";
+
+if (!CLICKUP_LIST_ID && !CLICKUP_PARENT_TASK_ID) {
+  console.error(
+    "ERROR: Either CLICKUP_LIST_ID or CLICKUP_PARENT_TASK_ID must be set.",
+  );
+  console.error(
+    "Set one in .clawup.env (in your project root) or export it.",
+  );
+  process.exit(1);
+}
 
 // GitHub
 export const GITHUB_REPO: string = process.env.GITHUB_REPO || "";
