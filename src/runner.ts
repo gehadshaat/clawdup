@@ -35,9 +35,7 @@ import {
   findExistingPR,
   returnToBaseBranch,
   deleteLocalBranch,
-  deleteBranchFully,
   isWorkingTreeClean,
-  ensureCleanState,
   mergePullRequest,
   getPRState,
   getPRMergeability,
@@ -362,9 +360,8 @@ async function processTask(task: ClickUpTask): Promise<void> {
       await cleanupBranch(branchName);
     }
   } finally {
-    // Always ensure clean state and return to base branch
+    // Always return to base branch
     try {
-      await ensureCleanState();
       await returnToBaseBranch();
     } catch {
       log("warn", "Could not return to base branch");
@@ -472,7 +469,6 @@ async function handleError(
  */
 async function cleanupBranch(branchName: string): Promise<void> {
   try {
-    await ensureCleanState();
     await returnToBaseBranch();
     await deleteLocalBranch(branchName);
   } catch {
@@ -498,59 +494,10 @@ async function closePRAndCleanup(
 }
 
 /**
- * Start from scratch: close the old PR, delete the branch, and reimplement
- * the entire feature on a fresh branch using the original task context.
- *
- * Returns the new PR URL if successful, or null on failure.
- */
-async function reimplementFromScratch(
-  task: ClickUpTask,
-  oldPrUrl: string,
-  oldBranchName: string,
-): Promise<string | null> {
-  const taskId = task.id;
-
-  log("info", `Starting from scratch for task ${taskId}: closing old PR, deleting branch, reimplementing`);
-
-  try {
-    // Ensure we're in a clean state and back on base
-    await ensureCleanState();
-    await returnToBaseBranch();
-
-    // Close the old PR
-    try {
-      await closePullRequest(oldPrUrl);
-      log("info", `Closed old PR: ${oldPrUrl}`);
-    } catch {
-      log("debug", "Could not close old PR (may already be closed)");
-    }
-
-    // Delete the old branch (local + remote)
-    await deleteBranchFully(oldBranchName);
-
-    await addTaskComment(
-      taskId,
-      `🔄 Merge conflict resolution failed. Starting from scratch with a fresh implementation.\n\n` +
-        `Old PR closed: ${oldPrUrl}`,
-    );
-
-    // Re-process the task from the beginning (creates new branch, new PR, etc.)
-    await processTask(task);
-    return "reimplemented"; // processTask handles its own PR creation and status updates
-  } catch (err) {
-    log("error", `Failed to reimplement from scratch for task ${taskId}: ${(err as Error).message}`);
-    return null;
-  }
-}
-
-/**
  * Resolve merge conflicts by merging the base branch into the feature branch
  * and using Claude to fix any conflicted files.
  *
- * If conflict resolution fails, falls back to reimplementing from scratch:
- * closes the old PR, deletes the branch, and creates a new implementation.
- *
- * Returns true if conflicts were resolved (or reimplemented), false if everything failed.
+ * Returns true if conflicts were resolved, false if resolution failed.
  */
 async function resolveConflictsWithMerge(
   task: ClickUpTask,
@@ -569,10 +516,6 @@ async function resolveConflictsWithMerge(
     await updateTaskStatus(taskId, STATUS.BLOCKED);
     return false;
   }
-
-  // Build task context for Claude so it can make informed conflict resolution decisions
-  const comments = await getTaskComments(taskId);
-  const taskContext = formatTaskForClaude(task, comments);
 
   try {
     // Checkout the feature branch
@@ -599,34 +542,47 @@ async function resolveConflictsWithMerge(
         `Conflicted files:\n${conflictedFiles.map((f) => `- \`${f}\``).join("\n")}`,
     );
 
-    // Use Claude to resolve the conflicts (with task context for better decisions)
+    // Use Claude to resolve the conflicts
     const headBeforeMerge = await getHeadHash();
-    const result = await runClaudeOnConflictResolution(conflictedFiles, branchName, taskContext);
+    const result = await runClaudeOnConflictResolution(conflictedFiles, branchName);
     const headAfterMerge = await getHeadHash();
     const claudeCommittedMerge = headBeforeMerge !== headAfterMerge;
 
     if (!result.success) {
-      log("warn", `Claude failed to resolve conflicts for task ${taskId} — falling back to reimplementation`);
+      log("error", `Claude failed to resolve conflicts for task ${taskId}`);
       if (!claudeCommittedMerge) {
-        try { await abortMerge(); } catch { /* may not be in merge state */ }
+        await abortMerge();
       }
-
-      // Fallback: start from scratch
-      const reimplResult = await reimplementFromScratch(task, prUrl, branchName);
-      return reimplResult !== null;
+      await notifyTaskCreator(
+        taskId,
+        task.creator,
+        `❌ Automation could not resolve merge conflicts automatically.\n\n` +
+          `Conflicted files:\n${conflictedFiles.map((f) => `- \`${f}\``).join("\n")}\n\n` +
+          `Error: ${result.error || "Claude could not resolve the conflicts"}\n\n` +
+          `Please resolve the conflicts manually.\nPR: ${prUrl}`,
+      );
+      await updateTaskStatus(taskId, STATUS.BLOCKED);
+      await returnToBaseBranch();
+      return false;
     }
 
     // Check if there are still conflict markers in the files
     const remainingConflicts = await getConflictedFiles();
     if (remainingConflicts.length > 0) {
-      log("warn", `Still ${remainingConflicts.length} conflicted file(s) after Claude resolution — falling back to reimplementation`);
+      log("warn", `Still ${remainingConflicts.length} conflicted file(s) after Claude resolution`);
       if (!claudeCommittedMerge) {
-        try { await abortMerge(); } catch { /* may not be in merge state */ }
+        await abortMerge();
       }
-
-      // Fallback: start from scratch
-      const reimplResult = await reimplementFromScratch(task, prUrl, branchName);
-      return reimplResult !== null;
+      await notifyTaskCreator(
+        taskId,
+        task.creator,
+        `⚠️ Claude attempted to resolve merge conflicts but some files still have conflicts:\n\n` +
+          `${remainingConflicts.map((f) => `- \`${f}\``).join("\n")}\n\n` +
+          `Please resolve the remaining conflicts manually.\nPR: ${prUrl}`,
+      );
+      await updateTaskStatus(taskId, STATUS.BLOCKED);
+      await returnToBaseBranch();
+      return false;
     }
 
     // Commit the merge resolution (fallback if Claude didn't) and push
@@ -649,21 +605,22 @@ async function resolveConflictsWithMerge(
   } catch (err) {
     log("error", `Error resolving conflicts for task ${taskId}: ${(err as Error).message}`);
 
-    // Best-effort cleanup and return to base
-    try { await ensureCleanState(); } catch { /* best effort */ }
-    try { await returnToBaseBranch(); } catch { /* best effort */ }
-
-    // Fallback: try reimplementing from scratch
-    log("info", `Attempting to reimplement from scratch after conflict resolution error for task ${taskId}`);
-    const reimplResult = await reimplementFromScratch(task, prUrl, branchName);
-    if (reimplResult !== null) {
-      return true;
+    // Best-effort abort merge and return to base
+    try {
+      await abortMerge();
+    } catch {
+      log("debug", "Could not abort merge (may not be in merge state)");
+    }
+    try {
+      await returnToBaseBranch();
+    } catch {
+      log("debug", "Could not return to base branch after conflict resolution failure");
     }
 
     await notifyTaskCreator(
       taskId,
       task.creator,
-      `❌ Automation could not resolve merge conflicts and reimplementation also failed:\n\n` +
+      `❌ Automation encountered an error while trying to resolve merge conflicts:\n\n` +
         `\`\`\`\n${(err as Error).message}\n\`\`\`\n\n` +
         `Please resolve the conflicts manually.\nPR: ${prUrl}`,
     );
@@ -915,30 +872,13 @@ async function processReturningTask(task: ClickUpTask, prUrl: string): Promise<v
       const conflictedFiles = await getConflictedFiles();
       log("info", `Branch has conflicts with base: ${conflictedFiles.join(", ")}`);
 
-      // Build task context for better conflict resolution
-      const earlyComments = await getTaskComments(taskId);
-      const earlyTaskContext = formatTaskForClaude(task, earlyComments);
-
-      const headBeforeConflict = await getHeadHash();
-      const conflictResult = await runClaudeOnConflictResolution(conflictedFiles, branchName, earlyTaskContext);
-      const headAfterConflict = await getHeadHash();
-      const claudeCommittedConflict = headBeforeConflict !== headAfterConflict;
-
+      const conflictResult = await runClaudeOnConflictResolution(conflictedFiles, branchName);
       if (!conflictResult.success) {
-        if (!claudeCommittedConflict) {
-          try { await abortMerge(); } catch { /* best effort */ }
-        }
-
-        // Fallback: start from scratch
-        log("info", `Conflict resolution failed for returning task ${taskId} — reimplementing from scratch`);
-        try { await ensureCleanState(); } catch { /* best effort */ }
-        const reimplResult = await reimplementFromScratch(task, prUrl, branchName);
-        if (reimplResult !== null) return;
-
+        await abortMerge();
         await notifyTaskCreator(
           taskId,
           task.creator,
-          `⚠️ This task was moved back to TODO but the branch has merge conflicts that could not be resolved, and reimplementation also failed.\n\n` +
+          `⚠️ This task was moved back to TODO but the branch has merge conflicts that could not be resolved automatically.\n\n` +
             `Conflicted files:\n${conflictedFiles.map((f) => `- \`${f}\``).join("\n")}\n\n` +
             `Please resolve conflicts manually.\nPR: ${prUrl}`,
         );
@@ -949,29 +889,18 @@ async function processReturningTask(task: ClickUpTask, prUrl: string): Promise<v
 
       const remaining = await getConflictedFiles();
       if (remaining.length > 0) {
-        if (!claudeCommittedConflict) {
-          try { await abortMerge(); } catch { /* best effort */ }
-        }
-
-        // Fallback: start from scratch
-        log("info", `Remaining conflicts after resolution for returning task ${taskId} — reimplementing from scratch`);
-        try { await ensureCleanState(); } catch { /* best effort */ }
-        const reimplResult = await reimplementFromScratch(task, prUrl, branchName);
-        if (reimplResult !== null) return;
-
+        await abortMerge();
         await notifyTaskCreator(
           taskId,
           task.creator,
-          `⚠️ Some merge conflicts remain after automatic resolution and reimplementation also failed:\n${remaining.map((f) => `- \`${f}\``).join("\n")}\n\nPlease resolve manually.\nPR: ${prUrl}`,
+          `⚠️ Some merge conflicts remain after automatic resolution:\n${remaining.map((f) => `- \`${f}\``).join("\n")}\n\nPlease resolve manually.\nPR: ${prUrl}`,
         );
         await updateTaskStatus(taskId, STATUS.BLOCKED);
         await returnToBaseBranch();
         return;
       }
 
-      if (claudeCommittedConflict) {
-        log("info", "Claude already committed the merge resolution");
-      } else if (await hasChanges()) {
+      if (await hasChanges()) {
         await commitMergeResolution();
       }
     }
@@ -1107,7 +1036,6 @@ async function processReturningTask(task: ClickUpTask, prUrl: string): Promise<v
     }
   } finally {
     try {
-      await ensureCleanState();
       await returnToBaseBranch();
     } catch {
       log("warn", "Could not return to base branch");
@@ -1241,7 +1169,6 @@ async function recoverOrphanedTasks(): Promise<void> {
 
       // Best-effort return to base
       try {
-        await ensureCleanState();
         await returnToBaseBranch();
       } catch {
         log("warn", "Could not return to base branch during recovery");

@@ -361,74 +361,11 @@ export async function branchHasBeenPushed(
 }
 
 /**
- * Check if a merge is in progress.
- */
-export async function isInMergeState(): Promise<boolean> {
-  try {
-    await git("rev-parse", "--verify", "MERGE_HEAD");
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Ensure the working tree is in a clean state so we can switch branches.
- * This handles common dirty states:
- *  - Abort any in-progress merge
- *  - Discard uncommitted changes (staged and unstaged)
- * Call this before operations that require a clean checkout (e.g. returnToBaseBranch).
- */
-export async function ensureCleanState(): Promise<void> {
-  // Abort in-progress merge if any
-  if (await isInMergeState()) {
-    log("warn", "Detected in-progress merge — aborting to restore clean state");
-    try {
-      await git("merge", "--abort");
-    } catch {
-      log("debug", "merge --abort failed (may already be resolved)");
-    }
-  }
-
-  // Discard any uncommitted changes (staged + unstaged + untracked)
-  const status = await git("status", "--porcelain");
-  if (status.length > 0) {
-    log("warn", "Detected uncommitted changes — discarding to restore clean state");
-    await git("reset", "--hard", "HEAD");
-    await git("clean", "-fd");
-  }
-}
-
-/**
  * Clean up: go back to base branch.
- * Ensures any dirty state (in-progress merge, uncommitted changes) is cleaned up first.
  */
 export async function returnToBaseBranch(): Promise<void> {
   log("info", `Returning to ${BASE_BRANCH}`);
-  await ensureCleanState();
   await git("checkout", BASE_BRANCH);
-}
-
-/**
- * Delete a branch both locally and on the remote (best-effort).
- * Used when starting from scratch on a task.
- */
-export async function deleteBranchFully(branchName: string): Promise<void> {
-  // Delete local branch
-  try {
-    await git("branch", "-D", branchName);
-    log("info", `Deleted local branch: ${branchName}`);
-  } catch {
-    log("debug", `Could not delete local branch ${branchName} (may not exist)`);
-  }
-
-  // Delete remote branch (best-effort)
-  try {
-    await git("push", "origin", "--delete", branchName);
-    log("info", `Deleted remote branch: ${branchName}`);
-  } catch {
-    log("debug", `Could not delete remote branch ${branchName} (may not exist)`);
-  }
 }
 
 /**
