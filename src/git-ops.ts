@@ -68,10 +68,61 @@ export async function getCurrentBranch(): Promise<string> {
 }
 
 /**
+ * Ensure the git working tree and index are in a clean state.
+ * Aborts any in-progress merge/rebase/cherry-pick, resets the index,
+ * and cleans untracked files. This is a forceful recovery operation
+ * that allows subsequent git operations (checkout, branch) to succeed
+ * even after a crash or interrupted operation.
+ */
+export async function ensureCleanState(): Promise<void> {
+  log("info", "Ensuring git state is clean before proceeding");
+
+  // Abort any in-progress merge
+  try {
+    await git("merge", "--abort");
+    log("info", "Aborted in-progress merge");
+  } catch {
+    // No merge in progress — ignore
+  }
+
+  // Abort any in-progress rebase
+  try {
+    await git("rebase", "--abort");
+    log("info", "Aborted in-progress rebase");
+  } catch {
+    // No rebase in progress — ignore
+  }
+
+  // Abort any in-progress cherry-pick
+  try {
+    await git("cherry-pick", "--abort");
+    log("info", "Aborted in-progress cherry-pick");
+  } catch {
+    // No cherry-pick in progress — ignore
+  }
+
+  // Reset index and working tree to HEAD
+  try {
+    await git("reset", "--hard");
+  } catch (err) {
+    log("warn", `Failed to reset: ${(err as Error).message}`);
+  }
+
+  // Clean untracked files and directories
+  try {
+    await git("clean", "-fd");
+  } catch (err) {
+    log("warn", `Failed to clean untracked files: ${(err as Error).message}`);
+  }
+}
+
+/**
  * Ensure we're on the base branch and it's up to date.
+ * Forcefully cleans any dirty state first so checkout always succeeds.
  */
 export async function syncBaseBranch(): Promise<void> {
   log("info", `Syncing base branch: ${BASE_BRANCH}`);
+  await ensureCleanState();
   await git("fetch", "origin", BASE_BRANCH);
   await git("checkout", BASE_BRANCH);
   await git("reset", "--hard", `origin/${BASE_BRANCH}`);
@@ -362,9 +413,11 @@ export async function branchHasBeenPushed(
 
 /**
  * Clean up: go back to base branch.
+ * Forcefully cleans any dirty state first so checkout always succeeds.
  */
 export async function returnToBaseBranch(): Promise<void> {
   log("info", `Returning to ${BASE_BRANCH}`);
+  await ensureCleanState();
   await git("checkout", BASE_BRANCH);
 }
 
