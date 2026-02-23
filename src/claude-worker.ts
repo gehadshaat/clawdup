@@ -784,14 +784,17 @@ export async function runClaudeOnReviewFeedback(
  * Run Claude Code to resolve merge conflicts.
  * Gives Claude the list of conflicted files and asks it to resolve
  * the conflict markers, keeping the intent of both sides.
+ * Optionally accepts the original task context to help Claude make
+ * better decisions about which side of the conflict to favor.
  */
 export async function runClaudeOnConflictResolution(
   conflictedFiles: string[],
   branchName: string,
+  taskContext?: string,
 ): Promise<ClaudeResult> {
   const fileList = conflictedFiles.map((f) => `- ${f}`).join("\n");
 
-  const prompt = `You are resolving merge conflicts in the branch "${branchName}".
+  let prompt = `You are resolving merge conflicts in the branch "${branchName}".
 
 The base branch was merged into this feature branch and the following files have merge conflicts:
 
@@ -806,6 +809,16 @@ INSTRUCTIONS:
 6. After resolving all conflicts, commit the merge resolution:
    git add -A && git commit --no-edit
 7. Do NOT push — the automation handles pushing.`;
+
+  if (taskContext) {
+    prompt += `
+
+## Original Task Context
+
+The feature branch was implementing the following task. Use this context to understand which changes belong to the feature and should be preserved:
+
+${taskContext}`;
+  }
 
   log("info", `Running Claude Code to resolve ${conflictedFiles.length} conflicted file(s)...`);
 
