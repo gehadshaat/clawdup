@@ -2,6 +2,37 @@
 
 Checklist for publishing a new version of clawup to the npm registry.
 
+## Prerequisites (one-time setup)
+
+- [ ] **Create an npm account** at [https://www.npmjs.com/signup](https://www.npmjs.com/signup)
+  - Choose a username, provide an email, and set a password
+  - Verify your email address (npm will send a confirmation link)
+- [ ] **Enable two-factor authentication (2FA)** — strongly recommended
+  - Go to [https://www.npmjs.com/settings/~/tfa](https://www.npmjs.com/settings/~/tfa)
+  - Enable 2FA for authorization and publishing (use an authenticator app or security key)
+- [ ] **Reserve the package name** on npm
+  - Check availability: `npm search clawup` or visit [https://www.npmjs.com/package/clawup](https://www.npmjs.com/package/clawup)
+  - If the name `clawup` is taken, you have two options:
+    1. **Use a scoped package** — rename to `@yourscope/clawup` in `package.json` (your npm username is a free scope, e.g. `@gehadshaat/clawup`)
+    2. **Pick a different unscoped name**
+  - To create a scope for an organization, go to [https://www.npmjs.com/org/create](https://www.npmjs.com/org/create) (free for public packages)
+- [ ] **Log in from the CLI**
+  ```bash
+  npm login
+  npm whoami  # should print your npm username
+  ```
+- [ ] **Configure npm publish access** (if using a scoped package)
+  - Scoped packages are private by default. To publish publicly:
+    ```bash
+    npm publish --access public
+    ```
+  - Or add to `package.json`:
+    ```json
+    "publishConfig": {
+      "access": "public"
+    }
+    ```
+
 ## Pre-release
 
 - [ ] Ensure you are on the `main` branch with a clean working tree
@@ -56,10 +87,9 @@ Checklist for publishing a new version of clawup to the npm registry.
 
 ## Publish
 
-- [ ] Log in to npm (if not already authenticated)
+- [ ] Verify you are logged in to npm (see Prerequisites if not)
   ```bash
-  npm login
-  npm whoami  # verify you're logged in as the correct user
+  npm whoami
   ```
 - [ ] Publish to the npm registry
   ```bash
