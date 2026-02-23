@@ -1,6 +1,6 @@
 // Main task runner - orchestrates the full ClickUp -> Claude -> GitHub pipeline
 
-import { existsSync, readFileSync, unlinkSync } from "fs";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import { POLL_INTERVAL_MS, RELAUNCH_INTERVAL_MS, STATUS, BASE_BRANCH, PROJECT_ROOT, CLICKUP_LIST_ID, CLICKUP_PARENT_TASK_ID, log } from "./config.js";
 import {
@@ -68,6 +68,90 @@ let signalHandlersRegistered = false;
 let interactiveMode = false;
 
 const TODO_FILE_PATH = resolve(PROJECT_ROOT, ".clawup.todo.json");
+const LOCK_FILE_PATH = resolve(PROJECT_ROOT, ".clawup.lock");
+
+interface LockFileData {
+  pid: number;
+  startedAt: string;
+}
+
+/**
+ * Check if a process with the given PID is still running.
+ */
+function isProcessRunning(pid: number): boolean {
+  try {
+    // signal 0 doesn't kill, just checks if process exists
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Acquire an exclusive lock to prevent concurrent Clawup instances.
+ * Throws if another instance is already running.
+ */
+function acquireLock(): void {
+  if (existsSync(LOCK_FILE_PATH)) {
+    try {
+      const raw = readFileSync(LOCK_FILE_PATH, "utf-8");
+      const data = JSON.parse(raw) as LockFileData;
+
+      if (data.pid && isProcessRunning(data.pid)) {
+        log(
+          "error",
+          `Another Clawup instance is already running (PID ${data.pid}, started ${data.startedAt}).`,
+        );
+        log(
+          "error",
+          `If this is a stale lock, delete ${LOCK_FILE_PATH} and try again.`,
+        );
+        process.exit(1);
+      }
+
+      // Stale lock — previous process is no longer running
+      log("warn", `Removing stale lock file (PID ${data.pid} is no longer running).`);
+    } catch {
+      // Corrupted lock file — remove it
+      log("warn", "Removing corrupted lock file.");
+    }
+
+    try {
+      unlinkSync(LOCK_FILE_PATH);
+    } catch {
+      // ignore
+    }
+  }
+
+  const lockData: LockFileData = {
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+  };
+
+  writeFileSync(LOCK_FILE_PATH, JSON.stringify(lockData, null, 2));
+  log("debug", `Lock acquired (PID ${process.pid}).`);
+}
+
+/**
+ * Release the lock file if it belongs to this process.
+ */
+function releaseLock(): void {
+  try {
+    if (!existsSync(LOCK_FILE_PATH)) return;
+
+    const raw = readFileSync(LOCK_FILE_PATH, "utf-8");
+    const data = JSON.parse(raw) as LockFileData;
+
+    // Only remove if we own it
+    if (data.pid === process.pid) {
+      unlinkSync(LOCK_FILE_PATH);
+      log("debug", "Lock released.");
+    }
+  } catch {
+    // Best-effort cleanup
+  }
+}
 
 /**
  * Process the .clawup.todo.json file if it exists.
@@ -1143,9 +1227,17 @@ async function pollForTasks(): Promise<void> {
  */
 export async function runSingleTask(taskId: string, options?: { interactive?: boolean }): Promise<void> {
   interactiveMode = options?.interactive ?? false;
-  const { getTask } = await import("./clickup-api.js");
-  const task = await getTask(taskId);
-  await processTask(task);
+
+  // Prevent concurrent instances
+  acquireLock();
+
+  try {
+    const { getTask } = await import("./clickup-api.js");
+    const task = await getTask(taskId);
+    await processTask(task);
+  } finally {
+    releaseLock();
+  }
 }
 
 /**
@@ -1157,6 +1249,9 @@ export async function startRunner(options?: { interactive?: boolean }): Promise<
   isShuttingDown = false;
   isProcessing = false;
   interactiveMode = options?.interactive ?? false;
+
+  // Prevent concurrent instances
+  acquireLock();
 
   log("info", "=== ClickUp Task Automation Runner ===");
   log("info", `Task source: ${CLICKUP_PARENT_TASK_ID ? `parent task ${CLICKUP_PARENT_TASK_ID} (subtasks)` : `list ${CLICKUP_LIST_ID}`}`);
@@ -1198,13 +1293,19 @@ export async function startRunner(options?: { interactive?: boolean }): Promise<
     process.on("SIGINT", () => {
       log("info", "\nReceived SIGINT. Shutting down gracefully...");
       isShuttingDown = true;
+      releaseLock();
       if (!isProcessing) process.exit(0);
     });
 
     process.on("SIGTERM", () => {
       log("info", "\nReceived SIGTERM. Shutting down gracefully...");
       isShuttingDown = true;
+      releaseLock();
       if (!isProcessing) process.exit(0);
+    });
+
+    process.on("exit", () => {
+      releaseLock();
     });
 
     signalHandlersRegistered = true;

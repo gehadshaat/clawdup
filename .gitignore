@@ -5,4 +5,5 @@ node_modules/
 .clawup.env
 .env.clickup
 .clawup.todo.json
+.clawup.lock
 *.tgz
