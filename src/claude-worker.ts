@@ -18,6 +18,33 @@ import {
 } from "./config.js";
 import type { ClickUpTask, ClaudeResult } from "./types.js";
 
+/**
+ * Patterns that may indicate the model output was influenced by prompt injection.
+ * These are checked after Claude finishes to flag suspicious behavior for review.
+ */
+const OUTPUT_SAFETY_PATTERNS: Array<{ pattern: RegExp; description: string }> = [
+  { pattern: /\b(cat|echo|print|type)\b.*\.(env|pem|key|secret|credentials)\b/i, description: "Possible credential file access" },
+  { pattern: /curl\s.*-d\b|wget\s.*--post/i, description: "Possible data exfiltration via HTTP POST" },
+  { pattern: /rm\s+-rf\s+\/(?!\s)/i, description: "Destructive rm -rf on root path" },
+  { pattern: /process\.env\[/i, description: "Accessing process.env programmatically" },
+  { pattern: /CLICKUP_API_TOKEN|GITHUB_TOKEN|API_KEY|SECRET_KEY/i, description: "Reference to known secret names" },
+  { pattern: /base64.*encode|btoa\(/i, description: "Base64 encoding (potential obfuscation)" },
+];
+
+/**
+ * Scan Claude's output for patterns that may indicate compromised behavior.
+ * Returns an array of warning descriptions. Empty array means no issues found.
+ */
+export function scanOutputForSafetyIssues(output: string): string[] {
+  const warnings: string[] = [];
+  for (const { pattern, description } of OUTPUT_SAFETY_PATTERNS) {
+    if (pattern.test(output)) {
+      warnings.push(description);
+    }
+  }
+  return warnings;
+}
+
 const NEEDS_INPUT_MARKERS = [
   "NEEDS_MORE_INFO",
   "REQUIRE_INPUT",
@@ -412,6 +439,12 @@ export async function runClaudeOnTask(
         log("warn", `Claude Code exited with code ${code}`);
       }
 
+      // Post-execution safety scan
+      const safetyWarnings = scanOutputForSafetyIssues(output);
+      if (safetyWarnings.length > 0) {
+        log("warn", `Safety scan flagged ${safetyWarnings.length} issue(s) in Claude output for task ${taskId}: ${safetyWarnings.join("; ")}`);
+      }
+
       const needsInput = NEEDS_INPUT_MARKERS.some((marker) =>
         output.toLowerCase().includes(marker.toLowerCase()),
       );
@@ -708,6 +741,12 @@ export async function runClaudeOnReviewFeedback(
 
       if (code !== 0 && code !== null) {
         log("warn", `Claude Code exited with code ${code}`);
+      }
+
+      // Post-execution safety scan
+      const safetyWarnings = scanOutputForSafetyIssues(output);
+      if (safetyWarnings.length > 0) {
+        log("warn", `Safety scan flagged ${safetyWarnings.length} issue(s) in Claude review output: ${safetyWarnings.join("; ")}`);
       }
 
       const needsInput = NEEDS_INPUT_MARKERS.some((marker) =>
