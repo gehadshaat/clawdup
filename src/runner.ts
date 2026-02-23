@@ -22,6 +22,7 @@ import {
   detectGitHubRepo,
   ensureCleanState,
   syncBaseBranch,
+  pruneLocalBranches,
   createTaskBranch,
   hasChanges,
   getHeadHash,
@@ -1281,6 +1282,10 @@ export async function startRunner(options?: { interactive?: boolean }): Promise<
   // so the runner can always start fresh.
   await ensureCleanState();
   await syncBaseBranch();
+
+  // Clean up stale local branches from previous runs so they don't
+  // interfere with fresh branch creation or cause checkout issues.
+  await pruneLocalBranches();
 
   // Recover any tasks left "in progress" from a previous crash
   await recoverOrphanedTasks();

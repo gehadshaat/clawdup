@@ -103,9 +103,14 @@ export async function ensureCleanState(): Promise<void> {
 
   // Reset index and working tree to HEAD
   try {
-    await git("reset", "--hard");
-  } catch (err) {
-    log("warn", `Failed to reset: ${(err as Error).message}`);
+    await git("reset", "--hard", "HEAD");
+  } catch {
+    // If reset --hard HEAD fails (e.g. invalid HEAD), try without ref
+    try {
+      await git("reset", "--hard");
+    } catch (err) {
+      log("warn", `Failed to reset: ${(err as Error).message}`);
+    }
   }
 
   // Clean untracked files and directories
@@ -119,12 +124,34 @@ export async function ensureCleanState(): Promise<void> {
 /**
  * Ensure we're on the base branch and it's up to date.
  * Forcefully cleans any dirty state first so checkout always succeeds.
+ * Uses force checkout (-f) to bypass broken index states (e.g. unresolved merges).
+ * Falls back to creating the local branch from remote if it doesn't exist locally.
  */
 export async function syncBaseBranch(): Promise<void> {
   log("info", `Syncing base branch: ${BASE_BRANCH}`);
   await ensureCleanState();
   await git("fetch", "origin", BASE_BRANCH);
-  await git("checkout", BASE_BRANCH);
+
+  // Prune stale remote tracking refs (handles deleted remote branches)
+  try {
+    await git("remote", "prune", "origin");
+  } catch {
+    // Non-critical — ignore
+  }
+
+  // Force checkout to bypass broken index (unresolved merges, etc.)
+  try {
+    await git("checkout", "-f", BASE_BRANCH);
+  } catch {
+    // Local branch may not exist (e.g. all branches were deleted).
+    // Create it from remote.
+    try {
+      await git("checkout", "-f", "-B", BASE_BRANCH, `origin/${BASE_BRANCH}`);
+    } catch (err) {
+      throw new Error(`Cannot checkout ${BASE_BRANCH}: ${(err as Error).message}`);
+    }
+  }
+
   await git("reset", "--hard", `origin/${BASE_BRANCH}`);
 }
 
@@ -414,11 +441,47 @@ export async function branchHasBeenPushed(
 /**
  * Clean up: go back to base branch.
  * Forcefully cleans any dirty state first so checkout always succeeds.
+ * Uses force checkout (-f) to bypass broken index states.
  */
 export async function returnToBaseBranch(): Promise<void> {
   log("info", `Returning to ${BASE_BRANCH}`);
   await ensureCleanState();
-  await git("checkout", BASE_BRANCH);
+  try {
+    await git("checkout", "-f", BASE_BRANCH);
+  } catch {
+    // Local branch may not exist — create from remote
+    await git("checkout", "-f", "-B", BASE_BRANCH, `origin/${BASE_BRANCH}`);
+  }
+}
+
+/**
+ * Delete all local branches except the base branch.
+ * This ensures a clean slate when starting, removing stale branches
+ * left from previous runs that may no longer exist on the remote.
+ */
+export async function pruneLocalBranches(): Promise<void> {
+  try {
+    const output = await git("branch", "--list");
+    const branches = output
+      .split("\n")
+      .map((b) => b.trim().replace(/^\*\s*/, ""))
+      .filter((b) => b && b !== BASE_BRANCH);
+
+    for (const branch of branches) {
+      try {
+        await git("branch", "-D", branch);
+        log("info", `Pruned local branch: ${branch}`);
+      } catch {
+        log("debug", `Could not prune branch ${branch}`);
+      }
+    }
+
+    if (branches.length > 0) {
+      log("info", `Pruned ${branches.length} local branch(es)`);
+    }
+  } catch (err) {
+    log("warn", `Failed to prune local branches: ${(err as Error).message}`);
+  }
 }
 
 /**
