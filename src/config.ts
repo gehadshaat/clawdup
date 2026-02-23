@@ -160,7 +160,7 @@ export function log(level: LogLevel, ...args: unknown[]): void {
     const timestamp = new Date().toISOString();
     const prefix = `[${timestamp}] [${level.toUpperCase()}]`;
     if (level === "error") {
-      console.error(prefix, ...args);
+      console.error(`\x1b[31m${prefix}`, ...args, "\x1b[0m");
     } else if (level === "warn") {
       console.warn(prefix, ...args);
     } else {
