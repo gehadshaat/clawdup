@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>clawdup - ClickUp to GitHub PR Automation with Claude Code</title>
-  <meta name="description" content="Automated pipeline that polls ClickUp for tasks, uses Claude Code to implement them, and creates GitHub PRs. Zero runtime dependencies.">
-  <meta property="og:title" content="clawdup - ClickUp to GitHub PR Automation">
-  <meta property="og:description" content="Automated pipeline that polls ClickUp for tasks, uses Claude Code to implement them, and creates GitHub PRs.">
+  <title>clawdup - Turn ClickUp Tasks into GitHub PRs with AI</title>
+  <meta name="description" content="clawdup automates your development workflow: ClickUp tasks go in, GitHub pull requests come out. Powered by Claude Code AI. Zero runtime dependencies.">
+  <meta property="og:title" content="clawdup - Turn ClickUp Tasks into GitHub PRs with AI">
+  <meta property="og:description" content="Automate your development workflow: ClickUp tasks go in, GitHub pull requests come out. Powered by Claude Code AI.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://gehadshaat.github.io/clawdup/">
   <link rel="canonical" href="https://gehadshaat.github.io/clawdup/">
@@ -34,32 +34,99 @@
       <ul class="nav-links">
         <li><a href="#how-it-works">How It Works</a></li>
         <li><a href="#features">Features</a></li>
+        <li><a href="#use-cases">Use Cases</a></li>
         <li><a href="#quickstart">Quick Start</a></li>
         <li><a href="#configuration">Configuration</a></li>
         <li><a href="blog/">Blog</a></li>
-        <li><a href="https://github.com/gehadshaat/clawdup">GitHub</a></li>
+        <li><a href="https://github.com/gehadshaat/clawdup" class="nav-github">GitHub</a></li>
       </ul>
+      <button class="nav-toggle" aria-label="Toggle menu">
+        <span></span><span></span><span></span>
+      </button>
     </div>
   </nav>
 
   <!-- Hero -->
   <section class="hero">
     <div class="hero-inner">
-      <h1>ClickUp tasks to GitHub PRs, <span>automatically</span></h1>
+      <div class="hero-badges">
+        <a href="https://www.npmjs.com/package/clawdup" class="badge">npm package</a>
+        <a href="https://github.com/gehadshaat/clawdup" class="badge">Open Source</a>
+        <span class="badge badge-new">Zero Dependencies</span>
+      </div>
+      <h1>Turn ClickUp tasks into<br><span>pull requests</span></h1>
       <p class="hero-tagline">
-        clawdup polls your ClickUp list for tasks, uses Claude Code to implement them, and creates pull requests &mdash; all without manual intervention.
+        Write a task in ClickUp. clawdup picks it up, uses Claude Code to implement the changes,
+        and opens a PR on GitHub &mdash; ready for your review. No manual coding required.
       </p>
       <div class="hero-actions">
-        <a href="#quickstart" class="btn btn-primary">Get Started</a>
+        <a href="#quickstart" class="btn btn-primary">Get Started Free</a>
         <a href="https://github.com/gehadshaat/clawdup" class="btn btn-outline">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
-          View on GitHub
+          Star on GitHub
         </a>
       </div>
       <div class="hero-install" onclick="navigator.clipboard.writeText('npm install -g clawdup')" title="Click to copy">
         <span class="prompt">$</span>
         <span class="cmd">npm install -g clawdup</span>
         <span class="copy-hint">click to copy</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Value Props -->
+  <section class="section value-props-section">
+    <div class="section-inner">
+      <div class="value-props">
+        <div class="value-prop">
+          <div class="value-number">10x</div>
+          <div class="value-label">Faster task turnaround</div>
+          <p>Tasks move from "to do" to "in review" in minutes, not hours.</p>
+        </div>
+        <div class="value-prop">
+          <div class="value-number">0</div>
+          <div class="value-label">Runtime dependencies</div>
+          <p>Built entirely on Node.js built-ins and CLI tools. Nothing extra to install.</p>
+        </div>
+        <div class="value-prop">
+          <div class="value-number">24/7</div>
+          <div class="value-label">Continuous automation</div>
+          <p>Polls ClickUp every 30 seconds. Tasks get implemented even while you sleep.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Before / After -->
+  <section class="section" id="before-after" style="background: var(--color-surface);">
+    <div class="section-inner">
+      <div class="section-header">
+        <h2>Before &amp; After clawdup</h2>
+        <p>See how clawdup transforms your development workflow.</p>
+      </div>
+      <div class="comparison-grid">
+        <div class="comparison-card comparison-before">
+          <div class="comparison-label">Without clawdup</div>
+          <ol class="comparison-list">
+            <li>Read ClickUp task</li>
+            <li>Create a git branch manually</li>
+            <li>Write the code yourself</li>
+            <li>Commit and push</li>
+            <li>Create PR on GitHub</li>
+            <li>Update ClickUp status</li>
+            <li>Link PR to task manually</li>
+          </ol>
+          <div class="comparison-time">~30&ndash;60 min per task</div>
+        </div>
+        <div class="comparison-card comparison-after">
+          <div class="comparison-label">With clawdup</div>
+          <ol class="comparison-list">
+            <li>Write a clear task in ClickUp</li>
+            <li>clawdup does everything else</li>
+            <li>Review the PR</li>
+          </ol>
+          <div class="comparison-time">~3&ndash;5 min of your time</div>
+        </div>
       </div>
     </div>
   </section>
@@ -122,39 +189,39 @@
   <section class="section" id="features" style="background: var(--color-surface);">
     <div class="section-inner">
       <div class="section-header">
-        <h2>Features</h2>
-        <p>Everything you need for automated task-to-PR workflows.</p>
+        <h2>Built for Real Workflows</h2>
+        <p>Everything you need for automated task-to-PR workflows, nothing you don't.</p>
       </div>
       <div class="features-grid">
         <div class="feature-card">
           <span class="icon">&#9889;</span>
           <h3>Zero Runtime Dependencies</h3>
-          <p>Built entirely on Node.js built-ins and CLI tools. No bloated dependency tree.</p>
+          <p>Built entirely on Node.js built-ins and CLI tools. No bloated dependency tree to worry about.</p>
         </div>
         <div class="feature-card">
           <span class="icon">&#128260;</span>
           <h3>Full Lifecycle Management</h3>
-          <p>Handles the entire flow: polling, branching, implementation, PR creation, and merging.</p>
+          <p>From polling ClickUp to merging PRs &mdash; every step is handled automatically.</p>
         </div>
         <div class="feature-card">
           <span class="icon">&#129302;</span>
           <h3>Claude Code Integration</h3>
-          <p>Uses Anthropic's Claude Code for AI-powered implementation with streaming output.</p>
+          <p>Powered by Anthropic's Claude Code for AI-driven implementation with streaming output.</p>
         </div>
         <div class="feature-card">
           <span class="icon">&#128279;</span>
           <h3>ClickUp Auto-Linking</h3>
-          <p>Branches, commits, and PRs include task IDs so ClickUp automatically links them.</p>
+          <p>Branches, commits, and PRs include task IDs for automatic two-way linking in ClickUp.</p>
         </div>
         <div class="feature-card">
           <span class="icon">&#128193;</span>
           <h3>Monorepo Support</h3>
-          <p>Each workspace package can have its own config pointing to a different ClickUp list.</p>
+          <p>Each workspace package gets its own config pointing to a different ClickUp list.</p>
         </div>
         <div class="feature-card">
           <span class="icon">&#128274;</span>
           <h3>Security First</h3>
-          <p>Task content is treated as untrusted input with prompt injection detection and sanitization.</p>
+          <p>Task content is treated as untrusted with prompt injection detection and content sanitization.</p>
         </div>
         <div class="feature-card">
           <span class="icon">&#128268;</span>
@@ -164,13 +231,75 @@
         <div class="feature-card">
           <span class="icon">&#128218;</span>
           <h3>CLAUDE.md Aware</h3>
-          <p>Automatically includes your project context file in every task prompt.</p>
+          <p>Automatically includes your project context file so Claude understands your codebase.</p>
         </div>
         <div class="feature-card">
           <span class="icon">&#128736;</span>
           <h3>Programmatic API</h3>
-          <p>Import individual modules for custom integrations and workflows.</p>
+          <p>Import individual modules for custom integrations beyond the CLI.</p>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Use Cases -->
+  <section class="section" id="use-cases">
+    <div class="section-inner">
+      <div class="section-header">
+        <h2>Who Is This For?</h2>
+        <p>clawdup works for teams and solo developers who use ClickUp and GitHub.</p>
+      </div>
+      <div class="use-cases-grid">
+        <div class="use-case-card">
+          <div class="use-case-icon">&#128104;&#8205;&#128187;</div>
+          <h3>Solo Developers</h3>
+          <p>Offload routine implementation tasks so you can focus on architecture and code review. Let clawdup handle the boilerplate while you handle the decisions.</p>
+        </div>
+        <div class="use-case-card">
+          <div class="use-case-icon">&#128101;</div>
+          <h3>Small Teams</h3>
+          <p>Multiply your team's output without adding headcount. Queue up tasks in ClickUp and clawdup works through them continuously &mdash; even outside business hours.</p>
+        </div>
+        <div class="use-case-card">
+          <div class="use-case-icon">&#127959;</div>
+          <h3>Agencies &amp; Consultancies</h3>
+          <p>Deliver faster on client projects. Write clear tasks from requirements, let clawdup generate the PRs, then review and ship. More throughput, same quality bar.</p>
+        </div>
+        <div class="use-case-card">
+          <div class="use-case-icon">&#128640;</div>
+          <h3>Open Source Maintainers</h3>
+          <p>Triage issues into ClickUp tasks and let clawdup draft implementations. Spend your time reviewing contributions instead of writing every line yourself.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Demo Terminal -->
+  <section class="section" style="background: var(--color-surface);" id="demo">
+    <div class="section-inner">
+      <div class="section-header">
+        <h2>See It in Action</h2>
+        <p>A single command kicks off the entire automation loop.</p>
+      </div>
+      <div class="demo-terminal">
+        <div class="code-header">
+          <span class="code-dot red"></span>
+          <span class="code-dot yellow"></span>
+          <span class="code-dot green"></span>
+          Terminal
+        </div>
+        <pre><span class="prompt">$</span> clawdup
+<span class="dim">[info]</span>  clawdup v1.0.0 started
+<span class="dim">[info]</span>  Polling ClickUp list 901234567 every 30s...
+<span class="dim">[info]</span>  Found task: <span class="highlight">CU-abc123</span> "Add user avatar upload"
+<span class="dim">[info]</span>  Created branch: <span class="string">clickup/CU-abc123-add-user-avatar-upload</span>
+<span class="dim">[info]</span>  Running Claude Code...
+<span class="dim">[info]</span>  Claude finished — 4 files changed, 127 insertions
+<span class="dim">[info]</span>  Committed: <span class="string">[CU-abc123] Add user avatar upload</span>
+<span class="dim">[info]</span>  Pushed to origin
+<span class="dim">[info]</span>  PR created: <span class="link">#42</span> — ready for review
+<span class="dim">[info]</span>  Task CU-abc123 moved to <span class="status-in-review">in review</span>
+<span class="dim">[info]</span>  Returning to main, polling for next task...</pre>
       </div>
     </div>
   </section>
@@ -180,7 +309,7 @@
     <div class="section-inner">
       <div class="section-header">
         <h2>Quick Start</h2>
-        <p>Get up and running in minutes.</p>
+        <p>Get up and running in under 5 minutes.</p>
       </div>
       <div class="quickstart-grid">
         <div class="quickstart-steps">
@@ -188,7 +317,7 @@
             <div class="step-number">1</div>
             <div class="step-content">
               <h3>Install</h3>
-              <p>Install globally with npm, or use npx for zero-install usage.</p>
+              <p>Install globally with npm, or use <code>npx clawdup</code> for zero-install usage.</p>
             </div>
           </div>
           <div class="step">
@@ -202,14 +331,14 @@
             <div class="step-number">3</div>
             <div class="step-content">
               <h3>Validate</h3>
-              <p>Run <code>clawdup --check</code> to verify your ClickUp connection, statuses, and tool dependencies.</p>
+              <p>Run <code>clawdup --check</code> to verify your ClickUp connection, statuses, and dependencies.</p>
             </div>
           </div>
           <div class="step">
             <div class="step-number">4</div>
             <div class="step-content">
               <h3>Run</h3>
-              <p>Start the automation with <code>clawdup</code>. Create tasks in ClickUp and watch PRs appear.</p>
+              <p>Start with <code>clawdup</code>. Create tasks in ClickUp and watch PRs appear on GitHub.</p>
             </div>
           </div>
         </div>
@@ -309,8 +438,8 @@
   <section class="section" id="configuration">
     <div class="section-inner">
       <div class="section-header">
-        <h2>Configuration</h2>
-        <p>Flexible configuration via environment files and JavaScript config.</p>
+        <h2>Simple Configuration</h2>
+        <p>Two files, a few lines each. That's all you need.</p>
       </div>
       <div class="config-grid">
         <div class="config-card">
@@ -382,16 +511,20 @@ Always write tests.
     </div>
   </section>
 
-  <!-- CTA -->
-  <section class="section">
+  <!-- Final CTA -->
+  <section class="section cta-section">
     <div class="section-inner" style="text-align: center;">
-      <h2 style="font-size: 2rem; margin-bottom: 12px;">Ready to automate?</h2>
-      <p style="color: var(--color-text-muted); font-size: 1.1rem; margin-bottom: 32px; max-width: 480px; margin-left: auto; margin-right: auto;">
-        Start turning ClickUp tasks into pull requests with a single command.
+      <h2>Stop context-switching.<br>Start shipping.</h2>
+      <p class="cta-subtitle">
+        clawdup bridges the gap between your task board and your codebase.
+        Write the task, review the PR &mdash; skip everything in between.
       </p>
       <div class="hero-actions">
         <a href="https://github.com/gehadshaat/clawdup#readme" class="btn btn-primary">Read the Docs</a>
         <a href="https://www.npmjs.com/package/clawdup" class="btn btn-outline">View on npm</a>
+      </div>
+      <div class="cta-install">
+        <code>npm install -g clawdup</code>
       </div>
     </div>
   </section>
@@ -399,18 +532,66 @@ Always write tests.
   <!-- Footer -->
   <footer class="footer">
     <div class="footer-inner">
-      <ul class="footer-links">
-        <li><a href="https://github.com/gehadshaat/clawdup">GitHub</a></li>
-        <li><a href="https://www.npmjs.com/package/clawdup">npm</a></li>
-        <li><a href="https://github.com/gehadshaat/clawdup/issues">Issues</a></li>
-        <li><a href="https://github.com/gehadshaat/clawdup/blob/main/LICENSE">License</a></li>
-      </ul>
-      <p>
-        Created by <a href="https://github.com/gehadshaat">Gehad Shaat</a>.
-        Personal open-source project &mdash; not affiliated with ClickUp.
-      </p>
+      <div class="footer-top">
+        <div class="footer-brand">
+          <span class="nav-logo">claw<span>dup</span></span>
+          <p>Automated ClickUp-to-PR pipeline powered by Claude Code.</p>
+        </div>
+        <div class="footer-col">
+          <h4>Product</h4>
+          <ul>
+            <li><a href="#how-it-works">How It Works</a></li>
+            <li><a href="#features">Features</a></li>
+            <li><a href="#use-cases">Use Cases</a></li>
+            <li><a href="#quickstart">Quick Start</a></li>
+          </ul>
+        </div>
+        <div class="footer-col">
+          <h4>Resources</h4>
+          <ul>
+            <li><a href="https://github.com/gehadshaat/clawdup#readme">Documentation</a></li>
+            <li><a href="https://github.com/gehadshaat/clawdup/blob/main/GUIDE.md">Setup Guide</a></li>
+            <li><a href="https://github.com/gehadshaat/clawdup/blob/main/CONFIGURATION.md">Configuration</a></li>
+            <li><a href="https://github.com/gehadshaat/clawdup/blob/main/TROUBLESHOOTING.md">Troubleshooting</a></li>
+          </ul>
+        </div>
+        <div class="footer-col">
+          <h4>Community</h4>
+          <ul>
+            <li><a href="https://github.com/gehadshaat/clawdup">GitHub</a></li>
+            <li><a href="https://www.npmjs.com/package/clawdup">npm</a></li>
+            <li><a href="https://github.com/gehadshaat/clawdup/issues">Issues</a></li>
+            <li><a href="https://github.com/gehadshaat/clawdup/blob/main/LICENSE">MIT License</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <p>
+          Created by <a href="https://github.com/gehadshaat">Gehad Shaat</a>.
+          Personal open-source project &mdash; not affiliated with ClickUp.
+        </p>
+      </div>
     </div>
   </footer>
+
+  <script>
+    // Mobile nav toggle
+    const toggle = document.querySelector('.nav-toggle');
+    const links = document.querySelector('.nav-links');
+    if (toggle) {
+      toggle.addEventListener('click', () => {
+        links.classList.toggle('open');
+        toggle.classList.toggle('active');
+      });
+      // Close on link click
+      links.querySelectorAll('a').forEach(a => {
+        a.addEventListener('click', () => {
+          links.classList.remove('open');
+          toggle.classList.remove('active');
+        });
+      });
+    }
+  </script>
 
 </body>
 </html>
