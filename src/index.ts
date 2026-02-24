@@ -1,4 +1,4 @@
-// Programmatic API - import this to use clawup from code.
+// Programmatic API - import this to use clawdup from code.
 export { startRunner, runSingleTask } from "./runner.js";
 export {
   getTasksByStatus,

@@ -70,8 +70,8 @@ let signalHandlersRegistered = false;
 let interactiveMode = false;
 let shouldRelaunchAfterMerge = false;
 
-const TODO_FILE_PATH = resolve(PROJECT_ROOT, ".clawup.todo.json");
-const LOCK_FILE_PATH = resolve(PROJECT_ROOT, ".clawup.lock");
+const TODO_FILE_PATH = resolve(PROJECT_ROOT, ".clawdup.todo.json");
+const LOCK_FILE_PATH = resolve(PROJECT_ROOT, ".clawdup.lock");
 
 interface LockFileData {
   pid: number;
@@ -92,7 +92,7 @@ function isProcessRunning(pid: number): boolean {
 }
 
 /**
- * Acquire an exclusive lock to prevent concurrent Clawup instances.
+ * Acquire an exclusive lock to prevent concurrent Clawdup instances.
  * Throws if another instance is already running.
  */
 function acquireLock(): void {
@@ -104,7 +104,7 @@ function acquireLock(): void {
       if (data.pid && isProcessRunning(data.pid)) {
         log(
           "error",
-          `Another Clawup instance is already running (PID ${data.pid}, started ${data.startedAt}).`,
+          `Another Clawdup instance is already running (PID ${data.pid}, started ${data.startedAt}).`,
         );
         log(
           "error",
@@ -157,7 +157,7 @@ function releaseLock(): void {
 }
 
 /**
- * Process the .clawup.todo.json file if it exists.
+ * Process the .clawdup.todo.json file if it exists.
  * Creates new ClickUp tasks for each entry and deletes the file afterward.
  */
 async function processTodoFile(): Promise<void> {
@@ -168,7 +168,7 @@ async function processTodoFile(): Promise<void> {
     const items = JSON.parse(raw) as Array<{ title?: string; description?: string }>;
 
     if (!Array.isArray(items)) {
-      log("warn", ".clawup.todo.json does not contain an array, skipping");
+      log("warn", ".clawdup.todo.json does not contain an array, skipping");
       return;
     }
 
@@ -185,11 +185,11 @@ async function processTodoFile(): Promise<void> {
       }
     }
   } catch (err) {
-    log("error", `Failed to process .clawup.todo.json: ${(err as Error).message}`);
+    log("error", `Failed to process .clawdup.todo.json: ${(err as Error).message}`);
   } finally {
     try {
       unlinkSync(TODO_FILE_PATH);
-      log("debug", "Deleted .clawup.todo.json");
+      log("debug", "Deleted .clawdup.todo.json");
     } catch {
       // ignore if already gone
     }
@@ -354,7 +354,7 @@ async function processTask(task: ClickUpTask): Promise<void> {
         task.creator,
         `❌ Automation encountered an error:\n\n\`\`\`\n${(err as Error).message}\n\`\`\`\n\n` +
           `The task has been moved to "Blocked". Please investigate and retry.\n\n` +
-          `See the [Troubleshooting Guide](https://github.com/gehadshaat/clawup/blob/main/TROUBLESHOOTING.md#blocked-tasks-automation-error) for recovery steps.` +
+          `See the [Troubleshooting Guide](https://github.com/gehadshaat/clawdup/blob/main/TROUBLESHOOTING.md#blocked-tasks-automation-error) for recovery steps.` +
           (prUrl ? `\n\nPR: ${prUrl}` : ""),
       );
       await updateTaskStatus(taskId, STATUS.BLOCKED);
@@ -406,7 +406,7 @@ async function handleNeedsInput(
     task.creator,
     `🔍 Automation needs more information to complete this task:\n\n${reason}\n\n` +
       `Please add the requested details and move this task back to "${STATUS.TODO}" to retry.\n\n` +
-      `See the [Troubleshooting Guide](https://github.com/gehadshaat/clawup/blob/main/TROUBLESHOOTING.md#claude-needs-more-input) for tips on writing better task descriptions.`,
+      `See the [Troubleshooting Guide](https://github.com/gehadshaat/clawdup/blob/main/TROUBLESHOOTING.md#claude-needs-more-input) for tips on writing better task descriptions.`,
   );
   await updateTaskStatus(task.id, STATUS.REQUIRE_INPUT);
 
@@ -578,7 +578,7 @@ async function resolveConflictsWithMerge(
           `Conflicted files:\n${conflictedFiles.map((f) => `- \`${f}\``).join("\n")}\n\n` +
           `Error: ${result.error || "Claude could not resolve the conflicts"}\n\n` +
           `Please resolve the conflicts manually.\nPR: ${prUrl}\n\n` +
-          `See the [Troubleshooting Guide](https://github.com/gehadshaat/clawup/blob/main/TROUBLESHOOTING.md#merge-conflicts) for recovery steps.`,
+          `See the [Troubleshooting Guide](https://github.com/gehadshaat/clawdup/blob/main/TROUBLESHOOTING.md#merge-conflicts) for recovery steps.`,
       );
       await updateTaskStatus(taskId, STATUS.BLOCKED);
       await returnToBaseBranch();

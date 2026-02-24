@@ -1,12 +1,12 @@
-// clawup CLI
+// clawdup CLI
 // Usage:
-//   clawup              Start continuous polling
-//   clawup --once <id>  Process a single task by ID
-//   clawup --interactive  Run Claude in interactive mode (accepts user input)
-//   clawup --check      Validate config and exit
-//   clawup --statuses   Show recommended ClickUp statuses
-//   clawup --setup      Interactive setup wizard
-//   clawup --init       Create example config files in current directory
+//   clawdup              Start continuous polling
+//   clawdup --once <id>  Process a single task by ID
+//   clawdup --interactive  Run Claude in interactive mode (accepts user input)
+//   clawdup --check      Validate config and exit
+//   clawdup --statuses   Show recommended ClickUp statuses
+//   clawdup --setup      Interactive setup wizard
+//   clawdup --init       Create example config files in current directory
 
 import { resolve } from "path";
 import { existsSync, writeFileSync } from "fs";
@@ -62,7 +62,7 @@ async function main(): Promise<void> {
     const taskId = args[taskIdIndex];
     if (!taskId) {
       console.error("Error: --once requires a task ID argument");
-      console.error("Usage: clawup --once <task-id>");
+      console.error("Usage: clawdup --once <task-id>");
       process.exit(1);
     }
     await runSingleTask(taskId, { interactive });
@@ -82,32 +82,32 @@ async function main(): Promise<void> {
 
 function printUsage(): void {
   console.log(`
-clawup
+clawdup
 ===================
 
 Continuously polls a ClickUp list for tasks, uses Claude Code to implement
 them, creates GitHub PRs, and updates task statuses.
 
 Usage:
-  clawup                     Start continuous polling
-  clawup --once <task-id>    Process a single task
-  clawup --interactive       Run Claude in interactive mode (accepts user input)
-  clawup --debug             Enable debug-level logging with timing
-  clawup --json-log          Output logs in JSON format
-  clawup --check             Validate configuration
-  clawup --statuses          Show recommended ClickUp statuses
-  clawup --setup             Interactive setup wizard
-  clawup --init              Create config files in current directory
-  clawup --help              Show this help
+  clawdup                     Start continuous polling
+  clawdup --once <task-id>    Process a single task
+  clawdup --interactive       Run Claude in interactive mode (accepts user input)
+  clawdup --debug             Enable debug-level logging with timing
+  clawdup --json-log          Output logs in JSON format
+  clawdup --check             Validate configuration
+  clawdup --statuses          Show recommended ClickUp statuses
+  clawdup --setup             Interactive setup wizard
+  clawdup --init              Create config files in current directory
+  clawdup --help              Show this help
 
 Configuration:
-  Create a .clawup.env file in your project root with:
+  Create a .clawdup.env file in your project root with:
     CLICKUP_API_TOKEN=pk_xxx
     CLICKUP_LIST_ID=xxx          # Poll tasks from a list
     # OR
     CLICKUP_PARENT_TASK_ID=xxx   # Poll subtasks of a parent task
 
-  Optionally create clawup.config.mjs for custom Claude prompts.
+  Optionally create clawdup.config.mjs for custom Claude prompts.
   Run --init to generate example config files.
 
 Debugging:
@@ -161,10 +161,10 @@ Status names can be customized via environment variables (STATUS_TODO, etc).
 
 async function initProject(): Promise<void> {
   const cwd = process.cwd();
-  const envDest = resolve(cwd, ".clawup.env");
-  const configDest = resolve(cwd, "clawup.config.mjs");
+  const envDest = resolve(cwd, ".clawdup.env");
+  const configDest = resolve(cwd, "clawdup.config.mjs");
 
-  console.log("Initializing clawup in current directory...\n");
+  console.log("Initializing clawdup in current directory...\n");
 
   if (existsSync(envDest)) {
     console.log(`  SKIP  ${envDest} (already exists)`);
@@ -172,7 +172,7 @@ async function initProject(): Promise<void> {
     writeFileSync(
       envDest,
       `# ClickUp Task Automation - Environment Variables
-# Docs: https://github.com/your-org/clawup
+# Docs: https://github.com/your-org/clawdup
 
 # === REQUIRED ===
 
@@ -233,9 +233,9 @@ CLICKUP_LIST_ID=
   } else {
     writeFileSync(
       configDest,
-      `// clawup.config.mjs
+      `// clawdup.config.mjs
 // Optional configuration for customizing Claude Code behavior.
-// This file is loaded automatically when clawup runs.
+// This file is loaded automatically when clawdup runs.
 
 export default {
   // Additional instructions appended to the Claude system prompt.
@@ -255,11 +255,11 @@ Run the formatter/linter after making changes to ensure code style is correct.
 
   console.log(`
 Done! Next steps:
-  1. Edit .clawup.env with your ClickUp API token and list ID
-  2. Optionally customize clawup.config.mjs
-  3. Add .clawup.env to your .gitignore
-  4. Run: clawup --check
-  5. Run: clawup
+  1. Edit .clawdup.env with your ClickUp API token and list ID
+  2. Optionally customize clawdup.config.mjs
+  3. Add .clawdup.env to your .gitignore
+  4. Run: clawdup --check
+  5. Run: clawdup
 `);
 }
 
@@ -371,7 +371,7 @@ async function runChecks({
   }
 
   // Check for config file
-  const configFile = resolve(process.cwd(), "clawup.config.mjs");
+  const configFile = resolve(process.cwd(), "clawdup.config.mjs");
   if (existsSync(configFile)) {
     console.log("  Config file: found");
   } else {
@@ -401,14 +401,14 @@ async function rebuildBeforeRelaunch(): Promise<void> {
 
   const execFileAsync = promisify(execFileCb);
 
-  // Resolve clawup's own package root from the compiled CLI location
+  // Resolve clawdup's own package root from the compiled CLI location
   // (dist/cli.js -> package root)
-  const clawupRoot = resolveFn(dirnameFn(fileURLToPath(import.meta.url)), "..");
+  const clawdupRoot = resolveFn(dirnameFn(fileURLToPath(import.meta.url)), "..");
 
   log("info", "Rebuilding to pick up latest code changes...");
   try {
     await execFileAsync("npm", ["run", "build"], {
-      cwd: clawupRoot,
+      cwd: clawdupRoot,
       timeout: 120000,
     });
     log("info", "Build succeeded. Relaunching...\n");

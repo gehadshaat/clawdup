@@ -233,7 +233,7 @@ describe("generatePRBody", () => {
 
   it("includes automation attribution", () => {
     const body = generatePRBody(baseTask, "output", []);
-    assert.ok(body.includes("clawup"));
+    assert.ok(body.includes("clawdup"));
   });
 });
 
