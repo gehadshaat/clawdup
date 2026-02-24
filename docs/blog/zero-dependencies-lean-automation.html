@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zero Dependencies: Building a Lean Node.js Automation Tool - clawdup Blog</title>
+  <meta name="description" content="Why clawdup has zero runtime dependencies and how we built a full-featured automation pipeline using only Node.js built-ins and CLI tools.">
+  <meta name="keywords" content="Node.js, zero dependencies, automation, lean software, TypeScript, CLI tools, software architecture">
+  <meta property="og:title" content="Zero Dependencies: Building a Lean Node.js Automation Tool">
+  <meta property="og:description" content="How clawdup achieves zero runtime dependencies using only Node.js built-ins and CLI tools.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://gehadshaat.github.io/clawdup/blog/zero-dependencies-lean-automation.html">
+  <meta property="article:published_time" content="2026-02-20">
+  <meta property="article:author" content="Gehad Shaat">
+  <link rel="canonical" href="https://gehadshaat.github.io/clawdup/blog/zero-dependencies-lean-automation.html">
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="blog.css">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "BlogPosting",
+    "headline": "Zero Dependencies: Building a Lean Node.js Automation Tool",
+    "description": "Why clawdup has zero runtime dependencies and how we built a full-featured automation pipeline using only Node.js built-ins.",
+    "datePublished": "2026-02-20",
+    "author": { "@type": "Person", "name": "Gehad Shaat" },
+    "publisher": { "@type": "Person", "name": "Gehad Shaat" },
+    "url": "https://gehadshaat.github.io/clawdup/blog/zero-dependencies-lean-automation.html",
+    "mainEntityOfPage": { "@type": "WebPage", "@id": "https://gehadshaat.github.io/clawdup/blog/zero-dependencies-lean-automation.html" }
+  }
+  </script>
+</head>
+<body>
+
+  <nav class="nav">
+    <div class="nav-inner">
+      <a href="../" class="nav-logo">claw<span>dup</span></a>
+      <ul class="nav-links">
+        <li><a href="../#features">Features</a></li>
+        <li><a href="../#quickstart">Quick Start</a></li>
+        <li><a href="./">Blog</a></li>
+        <li><a href="https://github.com/gehadshaat/clawdup">GitHub</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <article class="blog-post">
+    <header class="blog-post-header">
+      <h1>Zero Dependencies: Building a Lean Node.js Automation Tool</h1>
+      <div class="blog-post-meta">
+        <span class="blog-tag">Architecture</span>
+        <span>February 20, 2026</span>
+        <span>5 min read</span>
+      </div>
+    </header>
+
+    <div class="blog-post-content">
+      <p>clawdup's <code>package.json</code> has exactly two dev dependencies: <code>typescript</code> and <code>@types/node</code>. Zero runtime dependencies. This isn't an accident or a constraint — it's a deliberate architectural decision that makes the tool more reliable, more secure, and easier to maintain.</p>
+
+      <h2>Why Zero Dependencies Matters</h2>
+
+      <p>Every dependency you add to a project is a liability. It's code you don't control, maintained by people you don't know, with release schedules you can't predict. For an automation tool that runs continuously and handles sensitive operations (API tokens, code commits, PR creation), the attack surface of your dependency tree matters.</p>
+
+      <h3>Supply chain security</h3>
+      <p>With zero runtime dependencies, clawdup has zero supply chain attack surface. There are no transitive dependencies that could be compromised. No leftpad incidents. No malicious package updates to worry about. The only code that runs is code in this repository and Node.js itself.</p>
+
+      <h3>Installation reliability</h3>
+      <p>A <code>npm install</code> that downloads zero packages can't fail due to registry outages, version conflicts, or platform-specific native module compilation issues. clawdup installs in seconds and works the same on every platform.</p>
+
+      <h3>Maintenance burden</h3>
+      <p>No dependencies means no Dependabot PRs, no vulnerability alerts for transitive packages, and no time spent evaluating whether a major version bump in a dependency requires code changes. The only updates that matter are Node.js itself and the external CLI tools.</p>
+
+      <h2>What Node.js Gives You for Free</h2>
+
+      <p>Modern Node.js (18+) provides everything clawdup needs as built-in APIs:</p>
+
+      <h3>HTTP requests: native fetch</h3>
+      <p>Node.js 18 introduced native <code>fetch</code>, eliminating the need for <code>axios</code>, <code>node-fetch</code>, or <code>got</code>. The ClickUp API client uses <code>fetch</code> directly with standard <code>Request</code> and <code>Response</code> objects — the same API you'd use in a browser.</p>
+
+      <pre>const response = await fetch(url, {
+  headers: { Authorization: apiToken },
+});
+const data = await response.json();</pre>
+
+      <h3>Child processes: child_process</h3>
+      <p>clawdup orchestrates three CLI tools: <code>git</code>, <code>gh</code> (GitHub CLI), and <code>claude</code> (Claude Code). All three are invoked via <code>child_process.spawn</code> or <code>child_process.execFile</code>, which gives full control over stdio streams, exit codes, and timeouts.</p>
+
+      <p>Using CLI tools instead of API libraries has a major advantage: <strong>authentication is handled by the tools themselves</strong>. <code>gh</code> handles GitHub auth. <code>git</code> handles SSH keys and credential helpers. clawdup doesn't need to know about OAuth tokens or SSH key management.</p>
+
+      <h3>File system: fs/promises</h3>
+      <p>Configuration loading, CLAUDE.md reading, and file existence checks all use <code>fs/promises</code> with async/await. No file system abstraction library needed.</p>
+
+      <h3>Environment parsing: dotenv replacement</h3>
+      <p>Instead of depending on the <code>dotenv</code> package, clawdup includes a simple 20-line parser for <code>.env</code> files. It handles the common cases (key=value pairs, comments, quoted values) without the 15+ transitive dependencies that <code>dotenv</code> alternatives might bring.</p>
+
+      <h2>The CLI-First Architecture</h2>
+
+      <p>One of clawdup's most important design decisions is <strong>shelling out to CLI tools</strong> instead of using API libraries. Here's why:</p>
+
+      <h3>Git operations</h3>
+      <p>There are several Node.js Git libraries (<code>simple-git</code>, <code>isomorphic-git</code>, <code>nodegit</code>). Each adds dozens of dependencies and their own abstractions. But Git itself is already installed on every developer machine, battle-tested across millions of repositories, and has a well-documented CLI interface.</p>
+
+      <p>clawdup runs <code>git checkout -b</code>, <code>git add</code>, <code>git commit</code>, and <code>git push</code> directly. The output is predictable, the error messages are familiar, and debugging is straightforward — you can run the same commands manually to reproduce any issue.</p>
+
+      <h3>GitHub operations</h3>
+      <p>Similarly, the GitHub CLI (<code>gh</code>) handles PR creation and merging. It manages authentication, handles pagination, and provides a stable interface. Using it means clawdup doesn't need to implement GitHub API pagination, rate limiting, or token refresh logic.</p>
+
+      <h3>Claude Code</h3>
+      <p>Claude Code is invoked as a subprocess with JSONL streaming output. This approach gives clawdup real-time visibility into what the AI is doing, the ability to enforce timeouts, and clean process isolation.</p>
+
+      <h2>TypeScript as the Only Build Step</h2>
+
+      <p>clawdup uses TypeScript 5.8 in strict mode, targeting ES2022 with NodeNext module resolution. The build step is a single <code>tsc</code> command that produces JavaScript files in the <code>dist/</code> directory.</p>
+
+      <p>There's no bundler, no Babel, no webpack. TypeScript's strict mode serves as the primary correctness check — it catches type errors, null reference issues, and import problems at compile time. The compiled output is standard ESM JavaScript that Node.js runs directly.</p>
+
+      <h2>Trade-offs</h2>
+
+      <p>The zero-dependency approach isn't without trade-offs:</p>
+
+      <ul>
+        <li><strong>More code to write</strong>: Things like .env file parsing and JSONL stream handling need to be implemented from scratch, rather than importing a library</li>
+        <li><strong>CLI tool requirements</strong>: Users must have <code>git</code>, <code>gh</code>, and <code>claude</code> installed and configured, which adds to the prerequisites list</li>
+        <li><strong>No framework comforts</strong>: There's no Express for HTTP, no Commander for argument parsing — everything is hand-rolled</li>
+      </ul>
+
+      <p>These trade-offs are acceptable because clawdup is a focused tool with a narrow scope. It doesn't need a web framework because it doesn't serve HTTP. It doesn't need a CLI framework because it has a handful of flags. The code it needs to write from scratch is minimal compared to the complexity it avoids by not managing a dependency tree.</p>
+
+      <h2>The Result</h2>
+
+      <p>clawdup installs in seconds, has zero security advisories, requires zero maintenance for dependency updates, and runs reliably on any platform with Node.js 18+. The entire codebase is auditable by reading a handful of TypeScript files — no <code>node_modules</code> rabbit hole to follow.</p>
+
+      <blockquote>
+        <p>The best dependency is the one you don't have.</p>
+      </blockquote>
+
+      <p>For an automation tool that runs continuously, handles API tokens, and commits code to your repository, that simplicity isn't just nice to have — it's a feature.</p>
+    </div>
+
+    <nav class="blog-post-nav">
+      <a href="how-clawdup-turns-clickup-tasks-into-github-prs.html">&larr; Previous: How Clawdup Works</a>
+      <a href="security-first-handling-untrusted-input.html">Next: Security First &rarr;</a>
+    </nav>
+  </article>
+
+  <footer class="footer">
+    <div class="footer-inner">
+      <ul class="footer-links">
+        <li><a href="https://github.com/gehadshaat/clawdup">GitHub</a></li>
+        <li><a href="https://www.npmjs.com/package/clawdup">npm</a></li>
+        <li><a href="https://github.com/gehadshaat/clawdup/issues">Issues</a></li>
+      </ul>
+      <p>Created by <a href="https://github.com/gehadshaat">Gehad Shaat</a>. Personal open-source project &mdash; not affiliated with ClickUp.</p>
+    </div>
+  </footer>
+
+</body>
+</html>

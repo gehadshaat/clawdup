@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>From Idea to Merged PR: A Real-World Clawdup Workflow - clawdup Blog</title>
+  <meta name="description" content="Follow along as we take a feature request from a ClickUp task all the way to a merged pull request — without writing a single line of code manually.">
+  <meta name="keywords" content="clawdup tutorial, workflow automation, ClickUp tutorial, GitHub PR automation, AI coding workflow, developer productivity, step by step guide">
+  <meta property="og:title" content="From Idea to Merged PR: A Real-World Clawdup Workflow">
+  <meta property="og:description" content="A step-by-step walkthrough of a complete clawdup workflow from task creation to merged PR.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://gehadshaat.github.io/clawdup/blog/from-idea-to-merged-pr-workflow.html">
+  <meta property="article:published_time" content="2026-02-16">
+  <meta property="article:author" content="Gehad Shaat">
+  <link rel="canonical" href="https://gehadshaat.github.io/clawdup/blog/from-idea-to-merged-pr-workflow.html">
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="blog.css">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "BlogPosting",
+    "headline": "From Idea to Merged PR: A Real-World Clawdup Workflow",
+    "description": "A step-by-step walkthrough of a complete clawdup workflow from task creation to merged pull request.",
+    "datePublished": "2026-02-16",
+    "author": { "@type": "Person", "name": "Gehad Shaat" },
+    "publisher": { "@type": "Person", "name": "Gehad Shaat" },
+    "url": "https://gehadshaat.github.io/clawdup/blog/from-idea-to-merged-pr-workflow.html",
+    "mainEntityOfPage": { "@type": "WebPage", "@id": "https://gehadshaat.github.io/clawdup/blog/from-idea-to-merged-pr-workflow.html" }
+  }
+  </script>
+</head>
+<body>
+
+  <nav class="nav">
+    <div class="nav-inner">
+      <a href="../" class="nav-logo">claw<span>dup</span></a>
+      <ul class="nav-links">
+        <li><a href="../#features">Features</a></li>
+        <li><a href="../#quickstart">Quick Start</a></li>
+        <li><a href="./">Blog</a></li>
+        <li><a href="https://github.com/gehadshaat/clawdup">GitHub</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <article class="blog-post">
+    <header class="blog-post-header">
+      <h1>From Idea to Merged PR: A Real-World Clawdup Workflow</h1>
+      <div class="blog-post-meta">
+        <span class="blog-tag">Tutorial</span>
+        <span>February 16, 2026</span>
+        <span>9 min read</span>
+      </div>
+    </header>
+
+    <div class="blog-post-content">
+      <p>The best way to understand clawdup is to see it in action. In this post, we'll follow a feature request from the moment it's created in ClickUp all the way to a merged pull request — showing exactly what happens at each step and what the output looks like.</p>
+
+      <h2>The Setup</h2>
+
+      <p>We're working on a Node.js project that already has clawdup configured. The setup looks like:</p>
+
+      <ul>
+        <li>A ClickUp list with the required statuses configured</li>
+        <li>A <code>.clawdup.env</code> file with the API token and list ID</li>
+        <li>A <code>CLAUDE.md</code> file describing the project's coding conventions</li>
+        <li>clawdup running in the background: <code>clawdup</code></li>
+      </ul>
+
+      <p>Everything is ready. Now let's create a task.</p>
+
+      <h2>Step 1: Create the ClickUp Task</h2>
+
+      <p>In ClickUp, we create a new task in our monitored list:</p>
+
+      <ul>
+        <li><strong>Title:</strong> Add rate limiting middleware to API endpoints</li>
+        <li><strong>Description:</strong></li>
+      </ul>
+
+      <pre>Add a rate limiting middleware that:
+- Limits each IP to 100 requests per minute
+- Returns 429 Too Many Requests when exceeded
+- Includes Retry-After header in the response
+- Uses an in-memory store (no Redis dependency)
+- Apply it to all /api/* routes
+
+The middleware should be in src/middleware/rate-limit.ts
+and exported as rateLimitMiddleware.</pre>
+
+      <p>The task is set to "to do" status. Notice how the description is specific — it tells the AI exactly what to build, where to put it, and what constraints to follow. This specificity is key to getting good results.</p>
+
+      <h2>Step 2: Clawdup Picks Up the Task</h2>
+
+      <p>Within 30 seconds, clawdup's polling loop finds the task. In the terminal, you see:</p>
+
+      <pre>[info] Found 1 task(s) with status "to do"
+[info] Processing task CU-abc123: Add rate limiting middleware to API endpoints
+[info] Moving task to "in progress"
+[info] Creating branch: clickup/CU-abc123-add-rate-limiting-middleware-to-api-endpoints</pre>
+
+      <p>In ClickUp, the task status automatically changes to "in progress." Anyone watching the board sees that the automation has picked up the task.</p>
+
+      <h2>Step 3: Claude Code Implements the Task</h2>
+
+      <p>clawdup invokes Claude Code with the task description and project context. In the terminal, you see streaming output as Claude works:</p>
+
+      <pre>[info] Starting Claude Code for task CU-abc123
+[info] Claude: Reading src/middleware/ directory structure
+[info] Claude: Reading src/app.ts to understand route setup
+[info] Claude: Creating src/middleware/rate-limit.ts
+[info] Claude: Editing src/app.ts to apply middleware
+[info] Claude: Implementation complete</pre>
+
+      <p>Behind the scenes, Claude Code has:</p>
+
+      <ol>
+        <li>Read the project structure to understand the existing middleware pattern</li>
+        <li>Examined how routes are set up in the application</li>
+        <li>Created a new rate limiting middleware file following the project's coding conventions</li>
+        <li>Applied the middleware to the appropriate routes</li>
+      </ol>
+
+      <h2>Step 4: PR Creation</h2>
+
+      <p>Once Claude Code finishes, clawdup commits and pushes the changes, then creates a pull request:</p>
+
+      <pre>[info] Changes detected in 2 files
+[info] Committing: [CU-abc123] Add rate limiting middleware to API endpoints
+[info] Pushing branch to origin
+[info] Creating pull request
+[info] PR created: https://github.com/yourorg/yourrepo/pull/42
+[info] Moving task to "in review"
+[info] Posting PR link as comment on ClickUp task</pre>
+
+      <p>The pull request includes:</p>
+
+      <ul>
+        <li>A title with the task ID: <code>[CU-abc123] Add rate limiting middleware to API endpoints</code></li>
+        <li>A description with a link back to the ClickUp task</li>
+        <li>A clean diff showing exactly what was changed</li>
+      </ul>
+
+      <p>In ClickUp, the task moves to "in review" and a comment appears with the PR link. The GitHub integration automatically links the PR to the task because of the <code>CU-abc123</code> identifier in the branch name and PR title.</p>
+
+      <h2>Step 5: Human Review</h2>
+
+      <p>This is where the human comes in. A developer reviews the PR just like any other pull request:</p>
+
+      <ul>
+        <li>Are the changes correct and complete?</li>
+        <li>Does the code follow project conventions?</li>
+        <li>Are there any edge cases or security concerns?</li>
+        <li>Do the tests pass? (CI runs automatically on the PR)</li>
+      </ul>
+
+      <p>The reviewer might leave comments requesting changes. In that case, they can move the ClickUp task back to "to do" with a comment, and clawdup will pick it up again with the updated context.</p>
+
+      <p>If everything looks good, the reviewer moves the ClickUp task to "approved."</p>
+
+      <h2>Step 6: Automatic Merge</h2>
+
+      <p>clawdup detects the "approved" status change and merges the PR:</p>
+
+      <pre>[info] Task CU-abc123 approved - merging PR #42
+[info] PR #42 merged successfully
+[info] Moving task to "complete"</pre>
+
+      <p>The PR is merged, the task moves to "complete," and the feature branch is cleaned up. The entire flow — from task creation to merged code — happened with zero manual coding.</p>
+
+      <h2>What About Edge Cases?</h2>
+
+      <h3>When the AI needs clarification</h3>
+      <p>If the task description is ambiguous or missing critical details, Claude Code can signal that it needs more information. clawdup moves the task to "require input" and posts a comment explaining what's needed:</p>
+
+      <pre>[info] Claude needs clarification for task CU-def456
+[info] Moving task to "require input"
+[info] Comment: "The task mentions adding validation but doesn't specify
+which fields should be validated. Should all fields in the UserInput
+interface be validated, or only specific ones?"</pre>
+
+      <p>The task creator can add the missing information and move the task back to "to do" for another attempt.</p>
+
+      <h3>When an error occurs</h3>
+      <p>If something goes wrong (compilation error, git conflict, timeout), clawdup moves the task to "blocked" with a detailed error comment:</p>
+
+      <pre>[info] Error processing task CU-ghi789: TypeScript compilation failed
+[info] Moving task to "blocked"
+[info] Comment: "Build failed with 2 type errors in src/utils/parser.ts.
+Error details: ..."</pre>
+
+      <h3>When no changes are needed</h3>
+      <p>Sometimes Claude determines that the requested change already exists or isn't needed. In this case, clawdup moves the task to "require input" with an explanation rather than creating an empty PR.</p>
+
+      <h2>Tips for Writing Effective Tasks</h2>
+
+      <p>The quality of clawdup's output depends heavily on the quality of the task description. Here's what works best:</p>
+
+      <h3>Be specific about what to build</h3>
+      <p>Instead of "improve error handling," write "Add try/catch blocks to all database operations in src/db/ and log errors using the existing logger utility."</p>
+
+      <h3>Mention file paths when possible</h3>
+      <p>If you know where the changes should go, say so. "Create the component in src/components/UserAvatar.tsx" is much more effective than "Add a user avatar component somewhere."</p>
+
+      <h3>Include acceptance criteria</h3>
+      <p>Use ClickUp checklists to define what "done" looks like. Each checklist item becomes a clear, testable requirement for the AI.</p>
+
+      <h3>Reference existing patterns</h3>
+      <p>"Follow the same pattern as src/middleware/auth.ts" gives the AI a concrete example to follow, leading to more consistent code.</p>
+
+      <h3>Specify constraints</h3>
+      <p>"Use only Node.js built-ins, no new dependencies" or "This must be backwards-compatible with the existing API" prevents the AI from making unexpected decisions.</p>
+
+      <h2>The Bigger Picture</h2>
+
+      <p>What makes this workflow powerful isn't any single step — it's the <strong>end-to-end automation with human oversight</strong>. The task board is always accurate. Branches follow naming conventions. Commits include task IDs. PRs link back to requirements. And humans stay in control of what actually gets merged.</p>
+
+      <p>For routine tasks — adding configuration options, implementing CRUD endpoints, updating documentation, fixing simple bugs — this workflow can handle the full cycle from idea to merged code. For complex tasks, it produces a solid first draft that a developer can refine during review.</p>
+
+      <p>Either way, the mechanical work (branching, committing, PR creation, status updates) is handled automatically, letting your team focus on the work that actually requires human judgment.</p>
+    </div>
+
+    <nav class="blog-post-nav">
+      <a href="security-first-handling-untrusted-input.html">&larr; Previous: Security First</a>
+      <a href="./">Back to Blog &rarr;</a>
+    </nav>
+  </article>
+
+  <footer class="footer">
+    <div class="footer-inner">
+      <ul class="footer-links">
+        <li><a href="https://github.com/gehadshaat/clawdup">GitHub</a></li>
+        <li><a href="https://www.npmjs.com/package/clawdup">npm</a></li>
+        <li><a href="https://github.com/gehadshaat/clawdup/issues">Issues</a></li>
+      </ul>
+      <p>Created by <a href="https://github.com/gehadshaat">Gehad Shaat</a>. Personal open-source project &mdash; not affiliated with ClickUp.</p>
+    </div>
+  </footer>
+
+</body>
+</html>
