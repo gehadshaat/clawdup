@@ -63,6 +63,7 @@ import {
   generatePRBody,
   generateWorkSummary,
 } from "./claude-worker.js";
+import { runPreflightOrAbort } from "./preflight.js";
 import type { ClickUpTask, ClaudeResult } from "./types.js";
 
 let isShuttingDown = false;
@@ -1568,6 +1569,9 @@ export async function runSingleTask(taskId: string, options?: { interactive?: bo
   if (!DRY_RUN) acquireLock();
 
   try {
+    // Run preflight checks before processing the task
+    await runPreflightOrAbort();
+
     const { getTask } = await import("./clickup-api.js");
     const task = await getTask(taskId);
     await processTask(task);
@@ -1628,6 +1632,10 @@ export async function startRunner(options?: { interactive?: boolean }): Promise<
     log("info", "\n=== DRY RUN complete — no changes were made ===");
     return false;
   }
+
+  // Run preflight environment checks before proceeding.
+  // This validates git state, remote, lock file, and ClickUp connectivity.
+  await runPreflightOrAbort();
 
   // Ensure we start from a clean state — forcefully clean up any
   // leftover dirty state (unresolved merges, uncommitted changes, etc.)
