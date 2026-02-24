@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Superagents: How ClickUp and Clawdup Enable Continuous Project Improvement - clawdup Blog</title>
+  <meta name="description" content="Learn how to combine ClickUp superagents with clawdup to create an autonomous improvement loop that continuously enhances your projects — from signup to setup to your first superagent.">
+  <meta name="keywords" content="ClickUp superagents, clawdup setup, continuous improvement, AI automation, ClickUp tutorial, project automation, autonomous coding, developer productivity">
+  <meta property="og:title" content="Superagents: How ClickUp and Clawdup Enable Continuous Project Improvement">
+  <meta property="og:description" content="Combine ClickUp superagents with clawdup to create an autonomous loop that continuously improves your codebase.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://gehadshaat.github.io/clawdup/blog/superagents-clickup-clawdup-continuous-improvement.html">
+  <meta property="article:published_time" content="2026-02-24">
+  <meta property="article:author" content="Gehad Shaat">
+  <link rel="canonical" href="https://gehadshaat.github.io/clawdup/blog/superagents-clickup-clawdup-continuous-improvement.html">
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="blog.css">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "BlogPosting",
+    "headline": "Superagents: How ClickUp and Clawdup Enable Continuous Project Improvement",
+    "description": "Learn how to combine ClickUp superagents with clawdup to create an autonomous improvement loop that continuously enhances your projects.",
+    "datePublished": "2026-02-24",
+    "author": { "@type": "Person", "name": "Gehad Shaat" },
+    "publisher": { "@type": "Person", "name": "Gehad Shaat" },
+    "url": "https://gehadshaat.github.io/clawdup/blog/superagents-clickup-clawdup-continuous-improvement.html",
+    "mainEntityOfPage": { "@type": "WebPage", "@id": "https://gehadshaat.github.io/clawdup/blog/superagents-clickup-clawdup-continuous-improvement.html" }
+  }
+  </script>
+</head>
+<body>
+
+  <nav class="nav">
+    <div class="nav-inner">
+      <a href="../" class="nav-logo">claw<span>dup</span></a>
+      <ul class="nav-links">
+        <li><a href="../#features">Features</a></li>
+        <li><a href="../#quickstart">Quick Start</a></li>
+        <li><a href="./">Blog</a></li>
+        <li><a href="https://github.com/gehadshaat/clawdup">GitHub</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <article class="blog-post">
+    <header class="blog-post-header">
+      <h1>Superagents: How ClickUp and Clawdup Enable Continuous Project Improvement</h1>
+      <div class="blog-post-meta">
+        <span class="blog-tag">Tutorial</span>
+        <span>February 24, 2026</span>
+        <span>10 min read</span>
+      </div>
+    </header>
+
+    <div class="blog-post-content">
+      <p>What if your project could improve itself? Not just execute one task at a time, but continuously analyze its own codebase, identify improvements, and create tasks to implement them — all without human intervention. That's exactly what happens when you combine ClickUp superagents with clawdup.</p>
+
+      <p>In this guide, we'll walk through everything from signing up for ClickUp to setting up clawdup to creating your first superagent that keeps your project getting better on its own.</p>
+
+      <h2>What Are Superagents?</h2>
+
+      <p>A superagent is a ClickUp Automation that acts as a project manager for your codebase. Instead of a human reviewing the project and filing improvement tasks, a superagent does it automatically. It can:</p>
+
+      <ul>
+        <li>Analyze your codebase and identify areas for improvement</li>
+        <li>Create ClickUp tasks with detailed descriptions of what to change</li>
+        <li>Prioritize tasks based on impact and complexity</li>
+        <li>Continuously run on a schedule to keep finding new improvements</li>
+      </ul>
+
+      <p>When paired with clawdup, those tasks get automatically picked up, implemented by Claude Code, and turned into pull requests. The result is a <strong>continuous improvement loop</strong>: the superagent creates tasks, clawdup implements them, you review and merge the PRs, and the superagent finds the next round of improvements.</p>
+
+      <h2>Part 1: Setting Up ClickUp</h2>
+
+      <h3>Step 1: Sign up for ClickUp</h3>
+
+      <p>If you don't already have an account, head to <strong>clickup.com</strong> and sign up. The free tier works perfectly for this workflow. Here's what to do:</p>
+
+      <ol>
+        <li>Create an account with your email or sign in with Google/GitHub</li>
+        <li>Create a new Workspace (or use an existing one)</li>
+        <li>Create a new Space for your project — name it after your repository</li>
+      </ol>
+
+      <h3>Step 2: Create a List with the right statuses</h3>
+
+      <p>clawdup relies on specific task statuses to manage the automation lifecycle. Create a new List inside your Space and configure these statuses:</p>
+
+      <ul>
+        <li><strong>to do</strong> — Tasks waiting to be picked up</li>
+        <li><strong>in progress</strong> — Currently being implemented by clawdup</li>
+        <li><strong>in review</strong> — PR created, waiting for human review</li>
+        <li><strong>approved</strong> — Reviewed and ready to merge</li>
+        <li><strong>complete</strong> — Merged and done</li>
+        <li><strong>blocked</strong> — Something went wrong during implementation</li>
+        <li><strong>require input</strong> — The AI needs clarification before proceeding</li>
+      </ul>
+
+      <p>You can also use clawdup's built-in setup wizard to create a list with these statuses automatically — more on that in Part 2.</p>
+
+      <h3>Step 3: Get your API credentials</h3>
+
+      <p>You'll need two things from ClickUp:</p>
+
+      <ol>
+        <li><strong>API Token:</strong> Go to Settings &rarr; Apps &rarr; API Token. Generate a personal token.</li>
+        <li><strong>List ID:</strong> Navigate to your list, click the three-dot menu, and select "Copy Link." The List ID is the number at the end of the URL. Alternatively, you can paste the full link when configuring clawdup — it will extract the ID automatically.</li>
+      </ol>
+
+      <h2>Part 2: Setting Up Clawdup</h2>
+
+      <h3>Step 1: Install clawdup</h3>
+
+      <p>clawdup is available on npm. Install it globally:</p>
+
+      <pre>npm install -g clawdup</pre>
+
+      <h3>Step 2: Prerequisites</h3>
+
+      <p>Make sure you have these tools installed and configured:</p>
+
+      <ul>
+        <li><strong>Node.js 18+</strong> — clawdup uses native <code>fetch</code></li>
+        <li><strong>Git</strong> — for branching, committing, and pushing</li>
+        <li><strong>GitHub CLI (<code>gh</code>)</strong> — for creating pull requests. Run <code>gh auth login</code> to authenticate.</li>
+        <li><strong>Claude Code CLI (<code>claude</code>)</strong> — the AI engine that implements tasks. Install it and authenticate with your Anthropic API key.</li>
+      </ul>
+
+      <p>You can verify everything is ready by running:</p>
+
+      <pre>clawdup --check</pre>
+
+      <p>This checks for all required tools and reports any missing dependencies.</p>
+
+      <h3>Step 3: Initialize your project</h3>
+
+      <p>Navigate to your project's root directory and run the setup wizard:</p>
+
+      <pre>cd your-project
+clawdup --setup</pre>
+
+      <p>The wizard will prompt you for:</p>
+
+      <ul>
+        <li>Your ClickUp API token</li>
+        <li>Your ClickUp List ID (or a link to the list)</li>
+        <li>Whether to create a list with default statuses (if you haven't already)</li>
+      </ul>
+
+      <p>This creates a <code>.clawdup.env</code> file in your project root with the configuration. Make sure to add <code>.clawdup.env</code> to your <code>.gitignore</code> — it contains your API token.</p>
+
+      <h3>Step 4: Add a CLAUDE.md file</h3>
+
+      <p>This is the secret sauce. Create a <code>CLAUDE.md</code> file in your project root that describes your project's architecture, coding conventions, and any important context. Claude Code reads this file before implementing any task, ensuring the generated code matches your project's style.</p>
+
+      <p>A good <code>CLAUDE.md</code> includes:</p>
+
+      <ul>
+        <li>Tech stack and language version</li>
+        <li>Project structure overview</li>
+        <li>Naming conventions and coding standards</li>
+        <li>How to build and test the project</li>
+        <li>Key architectural decisions</li>
+      </ul>
+
+      <h3>Step 5: Start clawdup</h3>
+
+      <p>Run clawdup in your project directory:</p>
+
+      <pre>clawdup</pre>
+
+      <p>It will start polling your ClickUp list for tasks with "to do" status. When it finds one, it creates a branch, invokes Claude Code, commits the changes, and creates a PR. The entire pipeline runs autonomously.</p>
+
+      <h2>Part 3: Creating a Superagent</h2>
+
+      <p>Now for the exciting part. A superagent turns this from a "run tasks" tool into a "continuously improve your project" engine.</p>
+
+      <h3>The concept</h3>
+
+      <p>A superagent is a ClickUp Automation that periodically creates improvement tasks in your clawdup-monitored list. It uses ClickUp's built-in AI capabilities to analyze your project and generate actionable tasks.</p>
+
+      <h3>Step 1: Create the Automation</h3>
+
+      <p>In your ClickUp Space, go to <strong>Automations</strong> and create a new automation:</p>
+
+      <ol>
+        <li><strong>Trigger:</strong> Set it to run on a schedule — daily, weekly, or whatever cadence makes sense for your project</li>
+        <li><strong>Action:</strong> Create a task in your clawdup-monitored list</li>
+      </ol>
+
+      <h3>Step 2: Define improvement categories</h3>
+
+      <p>The most effective superagents focus on specific improvement categories. Create separate automations for each category:</p>
+
+      <ul>
+        <li><strong>Code quality:</strong> "Review the codebase for code smells, duplicated logic, or functions that are too long. Create a task to refactor the worst offender."</li>
+        <li><strong>Documentation:</strong> "Find functions or modules that are missing documentation. Create a task to add JSDoc comments to the least-documented file."</li>
+        <li><strong>Testing:</strong> "Identify modules with no test coverage. Create a task to add unit tests for one untested module."</li>
+        <li><strong>Performance:</strong> "Look for obvious performance issues like N+1 queries, unnecessary re-renders, or missing caching. Create a task to fix one."</li>
+        <li><strong>Security:</strong> "Scan for common security issues — hardcoded values that should be environment variables, missing input validation, or outdated patterns. Create a task to fix one."</li>
+      </ul>
+
+      <h3>Step 3: Write effective superagent prompts</h3>
+
+      <p>The key to a good superagent is writing task descriptions that give clawdup enough context to do useful work. Here's a template:</p>
+
+      <pre>Review [specific area] of the codebase and [specific action].
+
+Focus on:
+- [Criterion 1]
+- [Criterion 2]
+- [Criterion 3]
+
+Constraints:
+- Only change one file per task
+- Follow existing coding conventions in CLAUDE.md
+- Do not introduce new dependencies</pre>
+
+      <p>For example, a code quality superagent might create tasks like:</p>
+
+      <pre>Review src/ for functions longer than 50 lines and refactor
+the longest one into smaller, well-named helper functions.
+
+Focus on:
+- Maintaining the same public API
+- Adding clear function names that describe what each piece does
+- Keeping related logic together
+
+Constraints:
+- Only refactor one function per task
+- Do not change any exported function signatures
+- Ensure TypeScript strict mode still passes</pre>
+
+      <h3>Step 4: Control the pace</h3>
+
+      <p>You don't want the superagent to flood your list with tasks. Use these strategies to keep it manageable:</p>
+
+      <ul>
+        <li><strong>Schedule wisely:</strong> Start with one task per day and adjust based on your review capacity</li>
+        <li><strong>Add conditions:</strong> Only create a new task if there are fewer than 3 tasks with "to do" status in the list</li>
+        <li><strong>Rotate categories:</strong> Monday = code quality, Tuesday = docs, Wednesday = tests, etc.</li>
+        <li><strong>Set limits:</strong> Use ClickUp's automation conditions to cap the total number of open tasks</li>
+      </ul>
+
+      <h2>The Continuous Improvement Loop</h2>
+
+      <p>When everything is connected, here's what happens:</p>
+
+      <ol>
+        <li>The <strong>superagent</strong> runs on schedule and creates a task: "Add error handling to the database module"</li>
+        <li><strong>clawdup</strong> picks up the task, creates a branch, and invokes Claude Code</li>
+        <li><strong>Claude Code</strong> reads the codebase, implements the changes, and clawdup creates a PR</li>
+        <li>A <strong>human reviewer</strong> approves or requests changes</li>
+        <li>clawdup <strong>merges the PR</strong> when approved</li>
+        <li>The <strong>superagent</strong> runs again and identifies the next improvement</li>
+      </ol>
+
+      <p>Each cycle makes the codebase a little better. Over days and weeks, the compound effect is significant — better test coverage, cleaner code, more documentation, fewer security issues.</p>
+
+      <h2>Real-World Tips</h2>
+
+      <h3>Start small</h3>
+      <p>Begin with one superagent focused on a single category (documentation is a great starting point). Watch how it performs for a week before adding more.</p>
+
+      <h3>Always review the PRs</h3>
+      <p>Superagents are powerful, but they're not infallible. Every PR still goes through human review. The automation handles the tedious work; you provide the judgment.</p>
+
+      <h3>Refine your CLAUDE.md</h3>
+      <p>The quality of generated code depends heavily on your <code>CLAUDE.md</code> file. As you review PRs, note any patterns the AI gets wrong and add explicit guidance to <code>CLAUDE.md</code>. The better your project description, the better the output.</p>
+
+      <h3>Use task templates</h3>
+      <p>ClickUp supports task templates. Create templates for common improvement patterns so your superagent automations produce consistent, well-structured tasks.</p>
+
+      <h3>Monitor and adjust</h3>
+      <p>Check the "blocked" and "require input" statuses regularly. These indicate tasks that the AI couldn't handle — they're valuable feedback for improving your superagent prompts and CLAUDE.md.</p>
+
+      <h2>What's Possible</h2>
+
+      <p>Teams using this pattern report:</p>
+
+      <ul>
+        <li>Test coverage increasing steadily without dedicated testing sprints</li>
+        <li>Documentation staying up-to-date as the codebase evolves</li>
+        <li>Code quality metrics improving week over week</li>
+        <li>Developers spending less time on routine maintenance and more on creative work</li>
+      </ul>
+
+      <p>The superagent pattern isn't about replacing developers — it's about giving your codebase a tireless assistant that handles the improvements everyone knows should happen but nobody has time for. You stay in control of what gets merged. The automation just makes sure the work gets done.</p>
+    </div>
+
+    <nav class="blog-post-nav">
+      <a href="why-automated-task-to-pr-pipelines-are-the-future.html">&larr; Previous: Why Automated Pipelines Are the Future</a>
+      <a href="./">Back to Blog &rarr;</a>
+    </nav>
+  </article>
+
+  <footer class="footer">
+    <div class="footer-inner">
+      <ul class="footer-links">
+        <li><a href="https://github.com/gehadshaat/clawdup">GitHub</a></li>
+        <li><a href="https://www.npmjs.com/package/clawdup">npm</a></li>
+        <li><a href="https://github.com/gehadshaat/clawdup/issues">Issues</a></li>
+      </ul>
+      <p>Created by <a href="https://github.com/gehadshaat">Gehad Shaat</a>. Personal open-source project &mdash; not affiliated with ClickUp.</p>
+    </div>
+  </footer>
+
+</body>
+</html>
