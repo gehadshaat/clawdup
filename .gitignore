@@ -1,7 +1,9 @@
 dist/
+dist-test/
 node_modules/
 .idea/
-.clawup.env
+.clawdup.env
 .env.clickup
-.clawup.todo.json
+.clawdup.todo.json
+.clawdup.lock
 *.tgz

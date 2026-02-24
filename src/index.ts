@@ -1,4 +1,4 @@
-// Programmatic API - import this to use clawup from code.
+// Programmatic API - import this to use clawdup from code.
 export { startRunner, runSingleTask } from "./runner.js";
 export {
   getTasksByStatus,
@@ -36,7 +36,9 @@ export {
   getPRInlineComments,
 } from "./git-ops.js";
 export { runClaudeOnTask, runClaudeOnReviewFeedback, generateWorkSummary, scanOutputForSafetyIssues } from "./claude-worker.js";
-export { STATUS, PROJECT_ROOT, GIT_ROOT, log } from "./config.js";
+export { STATUS, PROJECT_ROOT, GIT_ROOT } from "./config.js";
+export { log, setLogLevel, setJsonOutput, isDebug, startTimer } from "./logger.js";
+export type { LogLevel, LogContext } from "./logger.js";
 export type {
   ClickUpTask,
   ClickUpUser,

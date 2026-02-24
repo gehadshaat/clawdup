@@ -1,4 +1,4 @@
-# Clawup Configuration Reference
+# Clawdup Configuration Reference
 
 Complete reference for all CLI options, environment variables, and configuration files.
 
@@ -28,37 +28,37 @@ Complete reference for all CLI options, environment variables, and configuration
 | `--interactive` | Run Claude Code in interactive mode. Instead of running autonomously, Claude accepts user input via the terminal. Can be combined with `--once` or continuous mode. |
 | `--check` | Validate all configuration (API keys, statuses, CLI tools) and exit. Non-zero exit code on failure. |
 | `--statuses` | Print the recommended ClickUp list statuses and exit. Does not require configuration. |
-| `--setup` | Run the interactive setup wizard that guides you through creating a `.clawup.env` file. |
-| `--init` | Create example `.clawup.env` and `clawup.config.mjs` files in the current directory. |
+| `--setup` | Run the interactive setup wizard that guides you through creating a `.clawdup.env` file. |
+| `--init` | Create example `.clawdup.env` and `clawdup.config.mjs` files in the current directory. |
 | `--help`, `-h` | Print usage information and exit. |
 
 ### Examples
 
 ```bash
 # Start continuous polling (default)
-clawup
+clawdup
 
 # Process one specific task
-clawup --once abc123
+clawdup --once abc123
 
 # Interactive mode with a specific task (for debugging/testing)
-clawup --interactive --once abc123
+clawdup --interactive --once abc123
 
 # Interactive continuous mode (you interact with Claude for each task)
-clawup --interactive
+clawdup --interactive
 
 # Validate config before starting
-clawup --check
+clawdup --check
 
 # Bootstrap a new project
-clawup --init
+clawdup --init
 ```
 
 ---
 
 ## Task Source: List vs Parent Task
 
-Clawup can poll tasks from two different sources. You must configure **exactly one**.
+Clawdup can poll tasks from two different sources. You must configure **exactly one**.
 
 ### Option 1: ClickUp List (`CLICKUP_LIST_ID`)
 
@@ -92,14 +92,14 @@ CLICKUP_PARENT_TASK_ID=abc123xyz
 ### Validation
 
 - At least one of `CLICKUP_LIST_ID` or `CLICKUP_PARENT_TASK_ID` must be set.
-- If neither is set, clawup exits immediately with an error.
+- If neither is set, clawdup exits immediately with an error.
 - Both can be set simultaneously — `CLICKUP_PARENT_TASK_ID` is used for fetching tasks while `CLICKUP_LIST_ID` is used for creating follow-up tasks.
 
 ---
 
 ## Configuration Files
 
-### `.clawup.env`
+### `.clawdup.env`
 
 Primary configuration file. Contains API tokens and settings as `KEY=VALUE` pairs.
 
@@ -108,14 +108,14 @@ Primary configuration file. Contains API tokens and settings as `KEY=VALUE` pair
 - Values do **not** override existing environment variables.
 - **Must be added to `.gitignore`** (contains secrets).
 
-Run `clawup --init` to generate an example file.
+Run `clawdup --init` to generate an example file.
 
-### `clawup.config.mjs`
+### `clawdup.config.mjs`
 
 Optional JavaScript configuration file for customizing Claude Code behavior.
 
 ```js
-// clawup.config.mjs
+// clawdup.config.mjs
 export default {
   // Extra instructions appended to Claude's system prompt
   prompt: `
@@ -135,7 +135,7 @@ Always write tests for new functions.
 
 ### `CLAUDE.md`
 
-Project context file used by Claude Code. Automatically included in every task prompt. In a monorepo, clawup checks the package directory first, then falls back to the repository root.
+Project context file used by Claude Code. Automatically included in every task prompt. In a monorepo, clawdup checks the package directory first, then falls back to the repository root.
 
 ---
 
@@ -221,17 +221,17 @@ The runner periodically restarts itself to pick up fresh code and avoid long-run
 Settings are resolved in this order (highest priority first):
 
 1. **Environment variables** — `export POLL_INTERVAL_MS=60000`
-2. **`.clawup.env`** (or `.env.clickup`) — loaded from the current working directory
-3. **`clawup.config.mjs`** — JavaScript config file for `prompt` and `claudeArgs`
+2. **`.clawdup.env`** (or `.env.clickup`) — loaded from the current working directory
+3. **`clawdup.config.mjs`** — JavaScript config file for `prompt` and `claudeArgs`
 4. **Defaults** — built-in fallback values
 
-Environment variables set before running clawup always take precedence. The `.clawup.env` file only sets values that are not already in the environment.
+Environment variables set before running clawdup always take precedence. The `.clawdup.env` file only sets values that are not already in the environment.
 
 ---
 
 ## Validation
 
-Clawup validates configuration at startup and fails fast with clear error messages.
+Clawdup validates configuration at startup and fails fast with clear error messages.
 
 ### Automatic checks (on every run)
 
@@ -246,45 +246,45 @@ Clawup validates configuration at startup and fails fast with clear error messag
 
 ### Extended checks (`--check` flag)
 
-In addition to the above, `clawup --check` validates:
+In addition to the above, `clawdup --check` validates:
 
 - ClickUp API connectivity (fetches list or parent task info).
 - ClickUp list statuses match the expected set.
 - GitHub CLI (`gh`) is installed and authenticated.
 - Claude Code CLI (`claude`) is installed and responsive.
 - Git repository detection.
-- Presence of `CLAUDE.md` and `clawup.config.mjs` (informational).
+- Presence of `CLAUDE.md` and `clawdup.config.mjs` (informational).
 
 ---
 
 ## Monorepo Configuration
 
-In a monorepo, each workspace package can have its own clawup configuration:
+In a monorepo, each workspace package can have its own clawdup configuration:
 
 ```
 my-monorepo/
 ├── packages/
 │   ├── frontend/
-│   │   ├── .clawup.env          # CLICKUP_LIST_ID=frontend-list
-│   │   └── clawup.config.mjs    # Frontend-specific Claude instructions
+│   │   ├── .clawdup.env          # CLICKUP_LIST_ID=frontend-list
+│   │   └── clawdup.config.mjs    # Frontend-specific Claude instructions
 │   └── backend/
-│       ├── .clawup.env          # CLICKUP_LIST_ID=backend-list
-│       └── clawup.config.mjs    # Backend-specific Claude instructions
+│       ├── .clawdup.env          # CLICKUP_LIST_ID=backend-list
+│       └── clawdup.config.mjs    # Backend-specific Claude instructions
 ├── CLAUDE.md                    # Shared project context
 └── pnpm-workspace.yaml
 ```
 
 **How it works:**
 
-- `PROJECT_ROOT` = the directory where `clawup` is run (e.g., `packages/frontend/`).
+- `PROJECT_ROOT` = the directory where `clawdup` is run (e.g., `packages/frontend/`).
 - `GIT_ROOT` = the repository root (e.g., `my-monorepo/`).
-- Config files (`.clawup.env`, `clawup.config.mjs`) are resolved from `PROJECT_ROOT`.
+- Config files (`.clawdup.env`, `clawdup.config.mjs`) are resolved from `PROJECT_ROOT`.
 - Git operations (branch, commit, push) run from `GIT_ROOT`.
 - `CLAUDE.md` is checked in `PROJECT_ROOT` first, then falls back to `GIT_ROOT`.
 
-Run clawup from each package directory to use that package's configuration:
+Run clawdup from each package directory to use that package's configuration:
 
 ```bash
-cd packages/frontend && clawup
-cd packages/backend && clawup
+cd packages/frontend && clawdup
+cd packages/backend && clawdup
 ```
