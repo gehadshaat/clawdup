@@ -190,6 +190,83 @@ async function selectSpace(apiToken: string): Promise<string> {
   return spaces[spaceIdx]!.id;
 }
 
+/**
+ * Check that required CLI tools (git, gh, claude) are installed and configured.
+ * Prints warnings for missing tools but does not block setup.
+ */
+async function checkCliDependencies(): Promise<void> {
+  const { execFile } = await import("child_process");
+  const { promisify } = await import("util");
+  const execFileAsync = promisify(execFile);
+
+  console.log("Checking CLI dependencies...\n");
+
+  interface DepCheck {
+    name: string;
+    command: string;
+    args: string[];
+    installHint: string;
+    format?: (stdout: string) => string;
+  }
+
+  const deps: DepCheck[] = [
+    {
+      name: "Git",
+      command: "git",
+      args: ["--version"],
+      installHint: "https://git-scm.com/downloads",
+      format: (s) => s.trim(),
+    },
+    {
+      name: "GitHub CLI (gh)",
+      command: "gh",
+      args: ["--version"],
+      installHint: "https://cli.github.com/",
+      format: (s) => s.trim().split("\n")[0] || s.trim(),
+    },
+    {
+      name: "Claude Code (claude)",
+      command: "claude",
+      args: ["--version"],
+      installHint: "npm install -g @anthropic-ai/claude-code",
+      format: (s) => s.trim(),
+    },
+  ];
+
+  let allFound = true;
+  for (const dep of deps) {
+    try {
+      const { stdout } = await execFileAsync(dep.command, dep.args, {
+        timeout: 5000,
+      });
+      const version = dep.format ? dep.format(stdout) : stdout.trim();
+      console.log(`  OK  ${dep.name}: ${version}`);
+    } catch {
+      console.log(`  MISSING  ${dep.name}`);
+      console.log(`           Install: ${dep.installHint}`);
+      allFound = false;
+    }
+  }
+
+  // Check gh auth status if gh is available
+  try {
+    await execFileAsync("gh", ["auth", "status"], { timeout: 10000 });
+    console.log("  OK  GitHub CLI auth: authenticated");
+  } catch (err) {
+    const msg = (err as Error).message || "";
+    if (!msg.includes("not found") && !msg.includes("ENOENT")) {
+      console.log("  WARN  GitHub CLI auth: not authenticated");
+      console.log("           Run: gh auth login");
+    }
+  }
+
+  console.log("");
+  if (!allFound) {
+    console.log("  Some tools are missing. You can continue setup, but");
+    console.log("  clawdup requires all of them to run. Install them later.\n");
+  }
+}
+
 export async function runSetup(): Promise<void> {
   const cwd = process.cwd();
   const envPath = resolve(cwd, ".clawdup.env");
@@ -201,6 +278,8 @@ export async function runSetup(): Promise<void> {
 `);
 
   console.log(`Project directory: ${cwd}\n`);
+
+  await checkCliDependencies();
 
   if (existsSync(envPath)) {
     const overwrite = await ask(

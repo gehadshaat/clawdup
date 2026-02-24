@@ -340,6 +340,21 @@ async function runChecks({
     allGood = false;
   }
 
+  // Check Git CLI
+  try {
+    const { execFile } = await import("child_process");
+    const { promisify } = await import("util");
+    const execFileAsync = promisify(execFile);
+    const { stdout } = await execFileAsync("git", ["--version"], {
+      timeout: 5000,
+    });
+    console.log(`  Git: ${stdout.trim()}`);
+  } catch {
+    console.error('  Git: FAILED - "git" command not found');
+    console.error('    Install: https://git-scm.com/downloads');
+    allGood = false;
+  }
+
   // Check Claude CLI
   try {
     const { execFile } = await import("child_process");
@@ -353,6 +368,8 @@ async function runChecks({
     console.error(
       '  Claude Code: FAILED - "claude" command not found or not working',
     );
+    console.error('    Install: npm install -g @anthropic-ai/claude-code');
+    console.error('    Docs: https://docs.anthropic.com/en/docs/claude-code');
     allGood = false;
   }
 
@@ -367,7 +384,30 @@ async function runChecks({
     console.log(`  GitHub CLI: ${stdout.trim().split("\n")[0]}`);
   } catch {
     console.error('  GitHub CLI: FAILED - "gh" command not found');
+    console.error('    Install: https://cli.github.com/');
+    console.error('    macOS: brew install gh');
+    console.error('    Linux: sudo apt install gh (or see link above)');
     allGood = false;
+  }
+
+  // Check gh auth status
+  try {
+    const { execFile } = await import("child_process");
+    const { promisify } = await import("util");
+    const execFileAsync = promisify(execFile);
+    await execFileAsync("gh", ["auth", "status"], {
+      timeout: 10000,
+    });
+    console.log("  GitHub CLI auth: authenticated");
+  } catch (err) {
+    const msg = (err as Error).message || "";
+    if (msg.includes("not found") || msg.includes("ENOENT")) {
+      // gh not installed — already reported above, skip duplicate
+    } else {
+      console.error('  GitHub CLI auth: FAILED - not authenticated');
+      console.error('    Run: gh auth login');
+      allGood = false;
+    }
   }
 
   // Check for CLAUDE.md
