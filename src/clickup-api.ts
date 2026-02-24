@@ -1,7 +1,7 @@
 // ClickUp API v2 client
 // Docs: https://clickup.com/api
 
-import { CLICKUP_API_TOKEN, CLICKUP_LIST_ID, CLICKUP_PARENT_TASK_ID, STATUS } from "./config.js";
+import { CLICKUP_API_TOKEN, CLICKUP_LIST_ID, CLICKUP_PARENT_TASK_ID, STATUS, DRY_RUN } from "./config.js";
 import { log } from "./logger.js";
 import type { ClickUpTask, ClickUpUser, ClickUpList, ClickUpComment } from "./types.js";
 
@@ -181,6 +181,10 @@ export async function updateTaskStatus(
   taskId: string,
   newStatus: string,
 ): Promise<void> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would update task ${taskId} status → "${newStatus}"`);
+    return;
+  }
   log("info", `Updating task ${taskId} status to "${newStatus}"`);
   await request("PUT", `/task/${taskId}`, {
     status: newStatus,
@@ -194,6 +198,10 @@ export async function addTaskComment(
   taskId: string,
   commentText: string,
 ): Promise<void> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would add comment to task ${taskId}: ${commentText.slice(0, 100)}...`);
+    return;
+  }
   log("info", `Adding comment to task ${taskId}`);
   await request("POST", `/task/${taskId}/comment`, {
     comment_text: commentText,
@@ -210,6 +218,10 @@ export async function addTaskCommentForUser(
   commentText: string,
   assigneeId: number,
 ): Promise<void> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would add comment to task ${taskId} for user ${assigneeId}: ${commentText.slice(0, 100)}...`);
+    return;
+  }
   log("info", `Adding comment to task ${taskId} (assigned to user ${assigneeId})`);
   await request("POST", `/task/${taskId}/comment`, {
     comment_text: commentText,
@@ -277,6 +289,10 @@ export async function createTask(
   name: string,
   description?: string,
 ): Promise<ClickUpTask> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would create task: "${name}"`);
+    return { id: "dry-run", name, url: "https://dry-run" } as ClickUpTask;
+  }
   const listId = await getEffectiveListId();
   log("info", `Creating new task: "${name}"`);
   const body: Record<string, unknown> = {

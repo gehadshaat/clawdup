@@ -14,6 +14,7 @@ import {
   PROJECT_ROOT,
   GIT_ROOT,
   userConfig,
+  DRY_RUN,
 } from "./config.js";
 import { log, startTimer } from "./logger.js";
 import type { ClickUpTask, ClaudeResult } from "./types.js";
@@ -240,6 +241,10 @@ export async function runClaudeOnTask(
   taskId: string,
   options?: { interactive?: boolean },
 ): Promise<ClaudeResult> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would run Claude Code on task ${taskId} (prompt: ${taskPrompt.length} chars)`);
+    return { success: true, output: "[DRY RUN] Claude Code execution skipped", needsInput: false };
+  }
   if (options?.interactive) {
     return runClaudeInteractive(taskPrompt, taskId);
   }
@@ -569,6 +574,11 @@ export async function runClaudeOnReviewFeedback(
   reviewFeedback: string,
   options?: { interactive?: boolean },
 ): Promise<ClaudeResult> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would run Claude Code on review feedback for task ${taskId} (prompt: ${taskPrompt.length} chars, feedback: ${reviewFeedback.length} chars)`);
+    return { success: true, output: "[DRY RUN] Claude Code review execution skipped", needsInput: false };
+  }
+
   const systemPrompt = buildReviewPrompt(taskPrompt, taskId, reviewFeedback);
 
   log("info", `Running Claude Code on review feedback for task ${taskId}...`, { taskId });
@@ -797,6 +807,10 @@ export async function runClaudeOnConflictResolution(
   conflictedFiles: string[],
   branchName: string,
 ): Promise<ClaudeResult> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would run Claude Code to resolve ${conflictedFiles.length} conflict(s) on ${branchName}`);
+    return { success: true, output: "[DRY RUN] Conflict resolution skipped", needsInput: false };
+  }
   const fileList = conflictedFiles.map((f) => `- ${f}`).join("\n");
 
   const prompt = `You are resolving merge conflicts in the branch "${branchName}".
