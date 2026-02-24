@@ -558,12 +558,18 @@ export async function mergeBaseBranch(): Promise<boolean> {
     log("info", "Merge completed cleanly — no conflicts");
     return true;
   } catch (err) {
-    const message = (err as Error).message;
-    if (message.includes("CONFLICT") || message.includes("Automatic merge failed")) {
-      log("warn", "Merge resulted in conflicts");
-      return false;
+    // Detect conflicts by checking for unmerged files rather than parsing
+    // error messages, because the git() wrapper loses stdout/stderr details
+    // where conflict info appears.
+    try {
+      const conflicted = await getConflictedFiles();
+      if (conflicted.length > 0) {
+        log("warn", "Merge resulted in conflicts");
+        return false;
+      }
+    } catch {
+      // If we can't check for conflicts, fall through to rethrow
     }
-    // If the error is not about conflicts, rethrow
     throw err;
   }
 }
