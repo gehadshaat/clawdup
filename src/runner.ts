@@ -247,6 +247,18 @@ async function processTask(task: ClickUpTask): Promise<void> {
       log("info", `Draft PR created: ${prUrl}`);
     } else {
       log("info", `Existing PR found: ${prUrl}`);
+
+      // Check if the existing PR is already merged
+      const prState = await getPRState(prUrl);
+      if (prState === "merged") {
+        log("info", `PR already merged for task ${taskId}. Marking complete.`);
+        await addTaskComment(
+          taskId,
+          `✅ The associated PR was already merged: ${prUrl}\n\nMoving task to complete.`,
+        );
+        await updateTaskStatus(taskId, STATUS.COMPLETED);
+        return;
+      }
     }
 
     await addTaskComment(
@@ -1102,6 +1114,18 @@ async function recoverOrphanedTasks(): Promise<void> {
         const existingPrUrl = await findPRUrlInComments(taskId);
 
         if (existingPrUrl) {
+          // Check if the PR is already merged
+          const prState = await getPRState(existingPrUrl);
+          if (prState === "merged") {
+            log("info", `PR already merged for task ${taskId}: ${existingPrUrl}. Marking complete.`);
+            await addTaskComment(
+              taskId,
+              `✅ The associated PR was already merged: ${existingPrUrl}\n\nMoving task to complete.`,
+            );
+            await updateTaskStatus(taskId, STATUS.COMPLETED);
+            await returnToBaseBranch();
+            continue;
+          }
           log(
             "info",
             `PR already exists for task ${taskId}: ${existingPrUrl}. Moving to in review.`,
