@@ -77,6 +77,15 @@ if (existsSync(configPath)) {
 }
 export { userConfig };
 
+// --- URL extraction helpers ---
+
+/** Extracts a ClickUp list ID from a URL or returns the input as-is. */
+function extractListId(input: string): string {
+  const match = input.match(/\/li\/(\d+)/);
+  if (match) return match[1];
+  return input;
+}
+
 // --- Required env vars ---
 function required(name: string): string {
   const val = process.env[name];
@@ -90,7 +99,7 @@ function required(name: string): string {
 
 // ClickUp
 export const CLICKUP_API_TOKEN: string = required("CLICKUP_API_TOKEN");
-export const CLICKUP_LIST_ID: string = process.env.CLICKUP_LIST_ID || "";
+export const CLICKUP_LIST_ID: string = extractListId(process.env.CLICKUP_LIST_ID || "");
 export const CLICKUP_PARENT_TASK_ID: string = process.env.CLICKUP_PARENT_TASK_ID || "";
 
 if (!CLICKUP_LIST_ID && !CLICKUP_PARENT_TASK_ID) {

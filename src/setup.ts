@@ -10,6 +10,17 @@ const rl = createInterface({
   output: process.stdout,
 });
 
+/**
+ * Extracts a ClickUp list ID from a URL or returns the input as-is if it's already a raw ID.
+ * Supports URLs like: https://app.clickup.com/{workspace}/v/li/{list_id}
+ */
+function extractListId(input: string): string {
+  const trimmed = input.trim();
+  const match = trimmed.match(/\/li\/(\d+)/);
+  if (match) return match[1];
+  return trimmed;
+}
+
 function ask(question: string, defaultValue = ""): Promise<string> {
   const suffix = defaultValue ? ` [${defaultValue}]` : "";
   return new Promise((res) => {
@@ -155,14 +166,15 @@ export async function runSetup(): Promise<void> {
     console.log(
       '\nFind your List ID: Open the list in ClickUp > click "..." > "Copy Link"',
     );
-    console.log("The list ID is the number at the end of the URL.\n");
+    console.log("You can paste the full link or just the list ID.\n");
 
-    listId = await ask("ClickUp List ID");
-    if (!listId) {
+    const listInput = await ask("ClickUp List ID or link");
+    if (!listInput) {
       console.error("List ID is required. Aborting.");
       rl.close();
       process.exit(1);
     }
+    listId = extractListId(listInput);
 
     // Validate the API token and list
     console.log("\nValidating ClickUp connection...");
