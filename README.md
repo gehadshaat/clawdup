@@ -9,6 +9,8 @@ Works with **any** project — just install, configure, and run.
 > **Something broken?** See the **[Troubleshooting & Recovery Guide](TROUBLESHOOTING.md)** for common failure scenarios and how to fix them.
 >
 > **Looking for the full configuration reference?** See **[CONFIGURATION.md](CONFIGURATION.md)** for all CLI flags, environment variables, validation rules, and advanced options.
+>
+> **Writing tasks for the automation?** See **[TASK_GUIDELINES.md](TASK_GUIDELINES.md)** for templates, examples, and best practices.
 
 ## Quick Start
 
@@ -272,6 +274,8 @@ For best results, write ClickUp tasks with:
 - **Detailed description** — Specifics about the implementation
 - **Acceptance criteria** — Use ClickUp checklists
 - **File hints** — Mention specific files or components if relevant
+
+For full guidelines, annotated examples, and copy-paste templates, see **[TASK_GUIDELINES.md](TASK_GUIDELINES.md)**.
 
 ## Disclaimer
 
