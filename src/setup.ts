@@ -20,6 +20,7 @@ function ask(question: string, defaultValue = ""): Promise<string> {
 }
 
 interface ListResponse {
+  id: string;
   name: string;
   statuses: { status: string }[];
 }
@@ -30,6 +31,152 @@ interface TaskResponse {
   url: string;
   list?: { id: string };
   subtasks?: { id: string; name: string; status: { status: string } }[];
+}
+
+interface TeamResponse {
+  teams: { id: string; name: string }[];
+}
+
+interface SpaceResponse {
+  spaces: { id: string; name: string }[];
+}
+
+const DEFAULT_STATUSES = [
+  { status: "to do", color: "#d3d3d3" },
+  { status: "in progress", color: "#4194f6" },
+  { status: "in review", color: "#a875ff" },
+  { status: "approved", color: "#2ecd6f" },
+  { status: "require input", color: "#f9d900" },
+  { status: "blocked", color: "#f44336" },
+  { status: "complete", color: "#6bc950" },
+];
+
+/**
+ * Extract a space ID from a ClickUp space URL.
+ * Example: https://app.clickup.com/12345678/v/s/90123456 -> 90123456
+ */
+function extractSpaceIdFromUrl(url: string): string | null {
+  const match = url.match(/\/s\/(\d+)/);
+  return match ? match[1]! : null;
+}
+
+/**
+ * Fetch workspaces/teams for the given API token.
+ */
+async function fetchTeams(apiToken: string): Promise<{ id: string; name: string }[]> {
+  const res = await fetch("https://api.clickup.com/api/v2/team", {
+    headers: { Authorization: apiToken },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`API error ${res.status}: ${text}`);
+  }
+  const data = (await res.json()) as TeamResponse;
+  return data.teams || [];
+}
+
+/**
+ * Fetch spaces in a workspace.
+ */
+async function fetchSpaces(apiToken: string, teamId: string): Promise<{ id: string; name: string }[]> {
+  const res = await fetch(`https://api.clickup.com/api/v2/team/${teamId}/space`, {
+    headers: { Authorization: apiToken },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`API error ${res.status}: ${text}`);
+  }
+  const data = (await res.json()) as SpaceResponse;
+  return data.spaces || [];
+}
+
+/**
+ * Create a folderless list in a space with the default statuses.
+ */
+async function createListInSpace(
+  apiToken: string,
+  spaceId: string,
+  listName: string,
+): Promise<ListResponse> {
+  const res = await fetch(`https://api.clickup.com/api/v2/space/${spaceId}/list`, {
+    method: "POST",
+    headers: {
+      Authorization: apiToken,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      name: listName,
+      statuses: DEFAULT_STATUSES,
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`API error ${res.status}: ${text}`);
+  }
+  return (await res.json()) as ListResponse;
+}
+
+/**
+ * Prompt to select a space, either by choosing from the list or pasting a URL.
+ */
+async function selectSpace(apiToken: string): Promise<string> {
+  console.log("\nHow do you want to specify the space?");
+  console.log("  1. Select from your workspaces");
+  console.log("  2. Paste a space URL or ID\n");
+
+  const method = await ask("Choose (1 or 2)", "1");
+
+  if (method === "2") {
+    const input = await ask("Space URL or ID");
+    if (!input) {
+      throw new Error("Space URL or ID is required.");
+    }
+    const extracted = extractSpaceIdFromUrl(input);
+    return extracted || input;
+  }
+
+  // Fetch teams
+  console.log("\nFetching your workspaces...");
+  const teams = await fetchTeams(apiToken);
+  if (teams.length === 0) {
+    throw new Error("No workspaces found for this API token.");
+  }
+
+  let teamId: string;
+  if (teams.length === 1) {
+    teamId = teams[0]!.id;
+    console.log(`  Workspace: ${teams[0]!.name}`);
+  } else {
+    console.log("\nSelect a workspace:");
+    for (let i = 0; i < teams.length; i++) {
+      console.log(`  ${i + 1}. ${teams[i]!.name}`);
+    }
+    const choice = await ask(`Choose (1-${teams.length})`, "1");
+    const idx = parseInt(choice) - 1;
+    if (idx < 0 || idx >= teams.length) {
+      throw new Error("Invalid selection.");
+    }
+    teamId = teams[idx]!.id;
+  }
+
+  // Fetch spaces
+  console.log("\nFetching spaces...");
+  const spaces = await fetchSpaces(apiToken, teamId);
+  if (spaces.length === 0) {
+    throw new Error("No spaces found in this workspace.");
+  }
+
+  console.log("\nSelect a space:");
+  for (let i = 0; i < spaces.length; i++) {
+    console.log(`  ${i + 1}. ${spaces[i]!.name}`);
+  }
+  const spaceChoice = await ask(`Choose (1-${spaces.length})`, "1");
+  const spaceIdx = parseInt(spaceChoice) - 1;
+  if (spaceIdx < 0 || spaceIdx >= spaces.length) {
+    throw new Error("Invalid selection.");
+  }
+
+  return spaces[spaceIdx]!.id;
 }
 
 export async function runSetup(): Promise<void> {
@@ -68,11 +215,12 @@ export async function runSetup(): Promise<void> {
   }
 
   console.log("\nHow do you want to organize tasks?");
-  console.log("  1. Poll a ClickUp list (all tasks in a list)");
-  console.log("  2. Poll subtasks of a parent task\n");
+  console.log("  1. Use an existing ClickUp list");
+  console.log("  2. Create a new list with default statuses");
+  console.log("  3. Poll subtasks of a parent task\n");
 
-  const sourceMode = await ask("Choose (1 or 2)", "1");
-  const useParentTask = sourceMode === "2";
+  const sourceMode = await ask("Choose (1, 2, or 3)", "1");
+  const useParentTask = sourceMode === "3";
 
   let listId = "";
   let parentTaskId = "";
@@ -147,6 +295,42 @@ export async function runSetup(): Promise<void> {
       console.error(`  Failed to validate: ${(err as Error).message}`);
       const cont = await ask("Continue anyway? (y/N)", "N");
       if (cont.toLowerCase() !== "y") {
+        rl.close();
+        process.exit(1);
+      }
+    }
+  } else if (sourceMode === "2") {
+    // Create a new list with default statuses
+    console.log("\nCreate a new ClickUp list with the recommended statuses.");
+    console.log("Statuses: " + DEFAULT_STATUSES.map((s) => s.status).join(", "));
+
+    try {
+      const spaceId = await selectSpace(apiToken);
+      const listName = await ask("List name", "clawdup Tasks");
+      if (!listName) {
+        console.error("List name is required. Aborting.");
+        rl.close();
+        process.exit(1);
+      }
+
+      console.log(`\nCreating list "${listName}" in space ${spaceId}...`);
+      const newList = await createListInSpace(apiToken, spaceId, listName);
+      listId = newList.id;
+      console.log(`  Created list: "${newList.name}" (ID: ${listId})`);
+      console.log(
+        `  Statuses: ${newList.statuses.map((s) => s.status).join(", ")}`,
+      );
+      console.log("  All recommended statuses configured!");
+    } catch (err) {
+      console.error(`  Failed to create list: ${(err as Error).message}`);
+      const cont = await ask("Continue anyway with a manual List ID? (y/N)", "N");
+      if (cont.toLowerCase() !== "y") {
+        rl.close();
+        process.exit(1);
+      }
+      listId = await ask("ClickUp List ID");
+      if (!listId) {
+        console.error("List ID is required. Aborting.");
         rl.close();
         process.exit(1);
       }
