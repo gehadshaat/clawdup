@@ -1,0 +1,6 @@
+[
+  {
+    "title": "Enable GitHub Pages in repo settings (manual)",
+    "description": "A repo owner must complete these manual steps in the GitHub UI: 1) Ensure the repository is public, or upgrade to a GitHub Pro/Team/Enterprise plan. 2) Go to the repo Settings > Pages. 3) Set 'Source' to 'GitHub Actions'. The deploy-pages.yml workflow has been added and will automatically deploy the docs/ directory on push to main once Pages is enabled."
+  }
+]
