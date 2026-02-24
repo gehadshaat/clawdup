@@ -1,10 +1,12 @@
-# clawup
+# clawdup
 
 Automated pipeline that polls a ClickUp list for tasks, uses Claude Code to implement them, creates GitHub PRs, and manages task statuses through their full lifecycle.
 
 Works with **any** project — just install, configure, and run.
 
-> **New to clawup?** Read the **[Complete Setup & Usage Guide](GUIDE.md)** for step-by-step instructions, including how to sign up for ClickUp, configure statuses, install all prerequisites, and get everything running.
+> **New to clawdup?** Read the **[Complete Setup & Usage Guide](GUIDE.md)** for step-by-step instructions, including how to sign up for ClickUp, configure statuses, install all prerequisites, and get everything running.
+>
+> **Something broken?** See the **[Troubleshooting & Recovery Guide](TROUBLESHOOTING.md)** for common failure scenarios and how to fix them.
 >
 > **Looking for the full configuration reference?** See **[CONFIGURATION.md](CONFIGURATION.md)** for all CLI flags, environment variables, validation rules, and advanced options.
 
@@ -12,19 +14,19 @@ Works with **any** project — just install, configure, and run.
 
 ```bash
 # Install globally
-npm install -g clawup
+npm install -g clawdup
 
 # Or use npx (no install needed)
-npx clawup --init
+npx clawdup --init
 
 # Set up your config
-clawup --setup
+clawdup --setup
 
 # Validate everything
-clawup --check
+clawdup --check
 
 # Start the automation
-clawup
+clawdup
 ```
 
 ## How It Works
@@ -72,12 +74,12 @@ clawup
 
 ### Per-Package (recommended)
 
-Install as a dev dependency in each package that needs its own ClickUp automation. Each package gets its own `.clawup.env` with its own ClickUp list ID, API key, etc.
+Install as a dev dependency in each package that needs its own ClickUp automation. Each package gets its own `.clawdup.env` with its own ClickUp list ID, API key, etc.
 
 ```bash
-npm install -D clawup
+npm install -D clawdup
 # or
-pnpm add -D clawup
+pnpm add -D clawdup
 ```
 
 Then add to the package's `package.json` scripts:
@@ -85,53 +87,53 @@ Then add to the package's `package.json` scripts:
 ```json
 {
   "scripts": {
-    "clawup": "clawup",
-    "clawup:check": "clawup --check",
-    "clawup:setup": "clawup --setup",
-    "clawup:once": "clawup --once"
+    "clawdup": "clawdup",
+    "clawdup:check": "clawdup --check",
+    "clawdup:setup": "clawdup --setup",
+    "clawdup:once": "clawdup --once"
   }
 }
 ```
 
 ### Monorepo / Workspace
 
-In a monorepo, each workspace package can have its own clawup config pointing to a different ClickUp list:
+In a monorepo, each workspace package can have its own clawdup config pointing to a different ClickUp list:
 
 ```
 my-monorepo/
 ├── packages/
 │   ├── frontend/
-│   │   ├── .clawup.env          # CLICKUP_LIST_ID=frontend-list
-│   │   ├── clawup.config.mjs    # Frontend-specific Claude instructions
-│   │   └── package.json         # "clawup": "clawup"
+│   │   ├── .clawdup.env          # CLICKUP_LIST_ID=frontend-list
+│   │   ├── clawdup.config.mjs    # Frontend-specific Claude instructions
+│   │   └── package.json         # "clawdup": "clawdup"
 │   └── backend/
-│       ├── .clawup.env          # CLICKUP_LIST_ID=backend-list
-│       ├── clawup.config.mjs    # Backend-specific Claude instructions
-│       └── package.json         # "clawup": "clawup"
+│       ├── .clawdup.env          # CLICKUP_LIST_ID=backend-list
+│       ├── clawdup.config.mjs    # Backend-specific Claude instructions
+│       └── package.json         # "clawdup": "clawdup"
 ├── CLAUDE.md                    # Shared project context (auto-detected)
 └── pnpm-workspace.yaml
 ```
 
-Config files (`.clawup.env`, `clawup.config.mjs`) are resolved from the directory where `clawup` is run. Git operations automatically use the repository root. `CLAUDE.md` is checked in both the package directory and the repo root.
+Config files (`.clawdup.env`, `clawdup.config.mjs`) are resolved from the directory where `clawdup` is run. Git operations automatically use the repository root. `CLAUDE.md` is checked in both the package directory and the repo root.
 
 ### Global Install
 
 ```bash
-npm install -g clawup
+npm install -g clawdup
 ```
 
 ### npx (no install)
 
 ```bash
-npx clawup --init
-npx clawup
+npx clawdup --init
+npx clawdup
 ```
 
 ## Configuration
 
 ### 1. Environment File
 
-Create `.clawup.env` in your package directory (or run `clawup --init`):
+Create `.clawdup.env` in your package directory (or run `clawdup --init`):
 
 ```env
 CLICKUP_API_TOKEN=pk_xxx
@@ -143,16 +145,16 @@ The tool also checks `.env.clickup` as an alternative filename.
 **Add to `.gitignore`:**
 
 ```
-.clawup.env
+.clawdup.env
 .env.clickup
 ```
 
 ### 2. Config File (Optional)
 
-Create `clawup.config.mjs` in your package directory to customize Claude's behavior:
+Create `clawdup.config.mjs` in your package directory to customize Claude's behavior:
 
 ```js
-// clawup.config.mjs
+// clawdup.config.mjs
 export default {
   // Extra instructions appended to Claude's system prompt.
   // Your CLAUDE.md is loaded automatically — this is for additional context.
@@ -168,7 +170,7 @@ Always write tests for new functions.
 
 ### 3. CLAUDE.md (Recommended)
 
-If your project has a `CLAUDE.md` file (used by Claude Code for project context), it will be automatically included in every task prompt. In a monorepo, clawup checks the package directory first, then falls back to the repository root.
+If your project has a `CLAUDE.md` file (used by Claude Code for project context), it will be automatically included in every task prompt. In a monorepo, clawdup checks the package directory first, then falls back to the repository root.
 
 ### All Environment Variables
 
@@ -232,14 +234,14 @@ Enable at: ClickUp Settings > Integrations > GitHub.
 ## CLI Reference
 
 ```bash
-clawup                     # Start continuous polling
-clawup --once <task-id>    # Process a single task
-clawup --interactive       # Run Claude in interactive mode (accepts user input)
-clawup --check             # Validate configuration
-clawup --statuses          # Show recommended ClickUp statuses
-clawup --setup             # Interactive setup wizard
-clawup --init              # Create config files in current directory
-clawup --help              # Show help
+clawdup                     # Start continuous polling
+clawdup --once <task-id>    # Process a single task
+clawdup --interactive       # Run Claude in interactive mode (accepts user input)
+clawdup --check             # Validate configuration
+clawdup --statuses          # Show recommended ClickUp statuses
+clawdup --setup             # Interactive setup wizard
+clawdup --init              # Create config files in current directory
+clawdup --help              # Show help
 ```
 
 For the full configuration reference including all environment variables, validation rules, and advanced options, see **[CONFIGURATION.md](CONFIGURATION.md)**.
@@ -249,9 +251,9 @@ For the full configuration reference including all environment variables, valida
 You can also import and use the modules directly:
 
 ```js
-import { startRunner, runSingleTask } from "clawup";
-import { getTasksByStatus, updateTaskStatus } from "clawup/clickup-api";
-import { createTaskBranch, createPullRequest } from "clawup/git-ops";
+import { startRunner, runSingleTask } from "clawdup";
+import { getTasksByStatus, updateTaskStatus } from "clawdup/clickup-api";
+import { createTaskBranch, createPullRequest } from "clawdup/git-ops";
 ```
 
 ## Prerequisites

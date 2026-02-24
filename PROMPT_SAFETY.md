@@ -1,10 +1,10 @@
 # Prompt Safety & Injection Prevention
 
-Clawup processes untrusted input from ClickUp tasks and comments, then passes it to an AI model (Claude Code) that can read/write files and run shell commands. This makes prompt injection a critical security concern.
+Clawdup processes untrusted input from ClickUp tasks and comments, then passes it to an AI model (Claude Code) that can read/write files and run shell commands. This makes prompt injection a critical security concern.
 
 ## What is Prompt Injection?
 
-Prompt injection occurs when an attacker embeds instructions inside data (e.g., a ClickUp task description) that trick the AI into performing unintended actions. Because Clawup gives Claude access to the filesystem and shell, a successful injection could:
+Prompt injection occurs when an attacker embeds instructions inside data (e.g., a ClickUp task description) that trick the AI into performing unintended actions. Because Clawdup gives Claude access to the filesystem and shell, a successful injection could:
 
 - Delete or corrupt files
 - Exfiltrate secrets or credentials
@@ -14,7 +14,7 @@ Prompt injection occurs when an attacker embeds instructions inside data (e.g., 
 
 ## Existing Mitigations
 
-Clawup uses a defense-in-depth strategy with multiple layers of protection:
+Clawdup uses a defense-in-depth strategy with multiple layers of protection:
 
 ### 1. System Prompt Hardening (`claude-worker.ts`)
 

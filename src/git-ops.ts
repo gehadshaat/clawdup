@@ -2,7 +2,8 @@
 
 import { execFile } from "child_process";
 import { promisify } from "util";
-import { BASE_BRANCH, BRANCH_PREFIX, GIT_ROOT, log } from "./config.js";
+import { BASE_BRANCH, BRANCH_PREFIX, GIT_ROOT, DRY_RUN } from "./config.js";
+import { log } from "./logger.js";
 import type { PullRequestOptions } from "./types.js";
 
 const execFileAsync = promisify(execFile);
@@ -12,7 +13,7 @@ const execFileAsync = promisify(execFile);
  * Uses GIT_ROOT (repo root) so git operations work correctly in monorepos.
  */
 async function git(...args: string[]): Promise<string> {
-  log("info", `$ git ${args.join(" ")}`);
+  log("debug", `$ git ${args.join(" ")}`);
   try {
     const { stdout, stderr } = await execFileAsync("git", args, {
       cwd: GIT_ROOT,
@@ -35,7 +36,7 @@ async function git(...args: string[]): Promise<string> {
  * Run a gh (GitHub CLI) command from the repository root.
  */
 async function gh(...args: string[]): Promise<string> {
-  log("info", `$ gh ${args.join(" ")}`);
+  log("debug", `$ gh ${args.join(" ")}`);
   try {
     const { stdout } = await execFileAsync("gh", args, {
       cwd: GIT_ROOT,
@@ -68,12 +69,100 @@ export async function getCurrentBranch(): Promise<string> {
 }
 
 /**
+ * Ensure the git working tree and index are in a clean state.
+ * Aborts any in-progress merge/rebase/cherry-pick, resets the index,
+ * and cleans untracked files. This is a forceful recovery operation
+ * that allows subsequent git operations (checkout, branch) to succeed
+ * even after a crash or interrupted operation.
+ */
+export async function ensureCleanState(): Promise<void> {
+  if (DRY_RUN) {
+    log("info", "[DRY RUN] Would ensure git state is clean");
+    return;
+  }
+  log("info", "Ensuring git state is clean before proceeding");
+
+  // Abort any in-progress merge
+  try {
+    await git("merge", "--abort");
+    log("info", "Aborted in-progress merge");
+  } catch {
+    // No merge in progress — ignore
+  }
+
+  // Abort any in-progress rebase
+  try {
+    await git("rebase", "--abort");
+    log("info", "Aborted in-progress rebase");
+  } catch {
+    // No rebase in progress — ignore
+  }
+
+  // Abort any in-progress cherry-pick
+  try {
+    await git("cherry-pick", "--abort");
+    log("info", "Aborted in-progress cherry-pick");
+  } catch {
+    // No cherry-pick in progress — ignore
+  }
+
+  // Reset index and working tree to HEAD
+  try {
+    await git("reset", "--hard", "HEAD");
+  } catch {
+    // If reset --hard HEAD fails (e.g. invalid HEAD), try without ref
+    try {
+      await git("reset", "--hard");
+    } catch (err) {
+      log("warn", `Failed to reset: ${(err as Error).message}`);
+    }
+  }
+
+  // Clean untracked files and directories
+  try {
+    await git("clean", "-fd");
+  } catch (err) {
+    log("warn", `Failed to clean untracked files: ${(err as Error).message}`);
+  }
+}
+
+/**
  * Ensure we're on the base branch and it's up to date.
+ * Forcefully cleans any dirty state first so checkout always succeeds.
+ * Uses force checkout (-f) to bypass broken index states (e.g. unresolved merges).
+ * Falls back to creating the local branch from remote if it doesn't exist locally.
  */
 export async function syncBaseBranch(): Promise<void> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would sync base branch: ${BASE_BRANCH}`);
+    return;
+  }
   log("info", `Syncing base branch: ${BASE_BRANCH}`);
-  await git("fetch", "origin", BASE_BRANCH);
-  await git("checkout", BASE_BRANCH);
+  await ensureCleanState();
+
+  // Fetch all refs from origin (not just base branch) so that remote branch
+  // lookups (e.g. findBranchForTask) have up-to-date information.
+  // Use --prune to clean up stale remote tracking refs for deleted branches.
+  try {
+    await git("fetch", "origin", "--prune");
+  } catch {
+    // Fall back to fetching just the base branch if full fetch fails
+    await git("fetch", "origin", BASE_BRANCH);
+  }
+
+  // Force checkout to bypass broken index (unresolved merges, etc.)
+  try {
+    await git("checkout", "-f", BASE_BRANCH);
+  } catch {
+    // Local branch may not exist (e.g. all branches were deleted).
+    // Create it from remote.
+    try {
+      await git("checkout", "-f", "-B", BASE_BRANCH, `origin/${BASE_BRANCH}`);
+    } catch (err) {
+      throw new Error(`Cannot checkout ${BASE_BRANCH}: ${(err as Error).message}`);
+    }
+  }
+
   await git("reset", "--hard", `origin/${BASE_BRANCH}`);
 }
 
@@ -88,6 +177,10 @@ export async function createTaskBranch(
   slug: string,
 ): Promise<string> {
   const branchName = `${BRANCH_PREFIX}/CU-${taskId}-${slug}`;
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would create branch: ${branchName}`);
+    return branchName;
+  }
   log("info", `Creating branch: ${branchName}`);
 
   // Make sure base is up to date
@@ -143,6 +236,10 @@ export async function getChangesSummary(): Promise<{
  * Stage all changes and commit.
  */
 export async function commitChanges(message: string): Promise<string> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would commit: ${message}`);
+    return "dry-run";
+  }
   log("info", "Staging and committing changes");
   await git("add", "-A");
   await git("commit", "-m", message);
@@ -155,6 +252,10 @@ export async function commitChanges(message: string): Promise<string> {
  * Push the current branch to origin with retry logic.
  */
 export async function pushBranch(branchName: string): Promise<void> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would push branch: ${branchName}`);
+    return;
+  }
   const delays = [2000, 4000, 8000, 16000];
 
   for (let attempt = 0; attempt <= delays.length; attempt++) {
@@ -189,6 +290,10 @@ export async function createPullRequest({
   baseBranch,
   draft,
 }: PullRequestOptions): Promise<string> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would create PR: "${title}"${draft ? " (draft)" : ""} (branch: ${branchName})`);
+    return "https://github.com/dry-run/pull/0";
+  }
   log("info", `Creating PR: "${title}"${draft ? " (draft)" : ""}`);
   const args = [
     "pr",
@@ -214,6 +319,10 @@ export async function createPullRequest({
  * Create an empty commit (used to enable early PR creation).
  */
 export async function createEmptyCommit(message: string): Promise<void> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would create empty commit: ${message}`);
+    return;
+  }
   log("info", "Creating empty initial commit for early PR");
   await git("commit", "--allow-empty", "-m", message);
 }
@@ -222,6 +331,10 @@ export async function createEmptyCommit(message: string): Promise<void> {
  * Mark a draft PR as ready for review.
  */
 export async function markPRReady(prUrl: string): Promise<void> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would mark PR as ready: ${prUrl}`);
+    return;
+  }
   log("info", `Marking PR as ready for review: ${prUrl}`);
   await gh("pr", "ready", prUrl);
 }
@@ -230,6 +343,10 @@ export async function markPRReady(prUrl: string): Promise<void> {
  * Close a pull request without merging.
  */
 export async function closePullRequest(prUrl: string): Promise<void> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would close PR: ${prUrl}`);
+    return;
+  }
   log("info", `Closing PR: ${prUrl}`);
   await gh("pr", "close", prUrl);
 }
@@ -241,6 +358,10 @@ export async function updatePullRequest(
   prUrl: string,
   { title, body }: { title?: string; body?: string },
 ): Promise<void> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would update PR: ${prUrl}`);
+    return;
+  }
   log("info", `Updating PR: ${prUrl}`);
   const args = ["pr", "edit", prUrl];
   if (title) {
@@ -328,13 +449,34 @@ export async function findBranchForTask(
 export async function checkoutExistingBranch(
   branchName: string,
 ): Promise<void> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would checkout branch: ${branchName}`);
+    return;
+  }
   log("info", `Checking out existing branch: ${branchName}`);
+
+  // Fetch latest for this branch from origin
   try {
-    // Try checking out as a local branch first
-    await git("checkout", branchName);
+    await git("fetch", "origin", branchName);
+  } catch {
+    log("debug", `Could not fetch ${branchName} from origin (may be local-only)`);
+  }
+
+  // Force checkout to bypass dirty index state
+  try {
+    await git("checkout", "-f", branchName);
   } catch {
     // If local checkout fails, create a tracking branch from remote
-    await git("checkout", "-b", branchName, `origin/${branchName}`);
+    await git("checkout", "-f", "-b", branchName, `origin/${branchName}`);
+  }
+
+  // Reset to the latest remote version if it exists
+  try {
+    await git("reset", "--hard", `origin/${branchName}`);
+    log("info", `Reset ${branchName} to latest from origin`);
+  } catch {
+    // Branch may not exist on remote — local-only branch is fine
+    log("debug", `No remote tracking for ${branchName} — using local version`);
   }
 }
 
@@ -362,16 +504,66 @@ export async function branchHasBeenPushed(
 
 /**
  * Clean up: go back to base branch.
+ * Forcefully cleans any dirty state first so checkout always succeeds.
+ * Uses force checkout (-f) to bypass broken index states.
  */
 export async function returnToBaseBranch(): Promise<void> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would return to ${BASE_BRANCH}`);
+    return;
+  }
   log("info", `Returning to ${BASE_BRANCH}`);
-  await git("checkout", BASE_BRANCH);
+  await ensureCleanState();
+  try {
+    await git("checkout", "-f", BASE_BRANCH);
+  } catch {
+    // Local branch may not exist — create from remote
+    await git("checkout", "-f", "-B", BASE_BRANCH, `origin/${BASE_BRANCH}`);
+  }
+}
+
+/**
+ * Delete all local branches except the base branch.
+ * This ensures a clean slate when starting, removing stale branches
+ * left from previous runs that may no longer exist on the remote.
+ */
+export async function pruneLocalBranches(): Promise<void> {
+  if (DRY_RUN) {
+    log("info", "[DRY RUN] Would prune local branches");
+    return;
+  }
+  try {
+    const output = await git("branch", "--list");
+    const branches = output
+      .split("\n")
+      .map((b) => b.trim().replace(/^\*\s*/, ""))
+      .filter((b) => b && b !== BASE_BRANCH);
+
+    for (const branch of branches) {
+      try {
+        await git("branch", "-D", branch);
+        log("info", `Pruned local branch: ${branch}`);
+      } catch {
+        log("debug", `Could not prune branch ${branch}`);
+      }
+    }
+
+    if (branches.length > 0) {
+      log("info", `Pruned ${branches.length} local branch(es)`);
+    }
+  } catch (err) {
+    log("warn", `Failed to prune local branches: ${(err as Error).message}`);
+  }
 }
 
 /**
  * Delete a local branch.
  */
 export async function deleteLocalBranch(branchName: string): Promise<void> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would delete branch: ${branchName}`);
+    return;
+  }
   try {
     await git("branch", "-D", branchName);
     log("info", `Deleted local branch: ${branchName}`);
@@ -385,6 +577,10 @@ export async function deleteLocalBranch(branchName: string): Promise<void> {
  * Uses squash merge by default for a clean history.
  */
 export async function mergePullRequest(prUrl: string): Promise<void> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would merge PR: ${prUrl}`);
+    return;
+  }
   log("info", `Merging PR: ${prUrl}`);
   await gh("pr", "merge", prUrl, "--squash", "--delete-branch", "--admin");
   log("info", `PR merged successfully: ${prUrl}`);
@@ -416,6 +612,10 @@ export async function getPRMergeability(prUrl: string): Promise<string> {
  * Returns true if merge completed cleanly, false if there are conflicts.
  */
 export async function mergeBaseBranch(): Promise<boolean> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would merge ${BASE_BRANCH} into current branch`);
+    return true;
+  }
   log("info", `Merging ${BASE_BRANCH} into current branch`);
   await git("fetch", "origin", BASE_BRANCH);
   try {
@@ -423,12 +623,18 @@ export async function mergeBaseBranch(): Promise<boolean> {
     log("info", "Merge completed cleanly — no conflicts");
     return true;
   } catch (err) {
-    const message = (err as Error).message;
-    if (message.includes("CONFLICT") || message.includes("Automatic merge failed")) {
-      log("warn", "Merge resulted in conflicts");
-      return false;
+    // Detect conflicts by checking for unmerged files rather than parsing
+    // error messages, because the git() wrapper loses stdout/stderr details
+    // where conflict info appears.
+    try {
+      const conflicted = await getConflictedFiles();
+      if (conflicted.length > 0) {
+        log("warn", "Merge resulted in conflicts");
+        return false;
+      }
+    } catch {
+      // If we can't check for conflicts, fall through to rethrow
     }
-    // If the error is not about conflicts, rethrow
     throw err;
   }
 }
@@ -445,6 +651,10 @@ export async function getConflictedFiles(): Promise<string[]> {
  * Abort an in-progress merge.
  */
 export async function abortMerge(): Promise<void> {
+  if (DRY_RUN) {
+    log("info", "[DRY RUN] Would abort merge");
+    return;
+  }
   log("info", "Aborting merge");
   await git("merge", "--abort");
 }
@@ -453,6 +663,10 @@ export async function abortMerge(): Promise<void> {
  * Stage resolved files and commit the merge.
  */
 export async function commitMergeResolution(): Promise<void> {
+  if (DRY_RUN) {
+    log("info", "[DRY RUN] Would commit merge resolution");
+    return;
+  }
   log("info", "Committing merge resolution");
   await git("add", "-A");
   await git("commit", "--no-edit");

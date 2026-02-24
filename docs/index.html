@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>clawup - ClickUp to GitHub PR Automation with Claude Code</title>
+  <title>clawdup - ClickUp to GitHub PR Automation with Claude Code</title>
   <meta name="description" content="Automated pipeline that polls ClickUp for tasks, uses Claude Code to implement them, and creates GitHub PRs. Zero runtime dependencies.">
-  <meta property="og:title" content="clawup - ClickUp to GitHub PR Automation">
+  <meta property="og:title" content="clawdup - ClickUp to GitHub PR Automation">
   <meta property="og:description" content="Automated pipeline that polls ClickUp for tasks, uses Claude Code to implement them, and creates GitHub PRs.">
   <meta property="og:type" content="website">
-  <meta property="og:url" content="https://gehadshaat.github.io/clawup/">
+  <meta property="og:url" content="https://gehadshaat.github.io/clawdup/">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -16,13 +16,13 @@
   <!-- Navigation -->
   <nav class="nav">
     <div class="nav-inner">
-      <a href="#" class="nav-logo">claw<span>up</span></a>
+      <a href="#" class="nav-logo">claw<span>dup</span></a>
       <ul class="nav-links">
         <li><a href="#how-it-works">How It Works</a></li>
         <li><a href="#features">Features</a></li>
         <li><a href="#quickstart">Quick Start</a></li>
         <li><a href="#configuration">Configuration</a></li>
-        <li><a href="https://github.com/gehadshaat/clawup">GitHub</a></li>
+        <li><a href="https://github.com/gehadshaat/clawdup">GitHub</a></li>
       </ul>
     </div>
   </nav>
@@ -32,18 +32,18 @@
     <div class="hero-inner">
       <h1>ClickUp tasks to GitHub PRs, <span>automatically</span></h1>
       <p class="hero-tagline">
-        clawup polls your ClickUp list for tasks, uses Claude Code to implement them, and creates pull requests &mdash; all without manual intervention.
+        clawdup polls your ClickUp list for tasks, uses Claude Code to implement them, and creates pull requests &mdash; all without manual intervention.
       </p>
       <div class="hero-actions">
         <a href="#quickstart" class="btn btn-primary">Get Started</a>
-        <a href="https://github.com/gehadshaat/clawup" class="btn btn-outline">
+        <a href="https://github.com/gehadshaat/clawdup" class="btn btn-outline">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
           View on GitHub
         </a>
       </div>
-      <div class="hero-install" onclick="navigator.clipboard.writeText('npm install -g clawup')" title="Click to copy">
+      <div class="hero-install" onclick="navigator.clipboard.writeText('npm install -g clawdup')" title="Click to copy">
         <span class="prompt">$</span>
-        <span class="cmd">npm install -g clawup</span>
+        <span class="cmd">npm install -g clawdup</span>
         <span class="copy-hint">click to copy</span>
       </div>
     </div>
@@ -180,21 +180,21 @@
             <div class="step-number">2</div>
             <div class="step-content">
               <h3>Configure</h3>
-              <p>Run the setup wizard or create a <code>.clawup.env</code> file with your ClickUp API token and list ID.</p>
+              <p>Run the setup wizard or create a <code>.clawdup.env</code> file with your ClickUp API token and list ID.</p>
             </div>
           </div>
           <div class="step">
             <div class="step-number">3</div>
             <div class="step-content">
               <h3>Validate</h3>
-              <p>Run <code>clawup --check</code> to verify your ClickUp connection, statuses, and tool dependencies.</p>
+              <p>Run <code>clawdup --check</code> to verify your ClickUp connection, statuses, and tool dependencies.</p>
             </div>
           </div>
           <div class="step">
             <div class="step-number">4</div>
             <div class="step-content">
               <h3>Run</h3>
-              <p>Start the automation with <code>clawup</code>. Create tasks in ClickUp and watch PRs appear.</p>
+              <p>Start the automation with <code>clawdup</code>. Create tasks in ClickUp and watch PRs appear.</p>
             </div>
           </div>
         </div>
@@ -206,19 +206,19 @@
             Terminal
           </div>
           <pre><span class="comment"># Install globally</span>
-<span class="prompt">$</span> npm install -g clawup
+<span class="prompt">$</span> npm install -g clawdup
 
 <span class="comment"># Or use npx (no install needed)</span>
-<span class="prompt">$</span> npx clawup --init
+<span class="prompt">$</span> npx clawdup --init
 
 <span class="comment"># Run the interactive setup</span>
-<span class="prompt">$</span> clawup --setup
+<span class="prompt">$</span> clawdup --setup
 
 <span class="comment"># Validate your configuration</span>
-<span class="prompt">$</span> clawup --check
+<span class="prompt">$</span> clawdup --check
 
 <span class="comment"># Start the automation</span>
-<span class="prompt">$</span> clawup</pre>
+<span class="prompt">$</span> clawdup</pre>
         </div>
       </div>
     </div>
@@ -229,7 +229,7 @@
     <div class="section-inner">
       <div class="section-header">
         <h2>Task Status Lifecycle</h2>
-        <p>clawup manages task statuses automatically through each phase.</p>
+        <p>clawdup manages task statuses automatically through each phase.</p>
       </div>
       <div class="status-table-wrapper">
         <table class="status-table">
@@ -252,7 +252,7 @@
               <td><span class="status-badge" style="background:#4194f6;color:#fff;">in progress</span></td>
               <td>Active</td>
               <td>Automation</td>
-              <td>clawup is working on the task</td>
+              <td>clawdup is working on the task</td>
             </tr>
             <tr>
               <td><span class="status-badge" style="background:#a875ff;color:#fff;">in review</span></td>
@@ -299,7 +299,7 @@
       </div>
       <div class="config-grid">
         <div class="config-card">
-          <h3>.clawup.env</h3>
+          <h3>.clawdup.env</h3>
           <p>Required settings for ClickUp connection.</p>
           <div class="code-block">
             <pre><span class="comment"># Required</span>
@@ -314,7 +314,7 @@ LOG_LEVEL=info</pre>
           </div>
         </div>
         <div class="config-card">
-          <h3>clawup.config.mjs</h3>
+          <h3>clawdup.config.mjs</h3>
           <p>Optional Claude Code customization.</p>
           <div class="code-block">
             <pre><span class="keyword">export default</span> {
@@ -346,7 +346,7 @@ Always write tests.
         <div class="feature-card">
           <span class="icon">&#127919;</span>
           <h3>Node.js 18+</h3>
-          <p>Required for native <code>fetch</code> support. The runtime for clawup.</p>
+          <p>Required for native <code>fetch</code> support. The runtime for clawdup.</p>
         </div>
         <div class="feature-card">
           <span class="icon">&#129302;</span>
@@ -375,8 +375,8 @@ Always write tests.
         Start turning ClickUp tasks into pull requests with a single command.
       </p>
       <div class="hero-actions">
-        <a href="https://github.com/gehadshaat/clawup#readme" class="btn btn-primary">Read the Docs</a>
-        <a href="https://www.npmjs.com/package/clawup" class="btn btn-outline">View on npm</a>
+        <a href="https://github.com/gehadshaat/clawdup#readme" class="btn btn-primary">Read the Docs</a>
+        <a href="https://www.npmjs.com/package/clawdup" class="btn btn-outline">View on npm</a>
       </div>
     </div>
   </section>
@@ -385,10 +385,10 @@ Always write tests.
   <footer class="footer">
     <div class="footer-inner">
       <ul class="footer-links">
-        <li><a href="https://github.com/gehadshaat/clawup">GitHub</a></li>
-        <li><a href="https://www.npmjs.com/package/clawup">npm</a></li>
-        <li><a href="https://github.com/gehadshaat/clawup/issues">Issues</a></li>
-        <li><a href="https://github.com/gehadshaat/clawup/blob/main/LICENSE">License</a></li>
+        <li><a href="https://github.com/gehadshaat/clawdup">GitHub</a></li>
+        <li><a href="https://www.npmjs.com/package/clawdup">npm</a></li>
+        <li><a href="https://github.com/gehadshaat/clawdup/issues">Issues</a></li>
+        <li><a href="https://github.com/gehadshaat/clawdup/blob/main/LICENSE">License</a></li>
       </ul>
       <p>
         Created by <a href="https://github.com/gehadshaat">Gehad Shaat</a>.

@@ -1,20 +1,20 @@
 // Configuration module.
 // Resolves settings from (in priority order):
 //   1. Environment variables
-//   2. .clawup.env in the package directory (cwd)
-//   3. clawup.config.mjs in the package directory (cwd)
+//   2. .clawdup.env in the package directory (cwd)
+//   3. clawdup.config.mjs in the package directory (cwd)
 //   4. Defaults
 //
-// Designed for per-package use: each package that depends on clawup
-// has its own .clawup.env with its own ClickUp list ID, API key, etc.
+// Designed for per-package use: each package that depends on clawdup
+// has its own .clawdup.env with its own ClickUp list ID, API key, etc.
 
 import { existsSync, readFileSync } from "fs";
 import { resolve } from "path";
 import { execFileSync } from "child_process";
 import type { UserConfig } from "./types.js";
 
-// PROJECT_ROOT is the directory where clawup was invoked (the package directory).
-// Config files (.clawup.env, clawup.config.mjs, CLAUDE.md) are resolved from here.
+// PROJECT_ROOT is the directory where clawdup was invoked (the package directory).
+// Config files (.clawdup.env, clawdup.config.mjs, CLAUDE.md) are resolved from here.
 export const PROJECT_ROOT: string = process.cwd();
 
 // GIT_ROOT is the repository root (where .git lives).
@@ -33,9 +33,9 @@ export const GIT_ROOT: string = (() => {
 })();
 
 // --- .env loading ---
-// Look for .clawup.env in the project root
+// Look for .clawdup.env in the project root
 const envCandidates = [
-  resolve(PROJECT_ROOT, ".clawup.env"),
+  resolve(PROJECT_ROOT, ".clawdup.env"),
   resolve(PROJECT_ROOT, ".env.clickup"),
 ];
 
@@ -61,10 +61,10 @@ for (const envPath of envCandidates) {
 }
 
 // --- User config file ---
-// Load clawup.config.mjs if it exists.
+// Load clawdup.config.mjs if it exists.
 // This allows users to customize the Claude prompt, hooks, etc.
 let userConfig: UserConfig = {};
-const configPath = resolve(PROJECT_ROOT, "clawup.config.mjs");
+const configPath = resolve(PROJECT_ROOT, "clawdup.config.mjs");
 if (existsSync(configPath)) {
   try {
     const mod = await import(`file://${configPath}`);
@@ -82,7 +82,7 @@ function required(name: string): string {
   const val = process.env[name];
   if (!val) {
     console.error(`ERROR: Missing required environment variable: ${name}`);
-    console.error(`Set it in .clawup.env (in your project root) or export it.`);
+    console.error(`Set it in .clawdup.env (in your project root) or export it.`);
     process.exit(1);
   }
   return val;
@@ -98,7 +98,7 @@ if (!CLICKUP_LIST_ID && !CLICKUP_PARENT_TASK_ID) {
     "ERROR: Either CLICKUP_LIST_ID or CLICKUP_PARENT_TASK_ID must be set.",
   );
   console.error(
-    "Set one in .clawup.env (in your project root) or export it.",
+    "Set one in .clawdup.env (in your project root) or export it.",
   );
   process.exit(1);
 }
@@ -194,6 +194,12 @@ if (CLAUDE_MAX_TURNS > 500) {
   process.exit(1);
 }
 
+// Auto-approve mode: skip manual review and merge PRs immediately after Claude completes
+export const AUTO_APPROVE: boolean = (process.env.AUTO_APPROVE || "").toLowerCase() === "true";
+
+// Dry-run mode: simulate the full automation flow without making any changes
+export const DRY_RUN: boolean = (process.env.DRY_RUN || "").toLowerCase() === "true";
+
 // Branch naming
 export const BRANCH_PREFIX: string = process.env.BRANCH_PREFIX || "clickup";
 
@@ -203,37 +209,4 @@ if (!/^[a-zA-Z0-9_-]+$/.test(BRANCH_PREFIX)) {
     `Only alphanumeric characters, hyphens, and underscores are allowed.`,
   );
   process.exit(1);
-}
-
-// Logging
-const VALID_LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
-export const LOG_LEVEL: string = process.env.LOG_LEVEL || "info";
-
-if (!VALID_LOG_LEVELS.includes(LOG_LEVEL as typeof VALID_LOG_LEVELS[number])) {
-  console.error(
-    `ERROR: LOG_LEVEL "${LOG_LEVEL}" is not valid. Must be one of: ${VALID_LOG_LEVELS.join(", ")}`,
-  );
-  process.exit(1);
-}
-
-type LogLevel = "debug" | "info" | "warn" | "error";
-
-export function log(level: LogLevel, ...args: unknown[]): void {
-  const levels: Record<string, number> = {
-    debug: 0,
-    info: 1,
-    warn: 2,
-    error: 3,
-  };
-  if (levels[level]! >= levels[LOG_LEVEL]!) {
-    const timestamp = new Date().toISOString();
-    const prefix = `[${timestamp}] [${level.toUpperCase()}]`;
-    if (level === "error") {
-      console.error(prefix, ...args);
-    } else if (level === "warn") {
-      console.warn(prefix, ...args);
-    } else {
-      console.log(prefix, ...args);
-    }
-  }
 }
