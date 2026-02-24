@@ -468,7 +468,9 @@ Sending `SIGTERM` also triggers graceful shutdown.
 
 ## Writing Effective Tasks
 
-The quality of the automation output depends heavily on how you write your tasks. Here are best practices:
+The quality of the automation output depends heavily on how you write your tasks. Here are best practices.
+
+> For full guidelines, annotated examples, and copy-paste templates, see **[TASK_GUIDELINES.md](TASK_GUIDELINES.md)**.
 
 ### Task Title
 
