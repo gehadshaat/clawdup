@@ -6,6 +6,8 @@ Works with **any** project — just install, configure, and run.
 
 > **New to clawup?** Read the **[Complete Setup & Usage Guide](GUIDE.md)** for step-by-step instructions, including how to sign up for ClickUp, configure statuses, install all prerequisites, and get everything running.
 >
+> **Something broken?** See the **[Troubleshooting & Recovery Guide](TROUBLESHOOTING.md)** for common failure scenarios and how to fix them.
+>
 > **Looking for the full configuration reference?** See **[CONFIGURATION.md](CONFIGURATION.md)** for all CLI flags, environment variables, validation rules, and advanced options.
 
 ## Quick Start
