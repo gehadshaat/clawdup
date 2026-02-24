@@ -6,4 +6,5 @@ node_modules/
 .env.clickup
 .clawdup.todo.json
 .clawdup.lock
+.clawdup.metrics.json
 *.tgz

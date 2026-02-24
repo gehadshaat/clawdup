@@ -39,6 +39,7 @@ export { runClaudeOnTask, runClaudeOnReviewFeedback, generateWorkSummary, scanOu
 export { STATUS, PROJECT_ROOT, GIT_ROOT, DRY_RUN } from "./config.js";
 export { log, setLogLevel, setJsonOutput, isDebug, startTimer } from "./logger.js";
 export type { LogLevel, LogContext } from "./logger.js";
+export { recordRun, getMetricsSummary, getRunRecords, formatMetricsSummary } from "./metrics.js";
 export type {
   ClickUpTask,
   ClickUpUser,
@@ -48,4 +49,7 @@ export type {
   ClaudeResult,
   UserConfig,
   PullRequestOptions,
+  RunOutcome,
+  RunRecord,
+  MetricsSummary,
 } from "./types.js";
