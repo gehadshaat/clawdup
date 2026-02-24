@@ -8,6 +8,8 @@ Works with **any** project — just install, configure, and run.
 >
 > **Something broken?** See the **[Troubleshooting & Recovery Guide](TROUBLESHOOTING.md)** for common failure scenarios and how to fix them.
 >
+> **Want to understand the internals?** See the **[Architecture & State Flow](ARCHITECTURE.md)** for how the core loop, git operations, and status transitions work.
+>
 > **Looking for the full configuration reference?** See **[CONFIGURATION.md](CONFIGURATION.md)** for all CLI flags, environment variables, validation rules, and advanced options.
 
 ## Quick Start

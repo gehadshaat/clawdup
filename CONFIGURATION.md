@@ -2,7 +2,7 @@
 
 Complete reference for all CLI options, environment variables, and configuration files.
 
-> For a step-by-step setup guide, see [GUIDE.md](GUIDE.md). For a quick overview, see [README.md](README.md).
+> For a step-by-step setup guide, see [GUIDE.md](GUIDE.md). For a quick overview, see [README.md](README.md). For how the pipeline works internally, see the [Architecture & State Flow](ARCHITECTURE.md).
 
 ---
 
