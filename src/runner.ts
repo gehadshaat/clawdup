@@ -67,6 +67,7 @@ let isShuttingDown = false;
 let isProcessing = false;
 let signalHandlersRegistered = false;
 let interactiveMode = false;
+let shouldRelaunchAfterMerge = false;
 
 const TODO_FILE_PATH = resolve(PROJECT_ROOT, ".clawup.todo.json");
 const LOCK_FILE_PATH = resolve(PROJECT_ROOT, ".clawup.lock");
@@ -723,6 +724,10 @@ async function processApprovedTask(task: ClickUpTask): Promise<void> {
     );
 
     log("info", `Task ${taskId} approved and merged: ${prUrl}`);
+
+    // Signal that we should rebuild and relaunch to pick up the merged code
+    shouldRelaunchAfterMerge = true;
+    log("info", "Merge detected — will rebuild and relaunch after this polling cycle.");
   } catch (err) {
     log(
       "error",
@@ -1222,6 +1227,13 @@ async function pollForTasks(): Promise<void> {
 
     if (isShuttingDown) return;
 
+    // If a merge happened, skip TODO processing — we'll rebuild and relaunch first
+    // so that subsequent tasks run against the freshly merged code.
+    if (shouldRelaunchAfterMerge) {
+      log("info", "Skipping TODO processing — relaunch pending after merge.");
+      return;
+    }
+
     // Then, check for TODO tasks to implement
     const tasks = await getTasksByStatus(STATUS.TODO);
 
@@ -1273,6 +1285,7 @@ export async function startRunner(options?: { interactive?: boolean }): Promise<
   // Reset state for fresh run (supports relaunch loop)
   isShuttingDown = false;
   isProcessing = false;
+  shouldRelaunchAfterMerge = false;
   interactiveMode = options?.interactive ?? false;
 
   // Prevent concurrent instances
@@ -1344,14 +1357,19 @@ export async function startRunner(options?: { interactive?: boolean }): Promise<
   // Initial poll
   await pollForTasks();
 
-  // Check if relaunch is due right after initial poll
-  if (relaunchEnabled && !isProcessing && !isShuttingDown && Date.now() - runnerStartTime >= RELAUNCH_INTERVAL_MS) {
-    log("info", "Relaunch interval reached. Pulling base branch before relaunch...");
+  // Check if relaunch is needed — either after a merge or when the timer expires
+  const shouldRelaunchNow = shouldRelaunchAfterMerge
+    || (relaunchEnabled && Date.now() - runnerStartTime >= RELAUNCH_INTERVAL_MS);
+  if (shouldRelaunchNow && !isProcessing && !isShuttingDown) {
+    log("info", shouldRelaunchAfterMerge
+      ? "Merge completed — rebuilding and relaunching to pick up latest code..."
+      : "Relaunch interval reached. Pulling base branch before relaunch...");
     try {
       await syncBaseBranch();
     } catch (err) {
       log("error", `Failed to sync base branch before relaunch: ${(err as Error).message}`);
     }
+    shouldRelaunchAfterMerge = false;
     releaseLock();
     return true;
   }
@@ -1367,15 +1385,20 @@ export async function startRunner(options?: { interactive?: boolean }): Promise<
 
       await pollForTasks();
 
-      // Check if it's time to relaunch (only when idle)
-      if (relaunchEnabled && !isProcessing && !isShuttingDown && Date.now() - runnerStartTime >= RELAUNCH_INTERVAL_MS) {
+      // Check if relaunch is needed — either after a merge or when the timer expires
+      const shouldRelaunch = shouldRelaunchAfterMerge
+        || (relaunchEnabled && Date.now() - runnerStartTime >= RELAUNCH_INTERVAL_MS);
+      if (shouldRelaunch && !isProcessing && !isShuttingDown) {
         clearInterval(interval);
-        log("info", "Relaunch interval reached. Pulling base branch before relaunch...");
+        log("info", shouldRelaunchAfterMerge
+          ? "Merge completed — rebuilding and relaunching to pick up latest code..."
+          : "Relaunch interval reached. Pulling base branch before relaunch...");
         try {
           await syncBaseBranch();
         } catch (err) {
           log("error", `Failed to sync base branch before relaunch: ${(err as Error).message}`);
         }
+        shouldRelaunchAfterMerge = false;
         releaseLock();
         resolve(true);
         return;
