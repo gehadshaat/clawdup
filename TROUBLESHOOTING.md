@@ -1,12 +1,12 @@
 # Troubleshooting & Recovery Guide
 
-This guide covers common Clawup automation failures, how to diagnose them, and how to recover.
+This guide covers common Clawdup automation failures, how to diagnose them, and how to recover.
 
 ## Overview
 
-Clawup automates the pipeline from ClickUp task to GitHub PR. It polls for tasks, creates branches, runs Claude Code, commits/pushes, and manages PR lifecycle. Failures can occur at any stage — ClickUp API calls, git operations, Claude execution, or GitHub CLI commands.
+Clawdup automates the pipeline from ClickUp task to GitHub PR. It polls for tasks, creates branches, runs Claude Code, commits/pushes, and manages PR lifecycle. Failures can occur at any stage — ClickUp API calls, git operations, Claude execution, or GitHub CLI commands.
 
-When something goes wrong, Clawup typically:
+When something goes wrong, Clawdup typically:
 1. Posts a comment on the ClickUp task describing the error
 2. Moves the task to **"blocked"** or **"require input"**
 3. Cleans up the branch/PR if no useful work was produced
@@ -18,10 +18,10 @@ When something goes wrong, Clawup typically:
 
 **Symptoms:**
 - Log message: `Branch already exists for task {id}: {branch}. Checking it out.`
-- This is **not an error** — Clawup handles this automatically
+- This is **not an error** — Clawdup handles this automatically
 
 **What happens:**
-When Clawup creates a branch for a task, it first checks for an existing local or remote branch matching the pattern `{prefix}/CU-{task-id}-*`. If found, it checks out the existing branch instead of creating a new one.
+When Clawdup creates a branch for a task, it first checks for an existing local or remote branch matching the pattern `{prefix}/CU-{task-id}-*`. If found, it checks out the existing branch instead of creating a new one.
 
 **When it can cause issues:**
 - The existing branch has stale or conflicting changes from a previous failed run
@@ -37,7 +37,7 @@ When Clawup creates a branch for a task, it first checks for an existing local o
 3. Move the task back to **"to do"** in ClickUp to retry
 
 **Prevention:**
-- Let Clawup manage branch lifecycle — avoid manually modifying task branches
+- Let Clawdup manage branch lifecycle — avoid manually modifying task branches
 - If a task is stuck in "blocked", resolve the root cause before moving it back to "to do"
 
 ---
@@ -50,11 +50,11 @@ When Clawup creates a branch for a task, it first checks for an existing local o
 - PR shows "This branch has conflicts that must be resolved"
 
 **What happens:**
-Clawup detects merge conflicts in two situations:
+Clawdup detects merge conflicts in two situations:
 1. **During approval merge** — when a PR is approved but the base branch has diverged
 2. **During review/retry** — when checking out an existing branch and merging the latest base
 
-Clawup attempts automatic resolution using Claude Code. If Claude cannot resolve the conflicts, the task is moved to "blocked".
+Clawdup attempts automatic resolution using Claude Code. If Claude cannot resolve the conflicts, the task is moved to "blocked".
 
 **Recovery:**
 1. Check out the task branch locally:
@@ -155,7 +155,7 @@ Claude started working but encountered an error partway through. The partial cha
 1. Review the partial changes in the PR
 2. Either:
    - Complete the work manually on the branch
-   - Move the task back to **"to do"** so Clawup picks it up again (it will detect the existing branch and continue from where it left off)
+   - Move the task back to **"to do"** so Clawdup picks it up again (it will detect the existing branch and continue from where it left off)
 3. Once complete, move to **"in review"** for human review
 
 ---
@@ -163,11 +163,11 @@ Claude started working but encountered an error partway through. The partial cha
 ### Orphaned In-Progress Tasks
 
 **Symptoms:**
-- Tasks stuck in **"in progress"** after a Clawup crash or restart
+- Tasks stuck in **"in progress"** after a Clawdup crash or restart
 - Log message at startup: `Found {N} orphaned in-progress task(s). Recovering...`
 
 **What happens:**
-When Clawup starts, it checks for tasks in "in progress" status. These indicate tasks that were being worked on when the process was interrupted. Clawup recovers them automatically:
+When Clawdup starts, it checks for tasks in "in progress" status. These indicate tasks that were being worked on when the process was interrupted. Clawdup recovers them automatically:
 - If a branch exists with commits: pushes and creates/finds a PR, moves to "in review"
 - If a branch exists but is empty: deletes it and re-processes the task
 - If no branch exists: resets the task to "to do"
@@ -198,7 +198,7 @@ Claude Code took longer than the configured timeout (default: 10 minutes / 600,0
 3. Move back to **"to do"** to retry
 
 **Prevention:**
-- Increase `CLAUDE_TIMEOUT_MS` in `.clawup.env` for complex tasks
+- Increase `CLAUDE_TIMEOUT_MS` in `.clawdup.env` for complex tasks
 - Increase `CLAUDE_MAX_TURNS` if Claude needs more iterations
 - Write smaller, more focused tasks
 
@@ -211,7 +211,7 @@ Claude Code took longer than the configured timeout (default: 10 minutes / 600,0
 - Claude outputs `NEEDS_MORE_INFO: The task description does not contain a clear software development request.`
 
 **What happens:**
-Clawup scans task content for known prompt injection patterns (e.g., "ignore previous instructions", "you are now", `</task>` tag attempts). When detected:
+Clawdup scans task content for known prompt injection patterns (e.g., "ignore previous instructions", "you are now", `</task>` tag attempts). When detected:
 - A warning is logged
 - The content is still processed but sanitized (closing `</task>` tags are escaped)
 - Claude's system prompt includes instructions to ignore manipulation attempts
@@ -229,7 +229,7 @@ Clawup scans task content for known prompt injection patterns (e.g., "ignore pre
 
 **Symptoms:**
 - Error at startup: `Working tree is not clean. Please commit or stash changes before running.`
-- Clawup exits immediately
+- Clawdup exits immediately
 
 **Recovery:**
 1. Commit or stash your uncommitted changes:
@@ -242,7 +242,7 @@ Clawup scans task content for known prompt injection patterns (e.g., "ignore pre
    ```bash
    git checkout main
    ```
-3. Restart Clawup
+3. Restart Clawdup
 
 ---
 
@@ -261,7 +261,7 @@ Clawup scans task content for known prompt injection patterns (e.g., "ignore pre
 **Recovery:**
 1. Verify your API token: `curl -H "Authorization: pk_xxx" https://api.clickup.com/api/v2/user`
 2. Check that `CLICKUP_LIST_ID` or `CLICKUP_PARENT_TASK_ID` is correct
-3. Run `clawup --check` to validate the configuration
+3. Run `clawdup --check` to validate the configuration
 
 ---
 
@@ -291,10 +291,10 @@ Clawup scans task content for known prompt injection patterns (e.g., "ignore pre
 - Tasks may not be picked up or status transitions may fail
 
 **Recovery:**
-1. Run `clawup --statuses` to see the required statuses
+1. Run `clawdup --statuses` to see the required statuses
 2. Add the missing statuses to your ClickUp list (List Settings > Statuses)
-3. Or configure custom status names in `.clawup.env` (e.g., `STATUS_TODO=open`)
-4. Run `clawup --check` to verify
+3. Or configure custom status names in `.clawdup.env` (e.g., `STATUS_TODO=open`)
+4. Run `clawdup --check` to verify
 
 ---
 
@@ -305,7 +305,7 @@ Clawup scans task content for known prompt injection patterns (e.g., "ignore pre
 - Task moved to **"blocked"** when trying to merge an approved task
 
 **What happens:**
-When a task is moved to "approved", Clawup tries to merge its PR. If the PR was already closed or is in an unexpected state, the merge fails.
+When a task is moved to "approved", Clawdup tries to merge its PR. If the PR was already closed or is in an unexpected state, the merge fails.
 
 **Recovery:**
 1. If the PR was closed accidentally, reopen it on GitHub
@@ -316,7 +316,7 @@ When a task is moved to "approved", Clawup tries to merge its PR. If the PR was 
 
 ## Where to Look in Logs
 
-Clawup logs all operations with timestamps and severity levels. Set `LOG_LEVEL=debug` in `.clawup.env` for verbose output.
+Clawdup logs all operations with timestamps and severity levels. Set `LOG_LEVEL=debug` in `.clawdup.env` for verbose output.
 
 **Key log patterns to search for:**
 - `[ERROR]` — failures that stopped a task
@@ -329,16 +329,16 @@ Clawup logs all operations with timestamps and severity levels. Set `LOG_LEVEL=d
 **Useful commands:**
 ```bash
 # Run with debug logging
-LOG_LEVEL=debug clawup
+LOG_LEVEL=debug clawdup
 
 # Check configuration
-clawup --check
+clawdup --check
 
 # Process a single task for testing
-clawup --once {task-id}
+clawdup --once {task-id}
 
 # Interactive mode (see Claude's work in real-time)
-clawup --once {task-id} --interactive
+clawdup --once {task-id} --interactive
 ```
 
 ## When to Escalate
@@ -349,11 +349,11 @@ Collect this information before asking for help:
 2. **The task ID** and URL
 3. **The branch name** (if one was created)
 4. **Git state**: `git status`, `git branch -a | grep CU-{task-id}`, `git log --oneline -5`
-5. **Configuration**: output of `clawup --check`
+5. **Configuration**: output of `clawdup --check`
 6. **Log output**: run with `LOG_LEVEL=debug` and capture the relevant output
 
 **Situations that warrant escalation:**
-- Clawup crashes repeatedly on the same task after multiple retries
+- Clawdup crashes repeatedly on the same task after multiple retries
 - Data inconsistency between ClickUp status and actual PR/branch state
 - Claude consistently produces incorrect or harmful code changes
 - Authentication issues that persist after re-authenticating

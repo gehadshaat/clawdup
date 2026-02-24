@@ -1,10 +1,10 @@
 {
-  "name": "clawup",
+  "name": "clawdup",
   "version": "1.0.0",
   "description": "Automated pipeline that polls ClickUp for tasks, uses Claude Code to implement them, and creates GitHub PRs",
   "type": "module",
   "bin": {
-    "clawup": "./bin/clawup.js"
+    "clawdup": "./bin/clawdup.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -67,10 +67,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/gehadshaat/clawup.git"
+    "url": "git+https://github.com/gehadshaat/clawdup.git"
   },
-  "homepage": "https://github.com/gehadshaat/clawup#readme",
+  "homepage": "https://github.com/gehadshaat/clawdup#readme",
   "bugs": {
-    "url": "https://github.com/gehadshaat/clawup/issues"
+    "url": "https://github.com/gehadshaat/clawdup/issues"
   }
 }

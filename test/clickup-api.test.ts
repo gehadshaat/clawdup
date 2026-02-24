@@ -514,10 +514,10 @@ describe("PR URL detection in comments", () => {
   const prUrlPattern = /https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+/;
 
   it("finds PR URL in automation comment", () => {
-    const text = "🤖 Automation picked up this task and is now working on it.\n\nPR: https://github.com/gehadshaat/clawup/pull/34";
+    const text = "🤖 Automation picked up this task and is now working on it.\n\nPR: https://github.com/gehadshaat/clawdup/pull/34";
     const match = text.match(prUrlPattern);
     assert.ok(match);
-    assert.equal(match![0], "https://github.com/gehadshaat/clawup/pull/34");
+    assert.equal(match![0], "https://github.com/gehadshaat/clawdup/pull/34");
   });
 
   it("finds PR URL in completion comment", () => {

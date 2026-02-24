@@ -1,6 +1,6 @@
-# clawup - Complete Setup & Usage Guide
+# clawdup - Complete Setup & Usage Guide
 
-This guide walks you through everything you need to set up and use **clawup**, an automated pipeline that connects ClickUp tasks to Claude Code for AI-powered implementation with automatic GitHub PR creation.
+This guide walks you through everything you need to set up and use **clawdup**, an automated pipeline that connects ClickUp tasks to Claude Code for AI-powered implementation with automatic GitHub PR creation.
 
 ---
 
@@ -15,8 +15,8 @@ This guide walks you through everything you need to set up and use **clawup**, a
 7. [Step 5: Find Your ClickUp List ID](#step-5-find-your-clickup-list-id)
 8. [Step 6: Enable ClickUp GitHub Integration](#step-6-enable-clickup-github-integration)
 9. [Step 7: Install Prerequisites](#step-7-install-prerequisites)
-10. [Step 8: Install clawup](#step-8-install-clawup)
-11. [Step 9: Configure clawup](#step-9-configure-clawup)
+10. [Step 8: Install clawdup](#step-8-install-clawdup)
+11. [Step 9: Configure clawdup](#step-9-configure-clawdup)
 12. [Step 10: Validate Your Setup](#step-10-validate-your-setup)
 13. [Running the Automation](#running-the-automation)
 14. [Writing Effective Tasks](#writing-effective-tasks)
@@ -33,7 +33,7 @@ This guide walks you through everything you need to set up and use **clawup**, a
 
 ## Overview
 
-clawup automates the software development workflow by:
+clawdup automates the software development workflow by:
 
 1. Polling a ClickUp list for tasks marked "to do"
 2. Picking the highest-priority task
@@ -43,7 +43,7 @@ clawup automates the software development workflow by:
 6. Updating the ClickUp task status throughout the process
 7. Automatically merging the PR once a human reviewer approves it
 
-This means you can write a task description in ClickUp, and clawup will attempt to implement it, create a PR for review, and merge it when approved — all without manual intervention.
+This means you can write a task description in ClickUp, and clawdup will attempt to implement it, create a PR for review, and merge it when approved — all without manual intervention.
 
 ---
 
@@ -53,7 +53,7 @@ Before you begin, ensure you have the following:
 
 | Requirement | Minimum Version | Purpose |
 |---|---|---|
-| **Node.js** | 18.0+ | Runtime for clawup (needs native `fetch`) |
+| **Node.js** | 18.0+ | Runtime for clawdup (needs native `fetch`) |
 | **Git** | Any recent version | Version control and branch management |
 | **GitHub CLI (`gh`)** | Any recent version | Creating and merging pull requests |
 | **Claude Code CLI (`claude`)** | Latest | AI-powered code implementation |
@@ -71,21 +71,21 @@ If you don't already have a ClickUp account:
 3. Sign up using your email, Google account, or SSO
 4. Follow the onboarding flow to create your **Workspace** (this is your team's top-level container)
 
-> **Tip:** The free tier of ClickUp is sufficient for using clawup. You don't need a paid plan.
+> **Tip:** The free tier of ClickUp is sufficient for using clawdup. You don't need a paid plan.
 
 ### ClickUp Hierarchy
 
-ClickUp organizes work in a hierarchy. Understanding this helps when setting up clawup:
+ClickUp organizes work in a hierarchy. Understanding this helps when setting up clawdup:
 
 ```
 Workspace (your team/org)
 └── Space (a project area, e.g., "Engineering")
     └── Folder (optional grouping)
-        └── List (where tasks live — this is what clawup polls)
+        └── List (where tasks live — this is what clawdup polls)
             └── Tasks (individual work items)
 ```
 
-clawup works at the **List** level — it polls a specific list for tasks.
+clawdup works at the **List** level — it polls a specific list for tasks.
 
 ---
 
@@ -96,13 +96,13 @@ clawup works at the **List** level — it polls a specific list for tasks.
 3. Inside the Space, click **"+ Add List"**
 4. Name the list (e.g., "Automation Tasks" or your project name)
 
-This list is where you'll create tasks for clawup to pick up and implement.
+This list is where you'll create tasks for clawdup to pick up and implement.
 
 ---
 
 ## Step 3: Configure ClickUp List Statuses
 
-clawup relies on specific task statuses to track progress. You need to set up these statuses in your ClickUp list.
+clawdup relies on specific task statuses to track progress. You need to set up these statuses in your ClickUp list.
 
 ### Required Statuses
 
@@ -130,13 +130,13 @@ clawup relies on specific task statuses to track progress. You need to set up th
    - All others should be "active" type statuses
 8. Click **"Save"**
 
-> **Tip:** You can also run `clawup --statuses` after installation to see this list as a quick reference.
+> **Tip:** You can also run `clawdup --statuses` after installation to see this list as a quick reference.
 
 ---
 
 ## Step 4: Get Your ClickUp API Token
 
-clawup needs an API token to interact with ClickUp on your behalf.
+clawdup needs an API token to interact with ClickUp on your behalf.
 
 1. Click your avatar in the bottom-left corner of ClickUp
 2. Select **"Settings"**
@@ -151,7 +151,7 @@ clawup needs an API token to interact with ClickUp on your behalf.
 
 ## Step 5: Find Your ClickUp List ID
 
-clawup needs the ID of the specific list to poll for tasks.
+clawdup needs the ID of the specific list to poll for tasks.
 
 1. Open your ClickUp list in the browser
 2. Click the **"..."** (three dots) menu next to the list name
@@ -169,7 +169,7 @@ Alternatively:
 
 This step is optional but highly recommended. It automatically links your GitHub branches, commits, and PRs to the corresponding ClickUp tasks.
 
-clawup names branches, commits, and PR titles with `CU-{task-id}` (e.g., `CU-abc123`). ClickUp's GitHub integration recognizes this pattern and shows the linked activity directly on the task.
+clawdup names branches, commits, and PR titles with `CU-{task-id}` (e.g., `CU-abc123`). ClickUp's GitHub integration recognizes this pattern and shows the linked activity directly on the task.
 
 ### How to Enable
 
@@ -195,7 +195,7 @@ Once enabled, you'll see GitHub activity (branches, commits, PRs) directly on ea
 
 ### Node.js (18+)
 
-clawup requires Node.js 18 or later for native `fetch` support.
+clawdup requires Node.js 18 or later for native `fetch` support.
 
 ```bash
 # Check your version
@@ -259,7 +259,7 @@ You'll need an Anthropic API key or an active Claude subscription for Claude Cod
 
 ---
 
-## Step 8: Install clawup
+## Step 8: Install clawdup
 
 Choose one of these installation methods:
 
@@ -269,7 +269,7 @@ Install as a dev dependency in your project:
 
 ```bash
 cd your-project
-npm install -D clawup
+npm install -D clawdup
 ```
 
 Add convenience scripts to your `package.json`:
@@ -277,10 +277,10 @@ Add convenience scripts to your `package.json`:
 ```json
 {
   "scripts": {
-    "clawup": "clawup",
-    "clawup:check": "clawup --check",
-    "clawup:setup": "clawup --setup",
-    "clawup:once": "clawup --once"
+    "clawdup": "clawdup",
+    "clawdup:check": "clawdup --check",
+    "clawdup:setup": "clawdup --setup",
+    "clawdup:once": "clawdup --once"
   }
 }
 ```
@@ -288,26 +288,26 @@ Add convenience scripts to your `package.json`:
 ### Option B: Global Install
 
 ```bash
-npm install -g clawup
+npm install -g clawdup
 ```
 
 ### Option C: Use npx (No Install)
 
 ```bash
-npx clawup --init
-npx clawup
+npx clawdup --init
+npx clawdup
 ```
 
 ---
 
-## Step 9: Configure clawup
+## Step 9: Configure clawdup
 
-There are two ways to configure clawup: the interactive setup wizard or manual configuration.
+There are two ways to configure clawdup: the interactive setup wizard or manual configuration.
 
 ### Option A: Interactive Setup Wizard (Recommended)
 
 ```bash
-clawup --setup
+clawdup --setup
 ```
 
 The wizard will:
@@ -316,20 +316,20 @@ The wizard will:
 3. Validate the connection to ClickUp
 4. Check if the required statuses exist
 5. Ask for optional settings (base branch, polling interval, etc.)
-6. Write the `.clawup.env` file
+6. Write the `.clawdup.env` file
 
 ### Option B: Quick Init + Manual Edit
 
 ```bash
 # Generate template config files
-clawup --init
+clawdup --init
 ```
 
 This creates two files:
-- **`.clawup.env`** — Environment variables (API token, list ID, etc.)
-- **`clawup.config.mjs`** — Optional Claude Code customization
+- **`.clawdup.env`** — Environment variables (API token, list ID, etc.)
+- **`clawdup.config.mjs`** — Optional Claude Code customization
 
-Edit `.clawup.env` and fill in your values:
+Edit `.clawdup.env` and fill in your values:
 
 ```env
 # Required
@@ -347,19 +347,19 @@ CLICKUP_LIST_ID=901234567890
 
 ### Add to .gitignore
 
-Your `.clawup.env` contains secrets. Make sure it's not committed:
+Your `.clawdup.env` contains secrets. Make sure it's not committed:
 
 ```bash
-echo ".clawup.env" >> .gitignore
+echo ".clawdup.env" >> .gitignore
 echo ".env.clickup" >> .gitignore
 ```
 
 ### Optional: Customize Claude's Behavior
 
-Edit `clawup.config.mjs` to add project-specific instructions for Claude:
+Edit `clawdup.config.mjs` to add project-specific instructions for Claude:
 
 ```js
-// clawup.config.mjs
+// clawdup.config.mjs
 export default {
   // Extra instructions for Claude (appended to the system prompt)
   prompt: `
@@ -375,7 +375,7 @@ Use TypeScript strict mode conventions.
 
 ### Optional: Add a CLAUDE.md File
 
-If your project has a `CLAUDE.md` file (used by Claude Code for project context), clawup will automatically include its contents in every task prompt. This is the best way to give Claude context about your project's architecture, conventions, and coding standards.
+If your project has a `CLAUDE.md` file (used by Claude Code for project context), clawdup will automatically include its contents in every task prompt. This is the best way to give Claude context about your project's architecture, conventions, and coding standards.
 
 ```markdown
 # CLAUDE.md
@@ -394,7 +394,7 @@ This is a Node.js project using TypeScript and Express.
 Before running the automation, verify everything is configured correctly:
 
 ```bash
-clawup --check
+clawdup --check
 ```
 
 This will verify:
@@ -404,7 +404,7 @@ This will verify:
 - Claude Code CLI (`claude`) is installed and working
 - GitHub CLI (`gh`) is installed
 - `CLAUDE.md` presence (optional)
-- `clawup.config.mjs` presence (optional)
+- `clawdup.config.mjs` presence (optional)
 
 Example output:
 
@@ -435,7 +435,7 @@ Fix any issues reported before proceeding.
 Start the automation and let it continuously poll for tasks:
 
 ```bash
-clawup
+clawdup
 ```
 
 This will:
@@ -450,14 +450,14 @@ This will:
 To process one specific task without continuous polling:
 
 ```bash
-clawup --once <task-id>
+clawdup --once <task-id>
 ```
 
 The task ID is the alphanumeric identifier from ClickUp (visible in the task URL or the task detail panel).
 
 ### Stopping the Automation
 
-Press `Ctrl+C` to gracefully shut down. clawup will:
+Press `Ctrl+C` to gracefully shut down. clawdup will:
 1. Finish processing the current task (if any)
 2. Return to the base branch
 3. Exit cleanly
@@ -497,7 +497,7 @@ The validation should happen on blur and on form submission.
 
 ### Checklists / Acceptance Criteria
 
-Use ClickUp checklists for acceptance criteria. clawup includes these in the prompt to Claude:
+Use ClickUp checklists for acceptance criteria. clawdup includes these in the prompt to Claude:
 
 - [ ] Email validation shows error for invalid formats
 - [ ] Password validation enforces minimum requirements
@@ -529,7 +529,7 @@ Tasks with the same priority are processed by creation date (oldest first).
 
 ## Understanding the Workflow
 
-Here's what happens when clawup processes a task:
+Here's what happens when clawdup processes a task:
 
 ```
 ┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
@@ -547,14 +547,14 @@ Here's what happens when clawup processes a task:
 
 ### Detailed Steps
 
-1. **Poll** — clawup checks the ClickUp list every 30 seconds for tasks with "to do" status
+1. **Poll** — clawdup checks the ClickUp list every 30 seconds for tasks with "to do" status
 2. **Pick** — Selects the highest-priority task (urgent > high > normal > low, then oldest first)
 3. **Status update** — Moves the task to "in progress" and adds a comment
 4. **Branch** — Creates a branch named `clickup/CU-{task-id}-{slug}` from the base branch
 5. **Claude Code** — Runs Claude Code with:
    - The task title, description, checklists, subtasks, and comments
    - Your `CLAUDE.md` project context (if it exists)
-   - Custom instructions from `clawup.config.mjs` (if configured)
+   - Custom instructions from `clawdup.config.mjs` (if configured)
 6. **Result handling:**
    - **Success with changes** — Commits, pushes, creates a GitHub PR, moves task to "in review"
    - **Needs input** — Adds a comment explaining what info is missing, moves to "require input"
@@ -564,12 +564,12 @@ Here's what happens when clawup processes a task:
 
 ### Approval and Merge
 
-clawup also watches for tasks in the "approved" status:
+clawdup also watches for tasks in the "approved" status:
 
 1. A human reviews the PR and the task
 2. The human moves the task to **"approved"** in ClickUp
-3. On the next poll, clawup detects the approved task
-4. clawup merges the PR (squash merge, deletes the branch)
+3. On the next poll, clawdup detects the approved task
+4. clawdup merges the PR (squash merge, deletes the branch)
 5. The task is moved to **"complete"**
 
 ---
@@ -585,29 +585,29 @@ to do → in progress → in review → approved → complete
 
 | Transition | Triggered By | What Happens |
 |---|---|---|
-| to do → in progress | Automation | clawup picks up the task and starts working |
+| to do → in progress | Automation | clawdup picks up the task and starts working |
 | in progress → in review | Automation | Claude succeeded, PR created |
 | in progress → require input | Automation | Claude needs more information |
 | in progress → blocked | Automation | An error occurred |
 | require input → to do | Human | After adding requested info, move back to retry |
 | in review → approved | Human | After reviewing the PR, approve it |
-| approved → complete | Automation | clawup merges the PR |
+| approved → complete | Automation | clawdup merges the PR |
 | blocked → to do | Human | After fixing the issue, move back to retry |
 
 ---
 
 ## Reviewing and Approving Changes
 
-When clawup creates a PR:
+When clawdup creates a PR:
 
 1. **Check the ClickUp task** — The automation adds a comment with the PR link
 2. **Review the PR on GitHub** — Look at the code changes, run tests locally if needed
 3. **If changes look good:**
    - Move the ClickUp task status to **"approved"**
-   - clawup will automatically merge the PR on the next poll cycle
+   - clawdup will automatically merge the PR on the next poll cycle
 4. **If changes need work:**
    - Leave comments on the PR or ClickUp task
-   - Move the task back to **"to do"** to have clawup retry
+   - Move the task back to **"to do"** to have clawdup retry
    - Or make manual edits on the branch and push them
 
 ---
@@ -616,7 +616,7 @@ When clawup creates a PR:
 
 ### All Environment Variables
 
-These can be set in `.clawup.env` or as system environment variables:
+These can be set in `.clawdup.env` or as system environment variables:
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
@@ -668,49 +668,49 @@ LOG_LEVEL=debug
 
 ## Monorepo Setup
 
-In a monorepo, each package can have its own clawup configuration pointing to a different ClickUp list:
+In a monorepo, each package can have its own clawdup configuration pointing to a different ClickUp list:
 
 ```
 my-monorepo/
 ├── packages/
 │   ├── frontend/
-│   │   ├── .clawup.env          # CLICKUP_LIST_ID=frontend-list-id
-│   │   ├── clawup.config.mjs    # Frontend-specific instructions
-│   │   └── package.json         # "clawup": "clawup"
+│   │   ├── .clawdup.env          # CLICKUP_LIST_ID=frontend-list-id
+│   │   ├── clawdup.config.mjs    # Frontend-specific instructions
+│   │   └── package.json         # "clawdup": "clawdup"
 │   └── backend/
-│       ├── .clawup.env          # CLICKUP_LIST_ID=backend-list-id
-│       ├── clawup.config.mjs    # Backend-specific instructions
-│       └── package.json         # "clawup": "clawup"
+│       ├── .clawdup.env          # CLICKUP_LIST_ID=backend-list-id
+│       ├── clawdup.config.mjs    # Backend-specific instructions
+│       └── package.json         # "clawdup": "clawdup"
 ├── CLAUDE.md                    # Shared project context
 └── pnpm-workspace.yaml
 ```
 
 ### How It Works
 
-- Config files (`.clawup.env`, `clawup.config.mjs`) are resolved from the directory where `clawup` is run
+- Config files (`.clawdup.env`, `clawdup.config.mjs`) are resolved from the directory where `clawdup` is run
 - Git operations automatically use the repository root (detected via `git rev-parse --show-toplevel`)
 - `CLAUDE.md` is checked in both the package directory and the repo root
-- Each package runs its own independent clawup instance
+- Each package runs its own independent clawdup instance
 
 ### Running in a Monorepo
 
 ```bash
 # From the frontend package
 cd packages/frontend
-npx clawup
+npx clawdup
 
 # Or using package scripts
-pnpm --filter frontend run clawup
+pnpm --filter frontend run clawdup
 ```
 
 ---
 
 ## Programmatic API
 
-You can import clawup's modules directly for custom integrations:
+You can import clawdup's modules directly for custom integrations:
 
 ```js
-import { startRunner, runSingleTask } from "clawup";
+import { startRunner, runSingleTask } from "clawdup";
 import {
   getTasksByStatus,
   getTask,
@@ -718,7 +718,7 @@ import {
   addTaskComment,
   formatTaskForClaude,
   validateStatuses,
-} from "clawup/clickup-api";
+} from "clawdup/clickup-api";
 import {
   detectGitHubRepo,
   createTaskBranch,
@@ -726,18 +726,18 @@ import {
   pushBranch,
   createPullRequest,
   mergePullRequest,
-} from "clawup/git-ops";
-import { runClaudeOnTask } from "clawup/claude-worker";
-import { STATUS, log } from "clawup/config";
+} from "clawdup/git-ops";
+import { runClaudeOnTask } from "clawdup/claude-worker";
+import { STATUS, log } from "clawdup/config";
 ```
 
 ### Example: Custom Task Processing
 
 ```js
-import { getTask, updateTaskStatus, formatTaskForClaude } from "clawup/clickup-api";
-import { createTaskBranch } from "clawup/git-ops";
-import { runClaudeOnTask } from "clawup/claude-worker";
-import { STATUS } from "clawup/config";
+import { getTask, updateTaskStatus, formatTaskForClaude } from "clawdup/clickup-api";
+import { createTaskBranch } from "clawdup/git-ops";
+import { runClaudeOnTask } from "clawdup/claude-worker";
+import { STATUS } from "clawdup/config";
 
 const task = await getTask("abc123");
 const prompt = formatTaskForClaude(task);
@@ -757,9 +757,9 @@ if (result.success) {
 
 ### "Missing required environment variable: CLICKUP_API_TOKEN"
 
-Your `.clawup.env` file is missing or doesn't contain `CLICKUP_API_TOKEN`. Make sure:
-- The file exists in the directory where you run `clawup`
-- The file is named `.clawup.env` (or `.env.clickup`)
+Your `.clawdup.env` file is missing or doesn't contain `CLICKUP_API_TOKEN`. Make sure:
+- The file exists in the directory where you run `clawdup`
+- The file is named `.clawdup.env` (or `.env.clickup`)
 - The token value is set correctly (no quotes needed)
 
 ### "ClickUp API error 401"
@@ -772,7 +772,7 @@ The list ID is incorrect. Double-check the ID by copying the list link from Clic
 
 ### "Status validation failed"
 
-Your ClickUp list is missing required statuses. Run `clawup --statuses` to see which statuses are needed, then add them in ClickUp (List Settings > Statuses).
+Your ClickUp list is missing required statuses. Run `clawdup --statuses` to see which statuses are needed, then add them in ClickUp (List Settings > Statuses).
 
 ### "claude command not found"
 
@@ -802,7 +802,7 @@ It should be a GitHub URL (SSH or HTTPS format).
 
 ### "Working tree is not clean"
 
-clawup requires a clean git working directory before starting. Commit or stash any pending changes:
+clawdup requires a clean git working directory before starting. Commit or stash any pending changes:
 
 ```bash
 git stash
@@ -826,7 +826,7 @@ CLAUDE_MAX_TURNS=100
 
 ### Task stuck in "in progress"
 
-If clawup crashes or is killed while processing a task, the task may be left as "in progress". On the next startup, clawup automatically detects and recovers orphaned tasks:
+If clawdup crashes or is killed while processing a task, the task may be left as "in progress". On the next startup, clawdup automatically detects and recovers orphaned tasks:
 - If a branch with commits exists, it pushes and creates a PR
 - If a branch exists but has no commits, it re-processes the task
 - If no branch exists, it resets the task to "to do"
@@ -835,7 +835,7 @@ You can also manually move the task back to "to do" in ClickUp to retry it.
 
 ### Follow-up tasks not being created
 
-If Claude discovers follow-up work during a task, it creates a `.clawup.todo.json` file. clawup automatically processes this file after each task, creating new ClickUp tasks from its contents. If this isn't working, check the logs with `LOG_LEVEL=debug`.
+If Claude discovers follow-up work during a task, it creates a `.clawdup.todo.json` file. clawdup automatically processes this file after each task, creating new ClickUp tasks from its contents. If this isn't working, check the logs with `LOG_LEVEL=debug`.
 
 ---
 
@@ -843,7 +843,7 @@ If Claude discovers follow-up work during a task, it creates a `.clawup.todo.jso
 
 ### Can I use this with any project?
 
-Yes. clawup works with any project that lives in a GitHub repository. It doesn't assume any specific language, framework, or tooling. Claude Code handles the actual implementation and adapts to your codebase.
+Yes. clawdup works with any project that lives in a GitHub repository. It doesn't assume any specific language, framework, or tooling. Claude Code handles the actual implementation and adapts to your codebase.
 
 ### Does it work with private repositories?
 
@@ -851,17 +851,17 @@ Yes, as long as:
 - Your `gh` CLI is authenticated with access to the repository
 - Git is configured with push access (SSH key or credentials)
 
-### Can multiple people run clawup on the same list?
+### Can multiple people run clawdup on the same list?
 
-Not recommended. clawup is designed to run as a single instance per list to avoid conflicts. If two instances pick up the same task, they'll create conflicting branches and PRs.
+Not recommended. clawdup is designed to run as a single instance per list to avoid conflicts. If two instances pick up the same task, they'll create conflicting branches and PRs.
 
 ### How do I retry a failed task?
 
-Move the task back to "to do" in ClickUp. On the next poll, clawup will pick it up again. If it was moved to "require input", add the requested information before moving it back.
+Move the task back to "to do" in ClickUp. On the next poll, clawdup will pick it up again. If it was moved to "require input", add the requested information before moving it back.
 
 ### Can I customize which tools Claude Code can use?
 
-Yes, via `clawup.config.mjs`:
+Yes, via `clawdup.config.mjs`:
 
 ```js
 export default {
@@ -869,24 +869,24 @@ export default {
 };
 ```
 
-By default, clawup allows: Edit, Write, Read, Glob, Grep, and Bash.
+By default, clawdup allows: Edit, Write, Read, Glob, Grep, and Bash.
 
 ### How do I see what Claude is doing?
 
-clawup streams Claude's output to the terminal in real time. You'll see text output and tool usage (file reads, edits, bash commands) as they happen. For more detail, set `LOG_LEVEL=debug` in your `.clawup.env`.
+clawdup streams Claude's output to the terminal in real time. You'll see text output and tool usage (file reads, edits, bash commands) as they happen. For more detail, set `LOG_LEVEL=debug` in your `.clawdup.env`.
 
-### What merge strategy does clawup use?
+### What merge strategy does clawdup use?
 
 Squash merge. This keeps your main branch history clean with one commit per task. The source branch is automatically deleted after merging.
 
 ### Can I use a different base branch?
 
-Yes, set `BASE_BRANCH` in your `.clawup.env`:
+Yes, set `BASE_BRANCH` in your `.clawdup.env`:
 
 ```env
 BASE_BRANCH=develop
 ```
 
-### What happens if I stop clawup mid-task?
+### What happens if I stop clawdup mid-task?
 
-`Ctrl+C` triggers a graceful shutdown — clawup finishes the current task before exiting. If the process is killed forcefully (e.g., `kill -9`), the task will remain "in progress". On the next startup, clawup recovers orphaned tasks automatically.
+`Ctrl+C` triggers a graceful shutdown — clawdup finishes the current task before exiting. If the process is killed forcefully (e.g., `kill -9`), the task will remain "in progress". On the next startup, clawdup recovers orphaned tasks automatically.

@@ -1,6 +1,6 @@
-# Releasing clawup to npm
+# Releasing clawdup to npm
 
-Checklist for publishing a new version of clawup to the npm registry.
+Checklist for publishing a new version of clawdup to the npm registry.
 
 ## Prerequisites (one-time setup)
 
@@ -11,9 +11,9 @@ Checklist for publishing a new version of clawup to the npm registry.
   - Go to [https://www.npmjs.com/settings/~/tfa](https://www.npmjs.com/settings/~/tfa)
   - Enable 2FA for authorization and publishing (use an authenticator app or security key)
 - [ ] **Reserve the package name** on npm
-  - Check availability: `npm search clawup` or visit [https://www.npmjs.com/package/clawup](https://www.npmjs.com/package/clawup)
-  - If the name `clawup` is taken, you have two options:
-    1. **Use a scoped package** — rename to `@yourscope/clawup` in `package.json` (your npm username is a free scope, e.g. `@gehadshaat/clawup`)
+  - Check availability: `npm search clawdup` or visit [https://www.npmjs.com/package/clawdup](https://www.npmjs.com/package/clawdup)
+  - If the name `clawdup` is taken, you have two options:
+    1. **Use a scoped package** — rename to `@yourscope/clawdup` in `package.json` (your npm username is a free scope, e.g. `@gehadshaat/clawdup`)
     2. **Pick a different unscoped name**
   - To create a scope for an organization, go to [https://www.npmjs.com/org/create](https://www.npmjs.com/org/create) (free for public packages)
 - [ ] **Log in from the CLI**
@@ -60,8 +60,8 @@ Checklist for publishing a new version of clawup to the npm registry.
   ```
 - [ ] Smoke-test the CLI locally
   ```bash
-  node bin/clawup.js --help
-  node bin/clawup.js --check
+  node bin/clawdup.js --help
+  node bin/clawdup.js --check
   ```
 - [ ] Review what will be included in the package
   ```bash
@@ -74,12 +74,12 @@ Checklist for publishing a new version of clawup to the npm registry.
   - `README.md`
   - `package.json` (always included)
 - [ ] Verify `package.json` fields are correct
-  - `name` — `clawup`
+  - `name` — `clawdup`
   - `version` — matches intended release
   - `description` — accurate
   - `main` — `./dist/index.js`
   - `types` — `./dist/index.d.ts`
-  - `bin` — `./bin/clawup.js`
+  - `bin` — `./bin/clawdup.js`
   - `license` — `MIT`
   - `repository` — points to the GitHub repo
   - `engines` — `node >=18.0.0`
@@ -95,10 +95,10 @@ Checklist for publishing a new version of clawup to the npm registry.
   ```bash
   npm publish
   ```
-  > On first publish the package name `clawup` must be available. If it is taken, either use a scoped name (`@yourscope/clawup`) or pick a different name.
+  > On first publish the package name `clawdup` must be available. If it is taken, either use a scoped name (`@yourscope/clawdup`) or pick a different name.
 - [ ] Verify the package is live
   ```bash
-  npm info clawup
+  npm info clawdup
   ```
 
 ## Post-release
@@ -113,14 +113,14 @@ Checklist for publishing a new version of clawup to the npm registry.
   ```
 - [ ] Verify installation works from the registry
   ```bash
-  npx clawup --help
+  npx clawdup --help
   ```
 
 ## Troubleshooting
 
 | Problem | Fix |
 |---|---|
-| `npm publish` says name is taken | Use a scoped package: rename to `@scope/clawup` in `package.json` |
+| `npm publish` says name is taken | Use a scoped package: rename to `@scope/clawdup` in `package.json` |
 | `dist/` is empty or stale | Delete `dist/` and re-run `npm run build` |
 | `npm pack --dry-run` includes unexpected files | Check the `files` array in `package.json` |
 | `prepublishOnly` script fails | Fix the TypeScript build errors before retrying |
