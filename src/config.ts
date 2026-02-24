@@ -118,29 +118,89 @@ export const STATUS = {
   BLOCKED: process.env.STATUS_BLOCKED || "blocked",
 } as const;
 
+// --- Validation helpers ---
+
+function parsePositiveInt(name: string, raw: string | undefined, defaultValue: number): number {
+  const str = raw || String(defaultValue);
+  const value = parseInt(str, 10);
+  if (isNaN(value) || value < 0) {
+    console.error(`ERROR: ${name} must be a non-negative integer, got "${str}".`);
+    process.exit(1);
+  }
+  return value;
+}
+
 // Polling
-export const POLL_INTERVAL_MS: number = parseInt(
-  process.env.POLL_INTERVAL_MS || "30000",
-  10,
+export const POLL_INTERVAL_MS: number = parsePositiveInt(
+  "POLL_INTERVAL_MS",
+  process.env.POLL_INTERVAL_MS,
+  30000,
 );
 
+if (POLL_INTERVAL_MS > 0 && POLL_INTERVAL_MS < 5000) {
+  console.error(
+    `ERROR: POLL_INTERVAL_MS is ${POLL_INTERVAL_MS}ms (${POLL_INTERVAL_MS / 1000}s). ` +
+    `Minimum is 5000ms (5s) to avoid excessive API calls.`,
+  );
+  process.exit(1);
+}
+
 // Relaunch interval (default: 10 minutes). Set to 0 to disable.
-export const RELAUNCH_INTERVAL_MS: number = parseInt(
-  process.env.RELAUNCH_INTERVAL_MS || "600000",
-  10,
+export const RELAUNCH_INTERVAL_MS: number = parsePositiveInt(
+  "RELAUNCH_INTERVAL_MS",
+  process.env.RELAUNCH_INTERVAL_MS,
+  600000,
 );
+
+if (RELAUNCH_INTERVAL_MS > 0 && RELAUNCH_INTERVAL_MS < 60000) {
+  console.error(
+    `ERROR: RELAUNCH_INTERVAL_MS is ${RELAUNCH_INTERVAL_MS}ms (${RELAUNCH_INTERVAL_MS / 1000}s). ` +
+    `Minimum is 60000ms (1min) when enabled. Set to 0 to disable.`,
+  );
+  process.exit(1);
+}
 
 // Claude Code
 export const CLAUDE_COMMAND: string = process.env.CLAUDE_COMMAND || "claude";
-export const CLAUDE_TIMEOUT_MS: number = parseInt(
-  process.env.CLAUDE_TIMEOUT_MS || "600000",
-  10,
+export const CLAUDE_TIMEOUT_MS: number = parsePositiveInt(
+  "CLAUDE_TIMEOUT_MS",
+  process.env.CLAUDE_TIMEOUT_MS,
+  600000,
 );
-export const CLAUDE_MAX_TURNS: number = parseInt(
-  process.env.CLAUDE_MAX_TURNS || "50",
-  10,
+
+if (CLAUDE_TIMEOUT_MS < 30000) {
+  console.error(
+    `ERROR: CLAUDE_TIMEOUT_MS is ${CLAUDE_TIMEOUT_MS}ms (${CLAUDE_TIMEOUT_MS / 1000}s). ` +
+    `Minimum is 30000ms (30s) to allow Claude to complete meaningful work.`,
+  );
+  process.exit(1);
+}
+
+export const CLAUDE_MAX_TURNS: number = parsePositiveInt(
+  "CLAUDE_MAX_TURNS",
+  process.env.CLAUDE_MAX_TURNS,
+  50,
 );
+
+if (CLAUDE_MAX_TURNS < 1) {
+  console.error("ERROR: CLAUDE_MAX_TURNS must be at least 1.");
+  process.exit(1);
+}
+
+if (CLAUDE_MAX_TURNS > 500) {
+  console.error(
+    `ERROR: CLAUDE_MAX_TURNS is ${CLAUDE_MAX_TURNS}. Maximum is 500 to prevent runaway sessions.`,
+  );
+  process.exit(1);
+}
 
 // Branch naming
 export const BRANCH_PREFIX: string = process.env.BRANCH_PREFIX || "clickup";
 
+if (!/^[a-zA-Z0-9_-]+$/.test(BRANCH_PREFIX)) {
+  console.error(
+    `ERROR: BRANCH_PREFIX "${BRANCH_PREFIX}" contains invalid characters. ` +
+    `Only alphanumeric characters, hyphens, and underscores are allowed.`,
+  );
+  process.exit(1);
+}

@@ -69,12 +69,14 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  // Default: start the continuous polling runner with periodic relaunch
-  while (true) {
-    const shouldRelaunch = await startRunner({ interactive });
-    if (!shouldRelaunch) break;
-    const { log } = await import("./logger.js");
-    log("info", "Relaunching runner...\n");
+  // Default: start the continuous polling runner with periodic relaunch.
+  // When relaunch is requested, rebuild TypeScript so the restarted process
+  // loads the latest compiled code (ESM module cache is per-process).
+  const shouldRelaunch = await startRunner({ interactive });
+  if (shouldRelaunch) {
+    await rebuildBeforeRelaunch();
+    // Exit with special code 75 to signal the bin wrapper to restart
+    process.exit(75);
   }
 }
 
@@ -382,6 +384,36 @@ async function runChecks({
   } else {
     console.log("Some checks failed. Please fix the issues above.");
     process.exit(1);
+  }
+}
+
+/**
+ * Rebuild TypeScript before relaunch so the new process loads fresh code.
+ * dist/ is gitignored, so after syncBaseBranch() pulls new source, the
+ * compiled JS is stale until we run tsc again.
+ */
+async function rebuildBeforeRelaunch(): Promise<void> {
+  const { execFile: execFileCb } = await import("child_process");
+  const { promisify } = await import("util");
+  const { dirname: dirnameFn, resolve: resolveFn } = await import("path");
+  const { fileURLToPath } = await import("url");
+  const { log } = await import("./logger.js");
+
+  const execFileAsync = promisify(execFileCb);
+
+  // Resolve clawup's own package root from the compiled CLI location
+  // (dist/cli.js -> package root)
+  const clawupRoot = resolveFn(dirnameFn(fileURLToPath(import.meta.url)), "..");
+
+  log("info", "Rebuilding to pick up latest code changes...");
+  try {
+    await execFileAsync("npm", ["run", "build"], {
+      cwd: clawupRoot,
+      timeout: 120000,
+    });
+    log("info", "Build succeeded. Relaunching...\n");
+  } catch (err) {
+    log("warn", `Build failed: ${(err as Error).message}. Relaunching with existing code.\n`);
   }
 }
 
