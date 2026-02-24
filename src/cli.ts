@@ -4,6 +4,7 @@
 //   clawdup --once <id>  Process a single task by ID
 //   clawdup --interactive  Run Claude in interactive mode (accepts user input)
 //   clawdup --check      Validate config and exit
+//   clawdup --doctor     Run preflight environment health checks
 //   clawdup --statuses   Show recommended ClickUp statuses
 //   clawdup --setup      Interactive setup wizard
 //   clawdup --init       Create example config files in current directory
@@ -45,6 +46,13 @@ async function main(): Promise<void> {
     const { runSetup } = await import("./setup.js");
     await runSetup();
     process.exit(0);
+  }
+
+  if (args.includes("--doctor")) {
+    const { runPreflightChecks, printPreflightResults } = await import("./preflight.js");
+    const result = await runPreflightChecks();
+    printPreflightResults(result);
+    process.exit(result.passed ? 0 : 1);
   }
 
   // Everything below requires config to be loaded
@@ -99,6 +107,7 @@ Usage:
   clawdup --debug             Enable debug-level logging with timing
   clawdup --json-log          Output logs in JSON format
   clawdup --check             Validate configuration
+  clawdup --doctor            Run preflight environment health checks
   clawdup --statuses          Show recommended ClickUp statuses
   clawdup --setup             Interactive setup wizard
   clawdup --init              Create config files in current directory
