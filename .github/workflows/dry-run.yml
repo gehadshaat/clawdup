@@ -1,0 +1,73 @@
+# CI workflow that exercises Clawup in dry-run mode on every PR.
+# Catches regressions in CLI arguments, configuration loading, and core logic
+# before they impact real repos/tasks.
+#
+# Required repository secrets:
+#   CLICKUP_API_TOKEN       - ClickUp API token (read-only access is sufficient)
+#   CLICKUP_LIST_ID         - ClickUp list ID to poll (use a dedicated CI test list)
+#
+# Optional secrets:
+#   CLICKUP_PARENT_TASK_ID  - Alternative to CLICKUP_LIST_ID (poll subtasks instead)
+
+name: Dry Run
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dry-run:
+    name: Clawup Dry Run
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Run Clawup dry-run
+        env:
+          CLICKUP_API_TOKEN: ${{ secrets.CLICKUP_API_TOKEN }}
+          CLICKUP_LIST_ID: ${{ secrets.CLICKUP_LIST_ID }}
+          CLICKUP_PARENT_TASK_ID: ${{ secrets.CLICKUP_PARENT_TASK_ID }}
+          DRY_RUN: "true"
+          LOG_LEVEL: debug
+        run: |
+          node dist/cli.js --dry-run 2>&1 | tee dry-run.log
+          echo "Exit code: $?"
+
+      - name: Check for error markers in logs
+        if: always()
+        run: |
+          if grep -qi "Fatal error:" dry-run.log; then
+            echo "::error::Dry run produced fatal errors"
+            exit 1
+          fi
+          if grep -qi "ERROR: Missing required" dry-run.log; then
+            echo "::error::Dry run has missing configuration"
+            exit 1
+          fi
+          echo "No error markers found in logs."
+
+      - name: Upload dry-run logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dry-run-logs
+          path: dry-run.log
+          retention-days: 14
