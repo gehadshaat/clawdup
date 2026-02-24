@@ -241,10 +241,47 @@ clawdup --check             # Validate configuration
 clawdup --statuses          # Show recommended ClickUp statuses
 clawdup --setup             # Interactive setup wizard
 clawdup --init              # Create config files in current directory
+clawdup --dry-run           # Simulate full flow without making changes
+clawdup --debug             # Enable debug-level logging
+clawdup --json-log          # Output logs in JSON format
 clawdup --help              # Show help
 ```
 
 For the full configuration reference including all environment variables, validation rules, and advanced options, see **[CONFIGURATION.md](CONFIGURATION.md)**.
+
+## CI Dry-Run Workflow
+
+The repository includes a GitHub Actions workflow (`.github/workflows/dry-run.yml`) that runs Clawup in `--dry-run` mode on every pull request. This catches regressions in CLI arguments, configuration loading, and core logic before they impact real repos or tasks.
+
+### How it works
+
+1. Checks out the PR branch and builds the project
+2. Runs `clawup --dry-run` with debug logging enabled
+3. Scans logs for fatal errors or configuration problems
+4. Uploads the full log as an artifact for debugging
+5. Fails the job on non-zero exit codes or error markers
+
+### Setup for your own repo
+
+1. **Create a dedicated CI ClickUp list** (or parent task) with a small set of test tasks in "to do" status.
+
+2. **Add repository secrets** in GitHub (Settings > Secrets > Actions):
+   - `CLICKUP_API_TOKEN` — your ClickUp API token (read-only access is sufficient for dry-run)
+   - `CLICKUP_LIST_ID` — the test list ID (or use `CLICKUP_PARENT_TASK_ID` instead)
+
+3. **Copy the workflow** from `.github/workflows/dry-run.yml` into your project, or adapt it:
+
+```yaml
+- name: Run Clawup dry-run
+  env:
+    CLICKUP_API_TOKEN: ${{ secrets.CLICKUP_API_TOKEN }}
+    CLICKUP_LIST_ID: ${{ secrets.CLICKUP_LIST_ID }}
+    DRY_RUN: "true"
+    LOG_LEVEL: debug
+  run: node dist/cli.js --dry-run
+```
+
+The dry-run mode performs a single poll cycle: it reads tasks from ClickUp, simulates what actions would be taken (branch creation, Claude invocation, PR creation, status updates), and exits — without mutating git, GitHub, or ClickUp state.
 
 ## Programmatic API
 
