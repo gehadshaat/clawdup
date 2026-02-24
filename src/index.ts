@@ -35,8 +35,10 @@ export {
   getPRReviewComments,
   getPRInlineComments,
 } from "./git-ops.js";
-export { runClaudeOnTask, runClaudeOnReviewFeedback, generateWorkSummary } from "./claude-worker.js";
-export { STATUS, PROJECT_ROOT, GIT_ROOT, log } from "./config.js";
+export { runClaudeOnTask, runClaudeOnReviewFeedback, generateWorkSummary, scanOutputForSafetyIssues } from "./claude-worker.js";
+export { STATUS, PROJECT_ROOT, GIT_ROOT } from "./config.js";
+export { log, setLogLevel, setJsonOutput, isDebug, startTimer } from "./logger.js";
+export type { LogLevel, LogContext } from "./logger.js";
 export type {
   ClickUpTask,
   ClickUpUser,

@@ -13,6 +13,14 @@ import { existsSync, writeFileSync } from "fs";
 
 const args = process.argv.slice(2);
 
+// Set debug/json-log mode before any module imports so logger picks them up
+if (args.includes("--debug")) {
+  process.env.LOG_LEVEL = "debug";
+}
+if (args.includes("--json-log")) {
+  process.env.LOG_FORMAT = "json";
+}
+
 async function main(): Promise<void> {
   // --init and --statuses don't need config loaded
   if (args.includes("--help") || args.includes("-h")) {
@@ -61,12 +69,14 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  // Default: start the continuous polling runner with periodic relaunch
-  while (true) {
-    const shouldRelaunch = await startRunner({ interactive });
-    if (!shouldRelaunch) break;
-    const { log } = await import("./config.js");
-    log("info", "Relaunching runner...\n");
+  // Default: start the continuous polling runner with periodic relaunch.
+  // When relaunch is requested, rebuild TypeScript so the restarted process
+  // loads the latest compiled code (ESM module cache is per-process).
+  const shouldRelaunch = await startRunner({ interactive });
+  if (shouldRelaunch) {
+    await rebuildBeforeRelaunch();
+    // Exit with special code 75 to signal the bin wrapper to restart
+    process.exit(75);
   }
 }
 
@@ -82,6 +92,8 @@ Usage:
   clawup                     Start continuous polling
   clawup --once <task-id>    Process a single task
   clawup --interactive       Run Claude in interactive mode (accepts user input)
+  clawup --debug             Enable debug-level logging with timing
+  clawup --json-log          Output logs in JSON format
   clawup --check             Validate configuration
   clawup --statuses          Show recommended ClickUp statuses
   clawup --setup             Interactive setup wizard
@@ -97,6 +109,12 @@ Configuration:
 
   Optionally create clawup.config.mjs for custom Claude prompts.
   Run --init to generate example config files.
+
+Debugging:
+  Use --debug or set LOG_LEVEL=debug to enable verbose logging with
+  timing information for each major step. You can also set DEBUG=1.
+  Use --json-log or set LOG_FORMAT=json for machine-parseable JSON logs.
+  Logs are written to stdout (info/debug) and stderr (warn/error).
 
 Flow:
   1. Polls ClickUp list (or parent task subtasks) for tasks with "to do" status
@@ -202,6 +220,9 @@ CLICKUP_LIST_ID=
 
 # Log level: debug | info | warn | error
 # LOG_LEVEL=info
+
+# Log output format: text (default) or json
+# LOG_FORMAT=json
 `,
     );
     console.log(`  CREATE  ${envDest}`);
@@ -363,6 +384,36 @@ async function runChecks({
   } else {
     console.log("Some checks failed. Please fix the issues above.");
     process.exit(1);
+  }
+}
+
+/**
+ * Rebuild TypeScript before relaunch so the new process loads fresh code.
+ * dist/ is gitignored, so after syncBaseBranch() pulls new source, the
+ * compiled JS is stale until we run tsc again.
+ */
+async function rebuildBeforeRelaunch(): Promise<void> {
+  const { execFile: execFileCb } = await import("child_process");
+  const { promisify } = await import("util");
+  const { dirname: dirnameFn, resolve: resolveFn } = await import("path");
+  const { fileURLToPath } = await import("url");
+  const { log } = await import("./logger.js");
+
+  const execFileAsync = promisify(execFileCb);
+
+  // Resolve clawup's own package root from the compiled CLI location
+  // (dist/cli.js -> package root)
+  const clawupRoot = resolveFn(dirnameFn(fileURLToPath(import.meta.url)), "..");
+
+  log("info", "Rebuilding to pick up latest code changes...");
+  try {
+    await execFileAsync("npm", ["run", "build"], {
+      cwd: clawupRoot,
+      timeout: 120000,
+    });
+    log("info", "Build succeeded. Relaunching...\n");
+  } catch (err) {
+    log("warn", `Build failed: ${(err as Error).message}. Relaunching with existing code.\n`);
   }
 }
 

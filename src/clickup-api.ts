@@ -1,7 +1,8 @@
 // ClickUp API v2 client
 // Docs: https://clickup.com/api
 
-import { CLICKUP_API_TOKEN, CLICKUP_LIST_ID, CLICKUP_PARENT_TASK_ID, STATUS, log } from "./config.js";
+import { CLICKUP_API_TOKEN, CLICKUP_LIST_ID, CLICKUP_PARENT_TASK_ID, STATUS } from "./config.js";
+import { log } from "./logger.js";
 import type { ClickUpTask, ClickUpUser, ClickUpList, ClickUpComment } from "./types.js";
 
 const BASE_URL = "https://api.clickup.com/api/v2";

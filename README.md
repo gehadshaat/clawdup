@@ -7,6 +7,8 @@ Works with **any** project — just install, configure, and run.
 > **New to clawup?** Read the **[Complete Setup & Usage Guide](GUIDE.md)** for step-by-step instructions, including how to sign up for ClickUp, configure statuses, install all prerequisites, and get everything running.
 >
 > **Something broken?** See the **[Troubleshooting & Recovery Guide](TROUBLESHOOTING.md)** for common failure scenarios and how to fix them.
+>
+> **Looking for the full configuration reference?** See **[CONFIGURATION.md](CONFIGURATION.md)** for all CLI flags, environment variables, validation rules, and advanced options.
 
 ## Quick Start
 
@@ -175,10 +177,13 @@ If your project has a `CLAUDE.md` file (used by Claude Code for project context)
 | Variable               | Required | Default         | Description                         |
 | ---------------------- | -------- | --------------- | ----------------------------------- |
 | `CLICKUP_API_TOKEN`    | Yes      | —               | ClickUp API token                   |
-| `CLICKUP_LIST_ID`      | Yes      | —               | ClickUp list to poll                |
+| `CLICKUP_LIST_ID`      | Yes*     | —               | ClickUp list to poll                |
+| `CLICKUP_PARENT_TASK_ID` | Yes*   | —               | Or: parent task to poll subtasks    |
+| `GITHUB_REPO`          | No       | *(auto-detect)*  | GitHub repo (`owner/repo`)          |
 | `BASE_BRANCH`          | No       | `main`          | Base branch for feature branches    |
 | `BRANCH_PREFIX`        | No       | `clickup`       | Prefix for task branches            |
 | `POLL_INTERVAL_MS`     | No       | `30000`         | Polling interval (ms)               |
+| `RELAUNCH_INTERVAL_MS` | No       | `600000`        | Runner restart interval (ms, 0=off) |
 | `CLAUDE_COMMAND`       | No       | `claude`        | Claude Code CLI command             |
 | `CLAUDE_TIMEOUT_MS`    | No       | `600000`        | Timeout per task (ms)               |
 | `CLAUDE_MAX_TURNS`     | No       | `50`            | Max agentic turns per task          |
@@ -190,6 +195,8 @@ If your project has a `CLAUDE.md` file (used by Claude Code for project context)
 | `STATUS_REQUIRE_INPUT` | No       | `require input` | ClickUp status: require input       |
 | `STATUS_COMPLETED`     | No       | `complete`      | ClickUp status: complete            |
 | `STATUS_BLOCKED`       | No       | `blocked`       | ClickUp status: blocked             |
+
+*\* At least one of `CLICKUP_LIST_ID` or `CLICKUP_PARENT_TASK_ID` must be set. See [CONFIGURATION.md](CONFIGURATION.md#task-source-list-vs-parent-task) for details.*
 
 ## ClickUp List Statuses
 
@@ -229,12 +236,15 @@ Enable at: ClickUp Settings > Integrations > GitHub.
 ```bash
 clawup                     # Start continuous polling
 clawup --once <task-id>    # Process a single task
+clawup --interactive       # Run Claude in interactive mode (accepts user input)
 clawup --check             # Validate configuration
 clawup --statuses          # Show recommended ClickUp statuses
 clawup --setup             # Interactive setup wizard
 clawup --init              # Create config files in current directory
 clawup --help              # Show help
 ```
+
+For the full configuration reference including all environment variables, validation rules, and advanced options, see **[CONFIGURATION.md](CONFIGURATION.md)**.
 
 ## Programmatic API
 
