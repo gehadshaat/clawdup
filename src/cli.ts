@@ -134,6 +134,13 @@ Flow:
 
   With AUTO_APPROVE=true, step 5 merges the PR immediately (skipping manual review).
 
+WARNING:
+  clawdup performs destructive git operations (reset --hard, clean -fd) on
+  startup to ensure a clean working tree. Uncommitted changes, untracked
+  files, and in-progress merges/rebases WILL BE LOST. Commit or stash your
+  work before running, or use a dedicated working copy.
+  Use --dry-run to safely preview what would happen without making changes.
+
 Signals:
   SIGINT/SIGTERM: Graceful shutdown (finishes current task, then exits)
 `);
