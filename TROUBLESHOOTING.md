@@ -2,6 +2,8 @@
 
 This guide covers common Clawdup automation failures, how to diagnose them, and how to recover.
 
+> For a detailed understanding of how the pipeline works and how status transitions are managed, see the **[Architecture & State Flow](ARCHITECTURE.md)** document.
+
 ## Overview
 
 Clawdup automates the pipeline from ClickUp task to GitHub PR. It polls for tasks, creates branches, runs Claude Code, commits/pushes, and manages PR lifecycle. Failures can occur at any stage — ClickUp API calls, git operations, Claude execution, or GitHub CLI commands.
