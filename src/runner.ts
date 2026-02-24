@@ -1525,6 +1525,11 @@ export async function runSingleTask(taskId: string, options?: { interactive?: bo
   // Prevent concurrent instances (skip in dry-run since we're read-only)
   if (!DRY_RUN) acquireLock();
 
+  if (!DRY_RUN) {
+    log("warn", "WARNING: clawdup will run 'git reset --hard' and 'git clean -fd' to ensure a clean working tree.");
+    log("warn", "Any uncommitted changes, untracked files, and in-progress merges/rebases will be lost.");
+  }
+
   try {
     const { getTask } = await import("./clickup-api.js");
     const task = await getTask(taskId);
@@ -1585,6 +1590,10 @@ export async function startRunner(options?: { interactive?: boolean }): Promise<
     log("info", "\n=== DRY RUN complete — no changes were made ===");
     return false;
   }
+
+  // Warn about destructive git operations
+  log("warn", "WARNING: clawdup will run 'git reset --hard' and 'git clean -fd' to ensure a clean working tree.");
+  log("warn", "Any uncommitted changes, untracked files, and in-progress merges/rebases will be lost.");
 
   // Ensure we start from a clean state — forcefully clean up any
   // leftover dirty state (unresolved merges, uncommitted changes, etc.)

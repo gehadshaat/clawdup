@@ -10,6 +10,10 @@ Works with **any** project — just install, configure, and run.
 >
 > **Looking for the full configuration reference?** See **[CONFIGURATION.md](CONFIGURATION.md)** for all CLI flags, environment variables, validation rules, and advanced options.
 
+## Warning
+
+> **This tool performs destructive git operations.** On startup, clawdup runs `git reset --hard` and `git clean -fd` to ensure a clean working tree. This **will discard any uncommitted changes, untracked files, and in-progress merges or rebases**. Always commit or stash your work before running clawdup, or run it in a dedicated working copy. Use `--dry-run` to preview what would happen without making any changes.
+
 ## Quick Start
 
 ```bash
