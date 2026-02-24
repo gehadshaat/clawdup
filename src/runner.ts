@@ -20,7 +20,9 @@ import {
 } from "./clickup-api.js";
 import {
   detectGitHubRepo,
+  ensureCleanState,
   syncBaseBranch,
+  pruneLocalBranches,
   createTaskBranch,
   hasChanges,
   getHeadHash,
@@ -35,7 +37,6 @@ import {
   findExistingPR,
   returnToBaseBranch,
   deleteLocalBranch,
-  isWorkingTreeClean,
   mergePullRequest,
   getPRState,
   getPRMergeability,
@@ -1300,14 +1301,15 @@ export async function startRunner(options?: { interactive?: boolean }): Promise<
     );
   }
 
-  // Ensure we start from a clean state
-  if (!(await isWorkingTreeClean())) {
-    log(
-      "error",
-      "Working tree is not clean. Please commit or stash changes before running.",
-    );
-    process.exit(1);
-  }
+  // Ensure we start from a clean state — forcefully clean up any
+  // leftover dirty state (unresolved merges, uncommitted changes, etc.)
+  // so the runner can always start fresh.
+  await ensureCleanState();
+  await syncBaseBranch();
+
+  // Clean up stale local branches from previous runs so they don't
+  // interfere with fresh branch creation or cause checkout issues.
+  await pruneLocalBranches();
 
   // Recover any tasks left "in progress" from a previous crash
   await recoverOrphanedTasks();
