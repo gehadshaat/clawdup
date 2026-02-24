@@ -13,6 +13,14 @@ import { existsSync, writeFileSync } from "fs";
 
 const args = process.argv.slice(2);
 
+// Set debug/json-log mode before any module imports so logger picks them up
+if (args.includes("--debug")) {
+  process.env.LOG_LEVEL = "debug";
+}
+if (args.includes("--json-log")) {
+  process.env.LOG_FORMAT = "json";
+}
+
 async function main(): Promise<void> {
   // --init and --statuses don't need config loaded
   if (args.includes("--help") || args.includes("-h")) {
@@ -84,6 +92,8 @@ Usage:
   clawup                     Start continuous polling
   clawup --once <task-id>    Process a single task
   clawup --interactive       Run Claude in interactive mode (accepts user input)
+  clawup --debug             Enable debug-level logging with timing
+  clawup --json-log          Output logs in JSON format
   clawup --check             Validate configuration
   clawup --statuses          Show recommended ClickUp statuses
   clawup --setup             Interactive setup wizard
@@ -99,6 +109,12 @@ Configuration:
 
   Optionally create clawup.config.mjs for custom Claude prompts.
   Run --init to generate example config files.
+
+Debugging:
+  Use --debug or set LOG_LEVEL=debug to enable verbose logging with
+  timing information for each major step. You can also set DEBUG=1.
+  Use --json-log or set LOG_FORMAT=json for machine-parseable JSON logs.
+  Logs are written to stdout (info/debug) and stderr (warn/error).
 
 Flow:
   1. Polls ClickUp list (or parent task subtasks) for tasks with "to do" status
@@ -204,6 +220,9 @@ CLICKUP_LIST_ID=
 
 # Log level: debug | info | warn | error
 # LOG_LEVEL=info
+
+# Log output format: text (default) or json
+# LOG_FORMAT=json
 `,
     );
     console.log(`  CREATE  ${envDest}`);
@@ -378,7 +397,7 @@ async function rebuildBeforeRelaunch(): Promise<void> {
   const { promisify } = await import("util");
   const { dirname: dirnameFn, resolve: resolveFn } = await import("path");
   const { fileURLToPath } = await import("url");
-  const { log } = await import("./config.js");
+  const { log } = await import("./logger.js");
 
   const execFileAsync = promisify(execFileCb);
 

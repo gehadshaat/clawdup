@@ -204,36 +204,3 @@ if (!/^[a-zA-Z0-9_-]+$/.test(BRANCH_PREFIX)) {
   );
   process.exit(1);
 }
-
-// Logging
-const VALID_LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
-export const LOG_LEVEL: string = process.env.LOG_LEVEL || "info";
-
-if (!VALID_LOG_LEVELS.includes(LOG_LEVEL as typeof VALID_LOG_LEVELS[number])) {
-  console.error(
-    `ERROR: LOG_LEVEL "${LOG_LEVEL}" is not valid. Must be one of: ${VALID_LOG_LEVELS.join(", ")}`,
-  );
-  process.exit(1);
-}
-
-type LogLevel = "debug" | "info" | "warn" | "error";
-
-export function log(level: LogLevel, ...args: unknown[]): void {
-  const levels: Record<string, number> = {
-    debug: 0,
-    info: 1,
-    warn: 2,
-    error: 3,
-  };
-  if (levels[level]! >= levels[LOG_LEVEL]!) {
-    const timestamp = new Date().toISOString();
-    const prefix = `[${timestamp}] [${level.toUpperCase()}]`;
-    if (level === "error") {
-      console.error(prefix, ...args);
-    } else if (level === "warn") {
-      console.warn(prefix, ...args);
-    } else {
-      console.log(prefix, ...args);
-    }
-  }
-}

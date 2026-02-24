@@ -14,8 +14,8 @@ import {
   PROJECT_ROOT,
   GIT_ROOT,
   userConfig,
-  log,
 } from "./config.js";
+import { log, startTimer } from "./logger.js";
 import type { ClickUpTask, ClaudeResult } from "./types.js";
 
 /**
@@ -246,7 +246,8 @@ export async function runClaudeOnTask(
 
   const systemPrompt = buildSystemPrompt(taskPrompt, taskId);
 
-  log("info", `Running Claude Code on task ${taskId}...`);
+  log("info", `Running Claude Code on task ${taskId}...`, { taskId });
+  const timer = startTimer();
 
   return new Promise((resolve) => {
     let output = "";
@@ -374,7 +375,7 @@ export async function runClaudeOnTask(
       }
     }
 
-    log("info", `$ ${CLAUDE_COMMAND} ${args.join(" ")}`);
+    log("debug", `$ ${CLAUDE_COMMAND} ${args.join(" ")}`);
 
     const proc = spawn(CLAUDE_COMMAND, args, {
       cwd: PROJECT_ROOT,
@@ -408,12 +409,13 @@ export async function runClaudeOnTask(
 
     const timeout = setTimeout(() => {
       timedOut = true;
-      log("warn", `Claude Code timed out after ${CLAUDE_TIMEOUT_MS}ms`);
+      log("warn", `Claude Code timed out after ${CLAUDE_TIMEOUT_MS}ms`, { taskId, elapsed: timer() });
       proc.kill("SIGTERM");
     }, CLAUDE_TIMEOUT_MS);
 
     proc.on("close", (code: number | null) => {
       clearTimeout(timeout);
+      const elapsed = timer();
 
       // Flush any remaining buffer
       if (jsonBuffer.trim()) {
@@ -436,8 +438,10 @@ export async function runClaudeOnTask(
       }
 
       if (code !== 0 && code !== null) {
-        log("warn", `Claude Code exited with code ${code}`);
+        log("warn", `Claude Code exited with code ${code}`, { taskId, elapsed });
       }
+
+      log("debug", `Claude Code execution completed`, { taskId, elapsed });
 
       // Post-execution safety scan
       const safetyWarnings = scanOutputForSafetyIssues(output);
@@ -469,7 +473,7 @@ export async function runClaudeOnTask(
 
     proc.on("error", (err: Error) => {
       clearTimeout(timeout);
-      log("error", `Failed to spawn Claude Code: ${err.message}`);
+      log("error", `Failed to spawn Claude Code: ${err.message}`, { taskId, elapsed: timer() });
       resolve({
         success: false,
         output,
@@ -567,7 +571,7 @@ export async function runClaudeOnReviewFeedback(
 ): Promise<ClaudeResult> {
   const systemPrompt = buildReviewPrompt(taskPrompt, taskId, reviewFeedback);
 
-  log("info", `Running Claude Code on review feedback for task ${taskId}...`);
+  log("info", `Running Claude Code on review feedback for task ${taskId}...`, { taskId });
 
   if (options?.interactive) {
     // In interactive mode, spawn with the review prompt
@@ -578,6 +582,7 @@ export async function runClaudeOnReviewFeedback(
   }
 
   // Use the standard runner with the review-specific system prompt
+  const reviewTimer = startTimer();
   return new Promise((resolve) => {
     let output = "";
     let timedOut = false;
@@ -682,7 +687,7 @@ export async function runClaudeOnReviewFeedback(
       }
     }
 
-    log("info", `$ ${CLAUDE_COMMAND} ${args.join(" ")}`);
+    log("debug", `$ ${CLAUDE_COMMAND} ${args.join(" ")}`);
 
     const proc = spawn(CLAUDE_COMMAND, args, {
       cwd: PROJECT_ROOT,
@@ -713,12 +718,13 @@ export async function runClaudeOnReviewFeedback(
 
     const timeout = setTimeout(() => {
       timedOut = true;
-      log("warn", `Claude Code timed out after ${CLAUDE_TIMEOUT_MS}ms`);
+      log("warn", `Claude Code timed out after ${CLAUDE_TIMEOUT_MS}ms`, { taskId, elapsed: reviewTimer() });
       proc.kill("SIGTERM");
     }, CLAUDE_TIMEOUT_MS);
 
     proc.on("close", (code: number | null) => {
       clearTimeout(timeout);
+      const elapsed = reviewTimer();
 
       if (jsonBuffer.trim()) {
         try {
@@ -740,8 +746,10 @@ export async function runClaudeOnReviewFeedback(
       }
 
       if (code !== 0 && code !== null) {
-        log("warn", `Claude Code exited with code ${code}`);
+        log("warn", `Claude Code exited with code ${code}`, { taskId, elapsed });
       }
+
+      log("debug", `Claude Code review execution completed`, { taskId, elapsed });
 
       // Post-execution safety scan
       const safetyWarnings = scanOutputForSafetyIssues(output);
@@ -754,7 +762,7 @@ export async function runClaudeOnReviewFeedback(
       );
 
       if (needsInput) {
-        log("info", `Claude indicated it needs more input for review on task`);
+        log("info", `Claude indicated it needs more input for review on task ${taskId}`);
         resolve({ success: false, output, needsInput: true });
         return;
       }
@@ -769,7 +777,7 @@ export async function runClaudeOnReviewFeedback(
 
     proc.on("error", (err: Error) => {
       clearTimeout(timeout);
-      log("error", `Failed to spawn Claude Code: ${err.message}`);
+      log("error", `Failed to spawn Claude Code: ${err.message}`, { taskId, elapsed: reviewTimer() });
       resolve({
         success: false,
         output,
@@ -807,7 +815,7 @@ INSTRUCTIONS:
    git add -A && git commit --no-edit
 7. Do NOT push — the automation handles pushing.`;
 
-  log("info", `Running Claude Code to resolve ${conflictedFiles.length} conflicted file(s)...`);
+  log("info", `Running Claude Code to resolve ${conflictedFiles.length} conflicted file(s)...`, { branch: branchName });
 
   return runClaudeOnTask(prompt, `conflict-resolution-${branchName}`);
 }
