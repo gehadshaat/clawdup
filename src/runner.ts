@@ -2,7 +2,7 @@
 
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import { resolve } from "path";
-import { POLL_INTERVAL_MS, RELAUNCH_INTERVAL_MS, STATUS, BASE_BRANCH, PROJECT_ROOT, CLICKUP_LIST_ID, CLICKUP_PARENT_TASK_ID } from "./config.js";
+import { POLL_INTERVAL_MS, RELAUNCH_INTERVAL_MS, STATUS, BASE_BRANCH, PROJECT_ROOT, CLICKUP_LIST_ID, CLICKUP_PARENT_TASK_ID, AUTO_APPROVE } from "./config.js";
 import { log, startTimer } from "./logger.js";
 import {
   getTasksByStatus,
@@ -334,15 +334,21 @@ async function processTask(task: ClickUpTask): Promise<void> {
 
     // Step 8: Update ClickUp task with a summary of the work done
     const workSummary = generateWorkSummary(result.output, stat, files);
-    await updateTaskStatus(taskId, STATUS.IN_REVIEW);
-    await addTaskComment(
-      taskId,
-      `✅ Automation completed! The pull request is ready for review:\n\n` +
-        `${prUrl}\n\n` +
-        `Branch: \`${branchName}\`\n\n` +
-        `${workSummary}\n\n` +
-        `Please review the PR. When ready, move this task to "${STATUS.APPROVED}" and the automation will merge it.`,
-    );
+
+    if (AUTO_APPROVE) {
+      // Auto-approve mode: merge immediately without waiting for manual review
+      await autoApproveAndMerge(task, prUrl, branchName, workSummary);
+    } else {
+      await updateTaskStatus(taskId, STATUS.IN_REVIEW);
+      await addTaskComment(
+        taskId,
+        `✅ Automation completed! The pull request is ready for review:\n\n` +
+          `${prUrl}\n\n` +
+          `Branch: \`${branchName}\`\n\n` +
+          `${workSummary}\n\n` +
+          `Please review the PR. When ready, move this task to "${STATUS.APPROVED}" and the automation will merge it.`,
+      );
+    }
 
     log("info", `Task ${taskId} completed successfully! PR: ${prUrl}`, { taskId, elapsed: timer() });
   } catch (err) {
@@ -644,6 +650,69 @@ async function resolveConflictsWithMerge(
         `Please resolve the conflicts manually.\nPR: ${prUrl}`,
     );
     await updateTaskStatus(taskId, STATUS.BLOCKED);
+    return false;
+  }
+}
+
+/**
+ * Auto-approve and merge a PR immediately after Claude completes work.
+ * Used when AUTO_APPROVE is enabled to skip the manual review step.
+ * Returns true if merge succeeded, false otherwise.
+ */
+async function autoApproveAndMerge(
+  task: ClickUpTask,
+  prUrl: string,
+  branchName: string,
+  workSummary: string,
+): Promise<boolean> {
+  const taskId = task.id;
+
+  try {
+    log("info", `Auto-approve enabled — merging PR immediately: ${prUrl}`, { taskId });
+
+    // Check mergeability (conflicts could exist if base changed during Claude's work)
+    const mergeability = await getPRMergeability(prUrl);
+    log("info", `PR mergeability: ${mergeability}`, { taskId });
+
+    if (mergeability === "CONFLICTING") {
+      log("info", `PR has conflicts. Attempting to resolve before auto-merge.`, { taskId });
+      const resolved = await resolveConflictsWithMerge(task, prUrl);
+      if (!resolved) {
+        return false; // resolveConflictsWithMerge handles status updates
+      }
+    }
+
+    await mergePullRequest(prUrl);
+    await updateTaskStatus(taskId, STATUS.COMPLETED);
+    await addTaskComment(
+      taskId,
+      `🤖 Auto-approved and merged!\n\n` +
+        `${prUrl}\n\n` +
+        `Branch: \`${branchName}\`\n\n` +
+        `${workSummary}\n\n` +
+        `Task is now complete.`,
+    );
+
+    log("info", `Task ${taskId} auto-approved and merged: ${prUrl}`, { taskId });
+
+    shouldRelaunchAfterMerge = true;
+    log("info", "Merge detected — will rebuild and relaunch after this polling cycle.");
+    return true;
+  } catch (err) {
+    log("error", `Auto-merge failed for task ${taskId}: ${(err as Error).message}`, { taskId });
+
+    // Fall back to normal review flow
+    try {
+      await updateTaskStatus(taskId, STATUS.IN_REVIEW);
+      await addTaskComment(
+        taskId,
+        `⚠️ Auto-merge failed:\n\n\`\`\`\n${(err as Error).message}\n\`\`\`\n\n` +
+          `PR: ${prUrl}\n\n` +
+          `Falling back to manual review. Move this task to "${STATUS.APPROVED}" to retry merge.`,
+      );
+    } catch (commentErr) {
+      log("error", `Failed to update task after auto-merge failure: ${(commentErr as Error).message}`);
+    }
     return false;
   }
 }
@@ -1033,15 +1102,21 @@ async function processReturningTask(task: ClickUpTask, prUrl: string): Promise<v
 
     // Update ClickUp task
     const workSummary = generateWorkSummary(result.output, stat, files);
-    await updateTaskStatus(taskId, STATUS.IN_REVIEW);
-    await addTaskComment(
-      taskId,
-      `✅ Automation completed the updates! The pull request is ready for review:\n\n` +
-        `${prUrl}\n\n` +
-        `Branch: \`${branchName}\`\n\n` +
-        `${workSummary}\n\n` +
-        `Please review the PR. When ready, move this task to "${STATUS.APPROVED}" and the automation will merge it.`,
-    );
+
+    if (AUTO_APPROVE) {
+      // Auto-approve mode: merge immediately without waiting for manual review
+      await autoApproveAndMerge(task, prUrl, branchName, workSummary);
+    } else {
+      await updateTaskStatus(taskId, STATUS.IN_REVIEW);
+      await addTaskComment(
+        taskId,
+        `✅ Automation completed the updates! The pull request is ready for review:\n\n` +
+          `${prUrl}\n\n` +
+          `Branch: \`${branchName}\`\n\n` +
+          `${workSummary}\n\n` +
+          `Please review the PR. When ready, move this task to "${STATUS.APPROVED}" and the automation will merge it.`,
+      );
+    }
 
     log("info", `Returning task ${taskId} completed successfully! PR: ${prUrl}`, { taskId, elapsed: timer() });
   } catch (err) {
@@ -1305,6 +1380,9 @@ export async function startRunner(options?: { interactive?: boolean }): Promise<
   log("info", `Task source: ${CLICKUP_PARENT_TASK_ID ? `parent task ${CLICKUP_PARENT_TASK_ID} (subtasks)` : `list ${CLICKUP_LIST_ID}`}`);
   log("info", `Polling interval: ${POLL_INTERVAL_MS / 1000}s`);
   log("info", `Base branch: ${BASE_BRANCH}`);
+  if (AUTO_APPROVE) {
+    log("info", "Auto-approve mode: ENABLED — PRs will be merged immediately after completion");
+  }
 
   const relaunchEnabled = RELAUNCH_INTERVAL_MS > 0;
   if (relaunchEnabled) {
