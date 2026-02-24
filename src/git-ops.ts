@@ -130,13 +130,15 @@ export async function ensureCleanState(): Promise<void> {
 export async function syncBaseBranch(): Promise<void> {
   log("info", `Syncing base branch: ${BASE_BRANCH}`);
   await ensureCleanState();
-  await git("fetch", "origin", BASE_BRANCH);
 
-  // Prune stale remote tracking refs (handles deleted remote branches)
+  // Fetch all refs from origin (not just base branch) so that remote branch
+  // lookups (e.g. findBranchForTask) have up-to-date information.
+  // Use --prune to clean up stale remote tracking refs for deleted branches.
   try {
-    await git("remote", "prune", "origin");
+    await git("fetch", "origin", "--prune");
   } catch {
-    // Non-critical — ignore
+    // Fall back to fetching just the base branch if full fetch fails
+    await git("fetch", "origin", BASE_BRANCH);
   }
 
   // Force checkout to bypass broken index (unresolved merges, etc.)
@@ -407,12 +409,29 @@ export async function checkoutExistingBranch(
   branchName: string,
 ): Promise<void> {
   log("info", `Checking out existing branch: ${branchName}`);
+
+  // Fetch latest for this branch from origin
   try {
-    // Try checking out as a local branch first
-    await git("checkout", branchName);
+    await git("fetch", "origin", branchName);
+  } catch {
+    log("debug", `Could not fetch ${branchName} from origin (may be local-only)`);
+  }
+
+  // Force checkout to bypass dirty index state
+  try {
+    await git("checkout", "-f", branchName);
   } catch {
     // If local checkout fails, create a tracking branch from remote
-    await git("checkout", "-b", branchName, `origin/${branchName}`);
+    await git("checkout", "-f", "-b", branchName, `origin/${branchName}`);
+  }
+
+  // Reset to the latest remote version if it exists
+  try {
+    await git("reset", "--hard", `origin/${branchName}`);
+    log("info", `Reset ${branchName} to latest from origin`);
+  } catch {
+    // Branch may not exist on remote — local-only branch is fine
+    log("debug", `No remote tracking for ${branchName} — using local version`);
   }
 }
 
