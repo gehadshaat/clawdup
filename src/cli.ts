@@ -47,6 +47,21 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
+  if (args.includes("--status")) {
+    const { getMetricsSummary, formatMetricsSummary } = await import("./metrics.js");
+    const hoursIndex = args.indexOf("--hours");
+    const hours = hoursIndex !== -1 && args[hoursIndex + 1]
+      ? parseInt(args[hoursIndex + 1]!, 10) || 24
+      : 24;
+    const summary = getMetricsSummary(hours);
+    if (args.includes("--json")) {
+      console.log(JSON.stringify(summary, null, 2));
+    } else {
+      console.log(formatMetricsSummary(summary));
+    }
+    process.exit(0);
+  }
+
   // Everything below requires config to be loaded
   const { startRunner, runSingleTask } = await import("./runner.js");
   const { validateStatuses, getListInfo, getTask } = await import("./clickup-api.js");
@@ -96,6 +111,9 @@ Usage:
   clawdup --once <task-id>    Process a single task
   clawdup --interactive       Run Claude in interactive mode (accepts user input)
   clawdup --dry-run           Simulate the full flow without making any changes
+  clawdup --status            Show run metrics/health summary (last 24h)
+  clawdup --status --hours N  Show metrics for the last N hours
+  clawdup --status --json     Output metrics as JSON
   clawdup --debug             Enable debug-level logging with timing
   clawdup --json-log          Output logs in JSON format
   clawdup --check             Validate configuration

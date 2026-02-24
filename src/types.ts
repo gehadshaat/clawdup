@@ -74,3 +74,30 @@ export interface PullRequestOptions {
   baseBranch?: string;
   draft?: boolean;
 }
+
+// --- Metrics / Telemetry ---
+
+export type RunOutcome = "success" | "partial" | "failure" | "needs_input";
+
+export interface RunRecord {
+  id: string;
+  taskId: string;
+  taskName: string;
+  timestamp: string;
+  outcome: RunOutcome;
+  errorCategory?: string;
+  durationMs: number;
+}
+
+export interface MetricsSummary {
+  totalRuns: number;
+  success: number;
+  partial: number;
+  failure: number;
+  needsInput: number;
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+  lastErrorCategory: string | null;
+  periodStart: string;
+  periodEnd: string;
+}

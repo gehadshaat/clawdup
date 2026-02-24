@@ -4,6 +4,7 @@ import { existsSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import { POLL_INTERVAL_MS, RELAUNCH_INTERVAL_MS, STATUS, BASE_BRANCH, PROJECT_ROOT, CLICKUP_LIST_ID, CLICKUP_PARENT_TASK_ID, AUTO_APPROVE, DRY_RUN, BRANCH_PREFIX } from "./config.js";
 import { log, startTimer } from "./logger.js";
+import { recordRun } from "./metrics.js";
 import {
   getTasksByStatus,
   getTaskComments,
@@ -478,12 +479,15 @@ async function processTask(task: ClickUpTask): Promise<void> {
     // Step 5: Handle the result
     if (result.needsInput) {
       // Claude needs more information
+      recordRun({ taskId, taskName, outcome: "needs_input", durationMs: timer() });
       await handleNeedsInput(task, result, branchName, prUrl);
       return;
     }
 
     if (!result.success) {
       // Claude encountered an error
+      const hasPartial = (await hasChanges()) || claudeCommitted;
+      recordRun({ taskId, taskName, outcome: hasPartial ? "partial" : "failure", durationMs: timer(), error: result.error });
       await handleError(task, result, branchName, prUrl, claudeCommitted);
       return;
     }
@@ -491,6 +495,7 @@ async function processTask(task: ClickUpTask): Promise<void> {
     // Step 6: Check if Claude actually made changes
     const uncommittedChanges = await hasChanges();
     if (!uncommittedChanges && !claudeCommitted) {
+      recordRun({ taskId, taskName, outcome: "needs_input", durationMs: timer(), error: "no changes produced" });
       log(
         "warn",
         `Claude completed but made no file changes for task ${taskId}`,
@@ -541,8 +546,10 @@ async function processTask(task: ClickUpTask): Promise<void> {
       );
     }
 
+    recordRun({ taskId, taskName, outcome: "success", durationMs: timer() });
     log("info", `Task ${taskId} completed successfully! PR: ${prUrl}`, { taskId, elapsed: timer() });
   } catch (err) {
+    recordRun({ taskId, taskName, outcome: "failure", durationMs: timer(), error: (err as Error).message });
     log("error", `Error processing task ${taskId}: ${(err as Error).message}`, { taskId, elapsed: timer() });
 
     try {
@@ -994,12 +1001,14 @@ async function processApprovedTask(task: ClickUpTask): Promise<void> {
       `🎉 PR merged successfully!\n\n${prUrl}\n\nTask is now complete.`,
     );
 
+    recordRun({ taskId, taskName, outcome: "success", durationMs: timer() });
     log("info", `Task ${taskId} approved and merged: ${prUrl}`, { taskId, elapsed: timer() });
 
     // Signal that we should rebuild and relaunch to pick up the merged code
     shouldRelaunchAfterMerge = true;
     log("info", "Merge detected — will rebuild and relaunch after this polling cycle.");
   } catch (err) {
+    recordRun({ taskId, taskName, outcome: "failure", durationMs: timer(), error: (err as Error).message });
     log(
       "error",
       `Error merging approved task ${taskId}: ${(err as Error).message}`,
@@ -1230,6 +1239,7 @@ async function processReturningTask(task: ClickUpTask, prUrl: string): Promise<v
 
     // Handle needs-input case
     if (result.needsInput) {
+      recordRun({ taskId, taskName, outcome: "needs_input", durationMs: timer() });
       const reason = extractNeedsInputReason(result.output);
       log("info", `Returning task ${taskId} requires more input: ${reason}`);
       await notifyTaskCreator(
@@ -1244,6 +1254,8 @@ async function processReturningTask(task: ClickUpTask, prUrl: string): Promise<v
     }
 
     if (!result.success) {
+      const hasPartialChanges = (await hasChanges()) || claudeCommitted;
+      recordRun({ taskId, taskName, outcome: hasPartialChanges ? "partial" : "failure", durationMs: timer(), error: result.error });
       log("error", `Returning task ${taskId} failed: ${result.error}`);
       const uncommittedChanges = await hasChanges();
       if (uncommittedChanges || claudeCommitted) {
@@ -1274,6 +1286,7 @@ async function processReturningTask(task: ClickUpTask, prUrl: string): Promise<v
     // Check if Claude actually made changes
     const uncommittedChanges = await hasChanges();
     if (!uncommittedChanges && !claudeCommitted) {
+      recordRun({ taskId, taskName, outcome: "needs_input", durationMs: timer(), error: "no changes produced" });
       log("warn", `Claude completed but made no changes for returning task ${taskId}`);
       await notifyTaskCreator(
         taskId,
@@ -1319,8 +1332,10 @@ async function processReturningTask(task: ClickUpTask, prUrl: string): Promise<v
       );
     }
 
+    recordRun({ taskId, taskName, outcome: "success", durationMs: timer() });
     log("info", `Returning task ${taskId} completed successfully! PR: ${prUrl}`, { taskId, elapsed: timer() });
   } catch (err) {
+    recordRun({ taskId, taskName, outcome: "failure", durationMs: timer(), error: (err as Error).message });
     log("error", `Error processing returning task ${taskId}: ${(err as Error).message}`);
 
     try {
