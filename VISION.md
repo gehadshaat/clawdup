@@ -1,159 +1,218 @@
-# Clawup: Claude's Brain + ClickUp's Body
+# Clawup: Managed OpenClaw for ClickUp
 
 ## The One-Liner
 
-**Clawup connects Claude's deep reasoning to ClickUp's execution layer — using ClickUp for everything it can do natively, and MCP servers for the rest.**
+**Clawup is hosted OpenClaw, purpose-built for ClickUp. Connect your workspace, pick your tools, start creating tasks. Zero setup. Zero infrastructure.**
 
-ClickUp already has Super Agents with 500+ skills, native email, calendar, Slack, and automation. What it doesn't have is Claude. Clawup brings Claude's planning, reasoning, and code generation into ClickUp's ecosystem — not by rebuilding what ClickUp already does, but by orchestrating it.
+OpenClaw proved the model: a local AI agent with skills, MCP, and memory can automate real work. But it requires self-hosting, terminal comfort, skill curation, and security vigilance. Most ClickUp teams — ops managers, project leads, agency owners — will never run a Node.js process on their laptop.
+
+Clawup takes OpenClaw's architecture and makes it a managed service, optimized end-to-end for ClickUp.
 
 ---
 
-## The Landscape
+## Why Not Just OpenClaw?
 
-### What ClickUp Already Does (December 2025)
+OpenClaw is powerful. It's also 180k stars of self-hosted complexity.
 
-ClickUp launched **Super Agents** — autonomous AI teammates that live inside the platform:
+| Dimension | OpenClaw (self-hosted) | Clawup (managed) |
+|---|---|---|
+| **Setup** | Install Node, configure gateway, find skills, set API keys, manage `openclaw.json` | Connect ClickUp OAuth, pick capabilities, done |
+| **Hosting** | Runs on your laptop or server. Stops when you close the terminal. | Always-on cloud. Processes tasks 24/7. |
+| **Skills** | 5,700+ on ClawHub — you curate, install, and audit each one | Pre-built ClickUp workflow engine + curated MCP servers. We handle compatibility. |
+| **Security** | Community skills are [unaudited](https://www.crowdstrike.com/en-us/blog/what-security-teams-need-to-know-about-openclaw-ai-super-agent/) — prompt injection, data exfiltration risks | Managed skill layer. We audit. We sandbox. Your ClickUp data stays controlled. |
+| **ClickUp depth** | Two community skills (REST API wrapper + MCP passthrough) | Deep integration: status workflows, custom fields, automation templates, recursive task trees, approval-as-execution |
+| **Updates** | Manual. You pull, you update skills, you fix breaking changes. | We ship updates. Workflows improve. New capabilities appear. |
+| **Target user** | Developers, power users, tinkerers | Anyone who uses ClickUp — ops, project management, agencies, founders |
+| **Reliability** | Your laptop's uptime | Cloud SLA. Retries. Monitoring. Alerting. |
 
-- **500+ work skills** including email, calendar, scheduling, reporting, task management
-- **Email ClickApp** — send/receive real emails from tasks via linked Gmail/Outlook
-- **Google Calendar automations** — create, update, delete calendar events triggered by task changes
-- **Native integrations** — Slack, GitHub, HubSpot, Google Drive, and 100+ more
-- **No-code builder** — natural language agent configuration
-- **Memory system** — short-term, long-term, and preference memory
-- **Approval modes** — human sign-off for critical actions
-- **Codegen acquisition** — AI code generation folded into Super Agents
-
-Super Agents handle routine automation well. What they lack:
-
-- **Deep multi-step reasoning** — Claude's ability to think through novel, complex problems
-- **Real software engineering** — full repo context, multi-file edits, test-driven development, PR workflows
-- **Recursive task decomposition** — breaking a vague goal into a structured plan, then executing each piece
-- **Programmatic control** — no API/SDK; everything is through the no-code builder
-- **Model choice** — you use whatever LLM ClickUp chose; you can't bring Claude
-
-### The Gap Clawup Fills
-
-```
-Super Agents:  "Do routine work inside ClickUp"
-Clawup:        "Think hard, plan deeply, write code, and USE ClickUp to execute"
-```
-
-Clawup doesn't replace Super Agents. It's the brain that drives them. Claude reasons about what needs to happen, then uses ClickUp's native capabilities to make it happen — creating tasks, triggering automations, sending emails through the Email ClickApp, scheduling through Calendar, posting to Slack. For anything ClickUp can't do natively, MCP servers fill the gap.
+**The analogy:** OpenClaw is Linux. Clawup is a managed cloud service built on it. Same power, packaged for people who have work to do.
 
 ---
 
 ## How It Works
 
-### The Architecture: ClickUp-Native First, MCP for the Rest
+### For the User
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                     CLAWUP ENGINE                       │
-│                                                         │
-│  ┌───────────┐    ┌──────────────────────────────────┐  │
-│  │           │    │          CLAUDE                   │  │
-│  │  ClickUp  │◄──►│  Planning · Reasoning · Code     │  │
-│  │  Poller   │    │                                   │  │
-│  │           │    │  "What needs to happen?"          │  │
-│  └───────────┘    └──────────┬───────────────────────┘  │
-│                              │                          │
-│              ┌───────────────┼───────────────┐          │
-│              ▼               ▼               ▼          │
-│  ┌───────────────┐  ┌──────────────┐  ┌────────────┐   │
-│  │  ClickUp API  │  │ ClickUp MCP  │  │ Other MCP  │   │
-│  │  (direct)     │  │ (official)   │  │ (custom)   │   │
-│  │               │  │              │  │            │   │
-│  │ • Tasks CRUD  │  │ • Search     │  │ • Code     │   │
-│  │ • Comments    │  │ • Docs       │  │ • Git/GH   │   │
-│  │ • Statuses    │  │ • Workspace  │  │ • Custom   │   │
-│  │ • Checklists  │  │   queries    │  │   APIs     │   │
-│  └───────┬───────┘  └──────┬───────┘  └─────┬──────┘   │
-│          │                 │                │           │
-└──────────┼─────────────────┼────────────────┼───────────┘
-           │                 │                │
-           ▼                 ▼                ▼
-   ClickUp Platform    ClickUp Data     External Systems
-   • Super Agents      • Docs           • GitHub
-   • Automations       • Tasks          • File systems
-   • Email ClickApp    • Comments       • Custom tools
-   • Calendar sync     • Workspace
-   • Slack integration
+1. Go to clawup.com
+2. Connect your ClickUp workspace (OAuth)
+3. Pick a list (or let Clawup create one with the right statuses)
+4. Choose capabilities: email, calendar, slack, code, web research
+5. Write a task in ClickUp
+6. Watch it get done
 ```
 
-### The Three Execution Layers
+No CLI. No terminal. No `npm install`. No `openclaw.json`. No skill hunting.
 
-**Layer 1: ClickUp API (Direct)**
-Clawup already uses this. Create tasks, update statuses, post comments, manage checklists. This is the foundation — all state lives in ClickUp.
-
-**Layer 2: ClickUp's Native Capabilities (via task/automation patterns)**
-Instead of building email and calendar tools from scratch, Clawup creates the right ClickUp artifacts and lets ClickUp's existing integrations do the work:
-
-| Claude wants to... | Clawup does... | ClickUp handles... |
-|---|---|---|
-| Send an email | Creates subtask with email custom fields, sets status to "pending approval" | User approves → ClickUp Email ClickApp sends it via linked Gmail |
-| Schedule a meeting | Creates subtask with event details in custom fields | User approves → ClickUp Calendar automation creates the event |
-| Notify the team on Slack | Creates subtask with message content | ClickUp Slack automation posts it |
-| Update a CRM record | Creates subtask describing the change | ClickUp HubSpot/Salesforce automation executes it |
-
-**The approval workflow IS the execution trigger.** When a human moves a task from "pending approval" to "approved," ClickUp automations fire and do the actual work — send the email, create the event, post the message. No extra credentials. No MCP server needed. The user's existing ClickUp integrations become the agent's toolkit.
-
-**Layer 3: MCP Servers (for everything else)**
-For capabilities ClickUp doesn't have natively:
-
-| MCP Server | What It Provides | Why Not ClickUp-Native |
-|---|---|---|
-| **ClickUp MCP** (official, `mcp.clickup.com`) | Deep workspace search, Doc reading, cross-space queries | API doesn't cover all query patterns |
-| **Code** (Claude Code native) | `git_branch`, `commit`, `create_pr`, `push`, full repo editing | ClickUp's Codegen is young; Claude Code is battle-tested |
-| **Web Research** | `web_search`, `web_read`, data extraction | ClickUp has no web research capability |
-| **Custom** (user-built) | Domain-specific APIs, internal tools, specialized data sources | Unique to each team |
-
-### The Decision Flow
-
-When Claude processes a task, it chooses the right execution path:
+### Under the Hood
 
 ```
-Claude receives task: "Email the Hamilton about March 20 availability"
-  │
-  ├─ Can ClickUp do this natively?
-  │   └─ YES: Email ClickApp is connected
-  │       └─ Create subtask with custom fields:
-  │          • email_to: events@thehamiltondc.com
-  │          • email_subject: Venue inquiry — March 20, 50 guests
-  │          • email_body: <drafted content>
-  │          • status: pending approval
-  │       └─ Human approves → ClickUp automation sends email
-  │       └─ Reply arrives as comment on task → Claude reads it next cycle
-  │
-  ├─ Does an MCP server handle this?
-  │   └─ Example: "Generate a PR for the auth module"
-  │       └─ Use Code MCP: branch, edit, test, commit, push, create PR
-  │
-  └─ Neither?
-      └─ Break it down further, research it, or ask for human input
+┌──────────────────────────────────────────────────────────────┐
+│                     CLAWUP CLOUD                             │
+│                                                              │
+│  ┌──────────────────────────────────────────────────────┐    │
+│  │              OPENCLAW-BASED AGENT RUNTIME             │    │
+│  │                                                       │    │
+│  │  ┌─────────┐  ┌──────────┐  ┌─────────────────────┐  │    │
+│  │  │ ClickUp │  │  Claude   │  │     MCP Servers     │  │    │
+│  │  │ Poller  │  │  (brain)  │  │  (curated, managed) │  │    │
+│  │  │         │  │          │  │                     │  │    │
+│  │  │ Watches │  │ Reasons  │  │ • ClickUp MCP      │  │    │
+│  │  │ tasks,  │◄►│ Plans    │◄►│ • Web research     │  │    │
+│  │  │ polls,  │  │ Decides  │  │ • Code (Claude)    │  │    │
+│  │  │ syncs   │  │ Acts     │  │ • Email (if no     │  │    │
+│  │  │         │  │          │  │   Email ClickApp)  │  │    │
+│  │  └─────────┘  └──────────┘  │ • Custom           │  │    │
+│  │                              └─────────────────────┘  │    │
+│  └──────────────────────────────────────────────────────┘    │
+│                                                              │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐   │
+│  │   Workspace   │  │   Security    │  │   Monitoring     │   │
+│  │   Isolation    │  │   Sandbox     │  │   & Alerting     │   │
+│  │               │  │              │  │                  │   │
+│  │ Each customer │  │ MCP calls    │  │ Task processing  │   │
+│  │ gets isolated │  │ sandboxed.   │  │ status. Failures.│   │
+│  │ agent runtime │  │ No cross-    │  │ Cost tracking.   │   │
+│  │               │  │ tenant leak. │  │ Usage dashboards.│   │
+│  └──────────────┘  └──────────────┘  └──────────────────┘   │
+└──────────────────────────────────────────────────────────────┘
+           │                    │                  │
+           ▼                    ▼                  ▼
+    ClickUp Platform      External APIs       GitHub/GitLab
+    • Tasks, Comments      • Web search        • PRs, branches
+    • Email ClickApp       • Custom APIs       • Code repos
+    • Calendar sync        • Data sources
+    • Slack integration
+    • Automations
 ```
+
+**Key architecture decisions:**
+
+1. **OpenClaw core** — we don't reinvent the agent runtime. OpenClaw's gateway, memory, and skill architecture are battle-tested. We build on it.
+
+2. **Managed MCP layer** — instead of users hunting for MCP servers on ClawHub, we curate and host the servers that matter for ClickUp workflows. We audit them. We version them. We handle auth.
+
+3. **ClickUp-native first** — when ClickUp can do it (send email via Email ClickApp, create calendar events, post to Slack), we use ClickUp. MCP only for things ClickUp can't do natively.
+
+4. **Always-on** — the agent doesn't stop when you close your laptop. It runs in the cloud, polls continuously, processes tasks when they appear, follows up when things are due.
+
+5. **Workspace isolation** — each customer gets an isolated agent runtime. No shared state. No cross-tenant data leakage.
 
 ---
 
-## The Core Loop
+## The ClickUp Integration: Deeper Than a Skill
+
+OpenClaw's ClickUp integration is two community skills — a REST API wrapper and an MCP passthrough. They let you create and read tasks. That's table stakes.
+
+Clawup goes much deeper:
+
+### The Status Workflow Engine
+
+Clawup configures your ClickUp list with a purpose-built status system:
+
+| Status | Purpose |
+|--------|---------|
+| **to do** | Ready for the agent to pick up |
+| **in progress** | Agent is actively working |
+| **pending approval** | Agent prepared an action — needs human sign-off |
+| **approved** | Human approved — triggers execution |
+| **needs input** | Agent is stuck — needs human clarification |
+| **waiting** | Paused on external party |
+| **complete** | Done |
+| **cancelled** | Not doing this |
+
+These aren't just labels. They're **control flow**:
+
+- `to do` → agent picks up automatically
+- `pending approval` → agent stops and waits for human
+- `approved` → ClickUp automations fire (send email, create event, post to Slack)
+- `needs input` → human gets notified, adds context, agent resumes
+
+**"Approved" is the execution trigger.** When a human moves a task to "approved," pre-configured ClickUp automations do the actual work. The status change IS the command. No extra API calls needed from the agent.
+
+### Recursive Task Decomposition
+
+When Claude encounters a complex task, it doesn't try to do everything at once:
 
 ```
-1. Human creates a task in ClickUp
-2. Clawup polls and picks it up → moves to "in progress"
-3. Claude reads the task, thinks, and plans:
-   - What needs to happen?
-   - What can ClickUp handle natively?
-   - What needs MCP tools?
-   - What needs human approval?
-4. Claude acts:
-   - Research: web search, read docs, gather data (MCP)
-   - Plan: decompose into subtasks in ClickUp (API)
-   - Execute: code via MCP, emails/calendar/slack via ClickUp-native patterns
-   - Report: post findings as ClickUp comments (API)
-5. For gated actions:
-   - Creates subtask in "pending approval" with all details
-   - Human reviews and approves/rejects
-   - ClickUp automation executes the approved action
-6. Task moves to "complete"
+Task: "Plan Q1 marketing campaign"
+  │
+  Claude creates subtasks in ClickUp:
+  ├── "Analyze Q4 campaign performance" → to do (agent picks up)
+  ├── "Research competitor campaigns" → to do (agent picks up)
+  ├── "Draft campaign strategy doc" → to do (depends on research)
+  ├── "Create content calendar" → to do (depends on strategy)
+  └── "Draft launch email sequence" → to do (depends on calendar)
+  │
+  Clawup sees new "to do" subtasks → picks them up → processes them
+  Each subtask may create MORE subtasks
+  Work cascades down the tree until everything is "complete"
+  Parent task auto-completes when all children are done
+```
+
+OpenClaw doesn't do this. It processes one message at a time. Clawup manages a **task tree** — the ClickUp hierarchy IS the agent's plan, and the poll loop IS the execution engine.
+
+### Custom Field Schemas
+
+Clawup sets up custom fields that bridge Claude's intent to ClickUp's automations:
+
+```
+When Claude wants to send an email:
+  → Creates subtask with custom fields:
+    • email_to: vendor@example.com
+    • email_subject: Venue inquiry
+    • email_body: <drafted by Claude>
+    • status: pending approval
+
+When human approves:
+  → ClickUp automation reads custom fields
+  → Email ClickApp sends via linked Gmail
+  → Status moves to "waiting"
+  → Reply threads back as comment on task
+  → Claude reads reply on next poll cycle
+```
+
+This pattern works for email, calendar events, Slack messages, CRM updates — any ClickUp integration becomes an execution channel for the agent, gated by human approval.
+
+### Automation Templates
+
+`clawup --setup` (or the web onboarding) configures ClickUp automations automatically:
+
+- "Approved" + email fields → send email via Email ClickApp
+- "Approved" + event fields → create Google Calendar event
+- "Approved" + slack fields → post to Slack channel
+- All children complete → mark parent complete
+- Task overdue → notify assigned human
+
+These automations are the bridge between Claude's decisions and real-world execution.
+
+---
+
+## The Three Layers of Execution
+
+### Layer 1: ClickUp API (Always)
+Create tasks, update statuses, post comments, manage checklists. All state lives in ClickUp.
+
+### Layer 2: ClickUp-Native Integrations (When Available)
+Email ClickApp, Calendar sync, Slack integration, CRM connectors. Triggered by status changes and automations. No extra credentials — uses what the team already connected.
+
+### Layer 3: MCP Servers (For the Rest)
+Managed, curated, audited:
+
+| MCP Server | What It Does | When Used |
+|---|---|---|
+| **ClickUp MCP** (official) | Deep workspace search, Docs, cross-space queries | Always — gives Claude full workspace context |
+| **Web research** | Search the web, read pages, extract data | Research tasks, competitive analysis, vendor scouting |
+| **Code** (Claude Code) | Full software engineering — edit, test, commit, PR | Development tasks |
+| **Custom** (per-customer) | Domain-specific APIs, internal tools | Customer brings their own MCP servers |
+
+**The decision flow:**
+```
+Claude needs to act
+  ├─ Can ClickUp do it natively? → Use ClickUp (Layer 2)
+  ├─ Need deeper ClickUp data? → ClickUp MCP (Layer 3)
+  ├─ Need external capability? → Other MCP server (Layer 3)
+  └─ None of the above? → Break it down further or ask human
 ```
 
 ---
@@ -163,447 +222,216 @@ Claude receives task: "Email the Hamilton about March 20 availability"
 **Task: "Plan a team offsite in DC for 50 people. Budget: $15K. Date: March 20."**
 
 ```
-Claude picks up the task. Here's what happens:
+Claude picks up the task:
 
-MINUTE 1-5: Planning & Research
-├── Claude posts a comment: "Breaking this down into venue, catering,
-│   logistics, and communications. Creating subtasks now."
-├── Creates subtask: "Research venue options in DC" → status: to do
-├── Creates subtask: "Research catering vendors" → status: to do
-├── Creates subtask: "Draft invitation email" → status: to do
-└── Creates subtask: "Create budget tracker" → status: to do
+PLANNING (minutes 1-5):
+├── Posts comment: "Breaking this into venue, catering, logistics,
+│   and communications."
+├── Creates subtask: "Research venue options in DC" → to do
+├── Creates subtask: "Research catering vendors" → to do
+├── Creates subtask: "Draft invitation email" → to do
+└── Creates subtask: "Create budget tracker" → to do
 
-MINUTE 5-15: Research Phase (parallel, via MCP web tools)
+RESEARCH (minutes 5-15, via web MCP):
 ├── "Research venues" → in progress
-│   Claude searches the web, reads venue sites, compares capacity/pricing
-│   Posts comment: "Found 4 strong options:
-│     1. The Hamilton — 75 cap, $3,200, downtown
-│     2. 600F Loft — 60 cap, $2,500, Penn Quarter
-│     3. Eastern Market — 100 cap, $1,800, outdoor covered
-│     4. The Lumen — 80 cap, $4,100, rooftop"
-│   Creates subtasks for each venue:
-│     "Contact The Hamilton for March 20 availability" → pending approval
-│       (custom fields: email_to, email_subject, email_body pre-filled)
-│     "Contact 600F Loft for March 20 availability" → pending approval
-│     "Contact Eastern Market for March 20 availability" → pending approval
+│   Web search, reads venue sites, compares pricing
+│   Posts findings as comment with 4 options
+│   Creates contact subtasks with email custom fields:
+│     "Contact The Hamilton" → pending approval
+│       (email_to: events@thehamiltondc.com, email_body: <drafted>)
+│     "Contact 600F Loft" → pending approval
+│     "Contact Eastern Market" → pending approval
 │   Moves "Research venues" → complete
 │
-├── "Research catering" → same pattern
-│
-├── "Draft invitation email" → in progress
-│   Writes draft, posts in comment for review
-│   Moves → complete
-│
-└── "Create budget tracker" → in progress
-    Creates a checklist on parent task:
-    ☐ Venue: $0 / $5,000 budget
-    ☐ Catering: $0 / $4,000 budget
-    ☐ AV/Equipment: $0 / $1,500 budget
-    ☐ Transportation: $0 / $2,000 budget
-    ☐ Misc: $0 / $2,500 budget
-    Moves → complete
+├── "Draft invitation" → in progress → complete (posted as comment)
+└── "Budget tracker" → in progress → complete (added as checklist)
 
-HUMAN REVIEWS (async, whenever they get to it)
-├── Sees venue options in comments. Likes The Hamilton and 600F.
-├── Approves "Contact The Hamilton" → status: approved
-│   └── ClickUp Email automation fires → sends inquiry via linked Gmail
-│       (No MCP needed. No separate email credentials. ClickUp did it.)
-├── Approves "Contact 600F Loft" → status: approved
-│   └── Same: ClickUp sends the email
-├── Cancels Eastern Market (too far from hotel)
-└── Comments on invite draft: "Make it more casual"
-
-NEXT POLL CYCLE:
-├── Claude sees the comment about casual tone
-│   Updates draft in a new comment
+HUMAN REVIEWS (async, whenever):
+├── Approves "Contact The Hamilton"
+│   → ClickUp Email automation sends the inquiry via linked Gmail
+│   → Status moves to "waiting"
+│   (No MCP. No extra credentials. ClickUp did it.)
 │
-├── Hamilton replies to the inquiry email
-│   Reply appears as comment on the task (ClickUp Email threading)
-│   Claude reads it: "Available March 20. $3,200 + $500 AV package."
-│   Creates subtask: "Confirm booking — The Hamilton — $3,700" → pending approval
-│     (custom fields: email_to, confirmation email body pre-filled)
-│
-└── Claude creates follow-up subtask for 600F if no reply by Thursday
-    (due date set → Clawup picks it up when due)
+├── Approves "Contact 600F Loft" → same
+├── Cancels Eastern Market
+└── Comments: "Make the invite more casual"
 
-HUMAN APPROVES booking → ClickUp sends confirmation email → done.
+NEXT CYCLE:
+├── Claude sees casual comment → rewrites invite in new comment
+├── Hamilton replies (threaded into task by Email ClickApp)
+│   Claude reads reply: "Available March 20. $3,700 with AV."
+│   Creates subtask: "Confirm Hamilton booking — $3,700" → pending approval
+│     (email_to, confirmation body pre-filled)
+└── Creates follow-up for 600F with Thursday due date
+
+HUMAN APPROVES booking → ClickUp sends confirmation → done.
 ```
 
-**What ClickUp did natively:** Sent all emails via the Email ClickApp, threaded replies back into tasks.
-
-**What MCP did:** Web research (venue/catering searches), code generation (if any).
-
-**What Claude did:** All the thinking — venue comparison, email drafting, budget structure, follow-up planning, task decomposition.
-
-**Total human effort: ~10 minutes of reading comments and approving/rejecting.**
+**Claude did:** All the thinking. Research, comparison, drafting, planning, follow-up scheduling.
+**ClickUp did:** All the executing. Sent emails, threaded replies, fired automations.
+**MCP did:** Web research (the only thing neither Claude nor ClickUp handles natively).
+**Human did:** ~10 minutes of reading and approving.
 
 ---
 
-## The Architecture Details
+## Why Managed Beats Self-Hosted for This Use Case
 
-### ClickUp Is the State
+### 1. The Buyer Isn't a Developer
 
-All state lives in ClickUp. No external database. No "agent memory store." ClickUp IS the state:
+The people who manage ClickUp workspaces — ops managers, project leads, agency owners, founders — aren't going to `npm install` anything. They need a product, not a toolkit.
 
-- **Task hierarchy** = the agent's plan
-- **Task statuses** = the agent's workflow state
-- **Comments** = the agent's work output and communication
-- **Custom fields** = structured data for automations (email addresses, event details)
-- **Checklists** = structured tracking (budgets, requirements, progress)
-- **Subtasks** = decomposed work items
-- **Assignees** = who's responsible (human or agent)
-- **Due dates** = deadlines and follow-up triggers
-- **Tags** = categorization and routing
+OpenClaw's ClickUp user posted on Skool, not GitHub. They're running a $100k/mo client implementation. They want results, not configuration files.
 
-This means:
-- Everything is auditable (ClickUp has full history)
-- Nothing is lost if Clawup restarts (state is in ClickUp, not in memory)
-- Multiple humans can observe and intervene at any time
-- The agent's "thinking" is visible as task structure and comments
-- ClickUp Super Agents can also see and act on the same tasks (coexistence)
+### 2. Always-On Matters
 
-### The Status Workflow
+A self-hosted OpenClaw agent stops when your laptop sleeps. Business tasks don't:
 
-| Status | Type | Color | Purpose |
-|--------|------|-------|---------|
-| **to do** | open | `#d3d3d3` | Ready for the agent to pick up |
-| **in progress** | active | `#4194f6` | Agent is actively working |
-| **pending approval** | active | `#f9d900` | Agent prepared an action — needs human sign-off |
-| **approved** | active | `#2ecd6f` | Human approved — ClickUp automation executes |
-| **needs input** | active | `#a875ff` | Agent is stuck — needs human clarification |
-| **waiting** | active | `#ff7800` | Paused on external party (email reply, vendor, etc.) |
-| **complete** | closed | `#6bc950` | Done |
-| **cancelled** | closed | `#808080` | Not doing this |
+- Follow-up emails need to send on Thursday morning
+- Vendor replies arrive at 3 AM
+- Approval tasks should process immediately, not when you open your terminal
 
-**The critical design:** "approved" is both a human decision AND an automation trigger. When a task moves to "approved," ClickUp automations fire — sending the email, creating the calendar event, posting to Slack. The status change IS the execution command.
+Clawup runs in the cloud. Tasks process 24/7. Due dates trigger on schedule. The agent doesn't sleep.
 
-**ClickUp automations to configure:**
+### 3. Security Is Non-Negotiable
+
+OpenClaw community skills have [documented security issues](https://www.crowdstrike.com/en-us/blog/what-security-teams-need-to-know-about-openclaw-ai-super-agent/) — prompt injection, data exfiltration, credential theft. When you're connecting an agent to your business's ClickUp workspace (with client data, employee info, financial details), you need:
+
+- Audited MCP servers, not community grab-bags
+- Workspace isolation between customers
+- Sandboxed execution for all tool calls
+- Audit logs for every action the agent takes
+- SOC 2 / compliance path
+
+Clawup provides this. Self-hosted OpenClaw doesn't.
+
+### 4. ClickUp-Specific Optimization
+
+Generic agents waste tokens figuring out ClickUp's API quirks, status semantics, and custom field schemas. Clawup's agent comes pre-trained on ClickUp patterns:
+
+- Knows the 8-status workflow and when to use each status
+- Knows how to structure custom fields for automation triggers
+- Knows how to decompose tasks into ClickUp subtree hierarchies
+- Knows how to read context from parent/sibling tasks
+- Knows the difference between "post a comment" and "create a subtask"
+
+This isn't just prompt engineering. It's the difference between a general contractor and a ClickUp specialist.
+
+### 5. The Upgrade Path from Super Agents
+
+Many ClickUp teams already use Super Agents for simple automation. When they hit limits — tasks too complex, reasoning too shallow, code not real — they need an upgrade path. Clawup is that path:
+
 ```
-When status changes to "approved" AND custom field "email_to" is set:
-  → Send email via Email ClickApp
-  → Move status to "waiting" (awaiting reply)
+Super Agents: "Summarize this task"    → works great
+Super Agents: "Plan a product launch"  → too complex, shallow output
 
-When status changes to "approved" AND custom field "event_date" is set:
-  → Create Google Calendar event
-  → Move status to "complete"
-
-When status changes to "approved" AND custom field "slack_channel" is set:
-  → Post message to Slack channel
-  → Move status to "complete"
+Clawup:       "Plan a product launch"  → decomposes into 15 subtasks,
+              researches competitors, drafts strategy doc, creates
+              timeline, assigns owners, sets up review gates
 ```
 
-### The Tool System
+Same ClickUp workspace. Same task hierarchy. Just a smarter agent on the complex work.
 
-**Principle: ClickUp-native for execution, MCP for reasoning and code.**
+---
 
-**ClickUp-native tools (via API + automations):**
+## Coexistence with Super Agents
 
-| Capability | How It Works |
+Clawup doesn't replace Super Agents. It complements them:
+
+| Work Type | Who Handles It |
 |---|---|
-| Create/update tasks | ClickUp API v2 (direct) |
-| Post comments | ClickUp API v2 (direct) |
-| Send emails | Email ClickApp triggered by status + custom fields |
-| Calendar events | Google Calendar automation triggered by status + custom fields |
-| Slack messages | Slack automation triggered by status + custom fields |
-| CRM updates | HubSpot/Salesforce automation triggered by status + custom fields |
+| Daily standup summaries | Super Agent |
+| Routine email digests | Super Agent |
+| Simple task triage | Super Agent |
+| Template doc generation | Super Agent |
+| **Complex multi-step planning** | **Clawup** |
+| **Novel research + analysis** | **Clawup** |
+| **Software engineering (real PRs)** | **Clawup** |
+| **Cross-functional coordination** | **Clawup** |
+| **Vendor evaluation + outreach** | **Clawup** |
 
-**MCP tools (for everything else):**
-
-| MCP Server | Tools | Why MCP |
-|---|---|---|
-| **ClickUp MCP** (`mcp.clickup.com`) | Workspace search, Doc queries, cross-space context | Deeper queries than API supports |
-| **Code** (Claude Code built-in) | File read/write/edit, bash, git, GitHub CLI | ClickUp can't write real code |
-| **Web** | `web_search`, `web_read` | ClickUp has no web research |
-| **Custom** | Whatever your team needs | Domain-specific extensions |
-
-**Tool permission model:**
-```javascript
-// clawup.config.mjs
-export default {
-  // ClickUp-native actions that need human approval
-  // (these create "pending approval" subtasks with custom fields)
-  gatedActions: ['email', 'calendar_event', 'slack_message'],
-
-  // ClickUp-native actions that execute automatically
-  autoActions: ['create_task', 'update_task', 'post_comment'],
-
-  // MCP tools that execute automatically
-  autoTools: ['web_search', 'web_read', 'clickup_mcp_search'],
-
-  // MCP tools that need approval
-  gatedTools: ['git_push', 'create_pr'],
-};
-```
-
-### Task Expansion: The Recursive Engine
-
-When Claude encounters a complex task, it decomposes:
-
-```
-processTask("Plan Q1 marketing campaign")
-  ↓
-Claude creates subtasks:
-  ├── "Analyze Q4 campaign performance" (to do — auto-process)
-  ├── "Research competitor campaigns" (to do — auto-process via web MCP)
-  ├── "Draft campaign strategy doc" (to do — depends on research)
-  ├── "Create content calendar" (to do — depends on strategy)
-  └── "Draft launch email sequence" (to do — depends on calendar)
-  ↓
-Clawup sees new "to do" subtasks → picks them up → processes them
-  ↓
-Each subtask may create MORE subtasks
-  ↓
-Work cascades down the tree until everything is "complete"
-  ↓
-Parent task auto-completes when all children are done
-```
-
-**Depth control:** Configurable max depth (default: 3). Beyond that, Claude comments "This needs further breakdown by a human" and moves to `needs input`.
-
-**Context threading:** When working on a subtask, Claude reads parent and sibling tasks via the ClickUp MCP server for full context.
+Claude (via Clawup) can even create subtasks that Super Agents pick up. The complex brain delegates routine execution to the simple workers. Same task tree, multiple agents, unified visibility.
 
 ---
 
-## Clawup + Super Agents: Coexistence
+## Product Tiers
 
-Clawup and ClickUp Super Agents aren't competitors — they're complementary layers:
+### Free Tier
+- 1 ClickUp list
+- 50 tasks/month
+- Web research + ClickUp MCP
+- Community support
+- "Powered by Clawup" comment on tasks
 
-| Dimension | Super Agents | Clawup |
-|---|---|---|
-| **Strength** | Routine automation, native integration depth | Deep reasoning, novel problem solving, code |
-| **Trigger** | @mention, assignment, schedule, automation | Poll-based, processes "to do" tasks |
-| **Reasoning** | Good for structured, repeatable workflows | Excels at ambiguous, complex, multi-step problems |
-| **Code** | Codegen (early, unproven) | Claude Code (battle-tested, full repo context) |
-| **Configuration** | No-code builder (accessible) | Code-first config (powerful, version-controlled) |
-| **Cost model** | AI credits per user/month | Pay-per-use Claude API |
-| **Control** | ClickUp controls the model and behavior | You control the model, prompts, and execution |
+### Pro ($49/mo)
+- Unlimited lists
+- 500 tasks/month
+- Email, Calendar, Slack via ClickUp-native patterns
+- Custom MCP servers (bring your own)
+- Priority processing
+- Usage dashboard
 
-**How they work together:**
+### Team ($149/mo)
+- Everything in Pro
+- 2,000 tasks/month
+- Multiple agent personalities (ops agent, dev agent, sales agent)
+- Team-wide memory (agent learns your company's patterns)
+- Approval routing rules
+- Audit logs + compliance exports
 
-```
-Complex task arrives in ClickUp
-  │
-  ├─ Clawup picks it up (deep work)
-  │   Claude reasons, plans, decomposes into subtasks
-  │   Some subtasks are straightforward enough for Super Agents
-  │   Claude tags them appropriately
-  │
-  ├─ Super Agent handles routine subtasks
-  │   "Send weekly status report" — Super Agent does this natively
-  │   "Update the onboarding doc" — Super Agent handles it
-  │
-  ├─ Clawup handles complex subtasks
-  │   "Implement the OAuth module" — Claude Code writes the PR
-  │   "Evaluate 5 vendors and recommend one" — Claude reasons deeply
-  │
-  └─ Both report back to the same ClickUp task tree
-      Full visibility, shared state, unified audit trail
-```
-
-**The key insight:** Super Agents are excellent employees for well-defined work. Claude (via Clawup) is the senior thinker who handles novel problems, makes judgment calls, and produces work that requires deep reasoning. They share the same workspace.
-
----
-
-## Use Cases
-
-### Where Clawup Adds Value Over Super Agents Alone
-
-**Complex reasoning tasks:**
-```
-"Evaluate whether we should build or buy a customer data platform.
- Consider our current stack, team size, budget, and 3-year roadmap."
-→ Claude researches, analyzes, produces a structured recommendation
-  with pros/cons, cost projections, and risk assessment
-→ Posts findings as ClickUp comments with a recommendation
-→ Creates subtasks for next steps based on the decision
-```
-
-**Software development:**
-```
-"Implement user authentication with OAuth"
-→ Claude Code: branches, writes code, runs tests, creates PR
-→ Also creates ClickUp subtasks: documentation, QA plan, security review
-→ ClickUp automations notify the team via Slack when PR is ready
-```
-
-**Novel business operations:**
-```
-"Plan a team offsite in DC for 50 people. Budget: $15K."
-→ Claude: web research, vendor comparison, email drafting, budget planning
-→ ClickUp-native: sends emails, creates calendar events, posts to Slack
-→ All through the approval workflow — human reviews, ClickUp executes
-```
-
-**Cross-functional coordination:**
-```
-"We're launching v2.0 next month. Coordinate eng, marketing, and sales."
-→ Claude decomposes into department-specific subtask trees
-→ Engineering: code tasks processed by Clawup + Claude Code
-→ Marketing: content tasks — some handled by Super Agents, complex ones by Claude
-→ Sales: outreach tasks — emails sent via ClickUp Email ClickApp
-→ All visible in one ClickUp task hierarchy
-```
-
-### Where Super Agents Are Better (Let Them Handle It)
-
-- Daily/weekly status reports
-- Meeting note summaries
-- Routine email digests
-- Simple task triage and assignment
-- Template-based document generation
-- Standard onboarding workflows
-
-Clawup shouldn't try to do these. Super Agents are purpose-built for them.
-
----
-
-## The Clawup CLI
-
-### Setup
-
-```bash
-# Install
-npm install -g clawup
-
-# Interactive setup:
-# - Connects to ClickUp API
-# - Creates Space with the 8-status workflow
-# - Configures custom fields (email_to, email_subject, etc.)
-# - Sets up ClickUp automations for the approval→execute pattern
-# - Connects ClickUp MCP server
-# - Configures additional MCP servers (code, web, custom)
-clawup --setup
-
-# Validate everything
-clawup --check
-```
-
-### Running
-
-```bash
-# Start the agent — polls ClickUp, processes tasks
-clawup
-
-# Process a single task
-clawup --once CU-abc123
-
-# With verbose output
-clawup --verbose
-```
-
-### Configuration (`clawup.config.mjs`)
-
-```javascript
-export default {
-  // Custom instructions for Claude
-  prompt: `
-    You are an operations assistant for Acme Corp.
-    Our company is a B2B SaaS startup with 50 employees in Austin, TX.
-    When contacting vendors, always mention we're a growing startup.
-    Budget approvals over $5,000 need CFO sign-off — create a separate
-    approval task assigned to @sarah.
-  `,
-
-  // ClickUp-native actions (these use automations, not MCP)
-  clickupNative: {
-    email: true,      // Email ClickApp is connected
-    calendar: true,   // Google Calendar integration active
-    slack: true,      // Slack integration active
-  },
-
-  // MCP servers to connect
-  mcpServers: {
-    clickup: 'https://mcp.clickup.com/mcp',  // Official ClickUp MCP
-    // Add custom MCP servers as needed
-  },
-
-  // Actions requiring human approval
-  gatedActions: ['email', 'calendar_event', 'slack_message', 'git_push'],
-
-  // Maximum subtask depth
-  maxDepth: 3,
-};
-```
-
----
-
-## Why This Matters for ClickUp
-
-### Clawup Makes ClickUp's Ecosystem More Valuable
-
-Every ClickUp integration — Gmail, Google Calendar, Slack, HubSpot — becomes more valuable when an AI agent is creating the right tasks and triggering the right automations. Clawup doesn't compete with ClickUp's native capabilities. It **drives more usage of them**.
-
-- More emails sent through Email ClickApp
-- More calendar events created through Calendar integration
-- More Slack messages through Slack integration
-- More tasks, comments, and subtasks created
-- More automations triggered
-
-**Clawup is a power user of ClickUp**, not a replacement for any part of it.
-
-### The Compound Effect
-
-```
-ClickUp alone:          Human creates tasks → human does work → human updates tasks
-Super Agents alone:     Human creates tasks → agent handles routine work → human handles complex work
-Clawup + Super Agents:  Human creates tasks → Claude plans and reasons → ClickUp executes
-                        → Super Agents handle routine pieces → Claude handles complex pieces
-                        → humans only make decisions
-```
-
-Each layer reduces the human effort required. Together, they approach the vision: **humans make decisions, software does the work.**
-
-### Revenue Opportunity
-
-Clawup as an open-source tool drives ClickUp adoption and feature usage:
-- Teams adopt ClickUp specifically because Clawup works with it
-- Teams upgrade to Business+ for Email ClickApp, advanced automations
-- Teams pay for Brain/Super Agents for routine work alongside Clawup for complex work
-- Teams connect more integrations (Gmail, Calendar, Slack) because Clawup uses them
-- ClickUp could acquire or partner with Clawup for a hosted version
+### Enterprise (Custom)
+- Unlimited tasks
+- Dedicated infrastructure (single-tenant)
+- Custom MCP server development
+- SOC 2 compliance
+- SLA guarantees
+- Onboarding + training
 
 ---
 
 ## Roadmap
 
-### Phase 1: Foundation (Now → 3 months)
-- Core ClickUp API integration (tasks, comments, statuses, custom fields)
-- ClickUp MCP server connection for workspace context
-- Web research via MCP (search, read pages)
-- Recursive task expansion with depth control
-- The 8-status workflow with `clawup --setup`
+### Phase 1: Core Platform (Now → 3 months)
+- OpenClaw-based agent runtime, hosted in cloud
+- ClickUp OAuth connection + workspace setup
+- 8-status workflow auto-configuration
+- Recursive task decomposition with depth control
+- ClickUp API integration (tasks, comments, statuses, custom fields)
+- ClickUp MCP + web research MCP (managed)
+- Web dashboard: connect workspace, monitor tasks, track usage
 - Research and analysis use cases work end-to-end
 
 ### Phase 2: ClickUp-Native Execution (3 → 6 months)
-- Custom field schema for email, calendar, and Slack actions
-- Automation templates: "approved" status triggers native execution
-- Email flow: Claude drafts → human approves → Email ClickApp sends → reply threads back
-- Calendar flow: Claude proposes → human approves → Calendar integration creates event
-- `clawup --setup` configures all automations automatically
-- Event planning and vendor outreach work end-to-end
+- Custom field schemas for email, calendar, Slack actions
+- ClickUp automation templates (approved → execute)
+- Email flow: draft → approve → Email ClickApp sends → reply threads back
+- Calendar flow: propose → approve → Google Calendar creates event
+- Onboarding wizard configures automations automatically
+- Event planning, vendor outreach, communications work end-to-end
 
-### Phase 3: Code + Deliverables (6 → 9 months)
-- Claude Code integration for full software development lifecycle
-- PR workflow: branch → code → test → commit → push → PR → review
-- ClickUp Docs integration (via MCP) for document deliverables
-- Task-to-PR linking with ClickUp's GitHub integration
-- Software development use cases work end-to-end
+### Phase 3: Code + Pro Features (6 → 9 months)
+- Claude Code integration for software engineering tasks
+- PR workflow: branch → code → test → commit → push → PR
+- Multiple agent personalities per workspace
+- Team memory: agent learns from past tasks and decisions
+- Custom MCP server connections (bring your own)
+- Usage dashboards, cost tracking, approval analytics
 
-### Phase 4: Intelligence + Platform (9 → 12 months)
-- Context threading: Claude reads parent/sibling tasks via ClickUp MCP
-- Cross-task learning from comment history and past decompositions
-- Community MCP server registry (let anyone extend Clawup)
-- Super Agent coordination (Clawup creates tasks that Super Agents pick up)
-- Hosted Clawup option
+### Phase 4: Enterprise + Marketplace (9 → 12 months)
+- Single-tenant deployments
+- SOC 2 certification
+- MCP server marketplace (curated, audited extensions)
+- Super Agent coordination (Clawup creates tasks for Super Agents)
+- Public API for programmatic agent management
+- ClickUp native app integration (button in ClickUp UI)
 
 ---
 
 ## The Endgame
 
-ClickUp built the body: integrations, automations, native email, calendar, Slack, 500+ skills.
+OpenClaw proved that local AI agents can do real work. ClickUp proved that project management can be the everything app. Super Agents proved that native AI in PM tools has demand.
 
-Clawup brings the brain: Claude's reasoning, planning, code generation, and judgment.
+Clawup combines all three: OpenClaw's agent architecture, ClickUp's execution platform, Claude's reasoning — packaged as a managed service for the people who actually run businesses on ClickUp.
 
-**ClickUp for everything it can do. MCP for the rest. Claude for the thinking.**
+**No terminal. No configuration. No skill hunting. No security anxiety.**
 
-The work gets done.
+Connect your workspace. Create a task. The work gets done.
