@@ -282,6 +282,40 @@ export async function findPRUrlInComments(
 }
 
 /**
+ * Get the names of all non-closed tasks in the configured list/parent.
+ * Used for deduplication when creating follow-up tasks via .clawdup.todo.json.
+ * Returns a Set of lowercased, trimmed task names.
+ */
+export async function getExistingTaskNames(): Promise<Set<string>> {
+  const names = new Set<string>();
+
+  if (CLICKUP_PARENT_TASK_ID) {
+    const parent = await request<ClickUpTask>(
+      "GET",
+      `/task/${CLICKUP_PARENT_TASK_ID}?include_subtasks=true`,
+    );
+    for (const sub of parent.subtasks || []) {
+      names.add(sub.name.toLowerCase().trim());
+    }
+  } else {
+    const listId = await getEffectiveListId();
+    const params = new URLSearchParams({
+      include_closed: "false",
+      subtasks: "true",
+    });
+    const data = await request<{ tasks: ClickUpTask[] }>(
+      "GET",
+      `/list/${listId}/task?${params.toString()}`,
+    );
+    for (const task of data.tasks || []) {
+      names.add(task.name.toLowerCase().trim());
+    }
+  }
+
+  return names;
+}
+
+/**
  * Create a new task in the ClickUp list.
  * In parent task mode, creates the task as a subtask of the configured parent.
  */

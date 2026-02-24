@@ -16,6 +16,7 @@ import {
   validateStatuses,
   findPRUrlInComments,
   createTask,
+  getExistingTaskNames,
   getNewReviewFeedback,
   getCommentText,
 } from "./clickup-api.js";
@@ -72,6 +73,11 @@ let shouldRelaunchAfterMerge = false;
 
 const TODO_FILE_PATH = resolve(PROJECT_ROOT, ".clawdup.todo.json");
 const LOCK_FILE_PATH = resolve(PROJECT_ROOT, ".clawdup.lock");
+
+// Tracks task IDs that have been processed in this runner session.
+// Prevents the same task from being picked up again if a status update
+// fails and the task remains in TODO after processing.
+const processedTaskIds = new Set<string>();
 
 interface LockFileData {
   pid: number;
@@ -158,40 +164,67 @@ function releaseLock(): void {
 
 /**
  * Process the .clawdup.todo.json file if it exists.
- * Creates new ClickUp tasks for each entry and deletes the file afterward.
+ * Creates new ClickUp tasks for each entry, skipping duplicates.
+ * The file is deleted immediately after reading to prevent double-processing
+ * if this function is called multiple times (e.g. in both success and finally paths).
  */
 async function processTodoFile(): Promise<void> {
   if (!existsSync(TODO_FILE_PATH)) return;
 
+  // Step 1: Read and delete the file atomically to prevent double-processing.
+  // If the process crashes after deletion but before creating tasks,
+  // the items are lost — but this is safer than creating duplicates.
+  let items: Array<{ title?: string; description?: string }>;
   try {
     const raw = readFileSync(TODO_FILE_PATH, "utf-8");
-    const items = JSON.parse(raw) as Array<{ title?: string; description?: string }>;
-
-    if (!Array.isArray(items)) {
-      log("warn", ".clawdup.todo.json does not contain an array, skipping");
-      return;
-    }
-
-    for (const item of items) {
-      if (!item.title) {
-        log("warn", "Skipping todo entry with no title");
-        continue;
-      }
-      try {
-        const created = await createTask(item.title, item.description);
-        log("info", `Created follow-up task: "${item.title}" (${created.id})`);
-      } catch (err) {
-        log("error", `Failed to create follow-up task "${item.title}": ${(err as Error).message}`);
-      }
-    }
+    items = JSON.parse(raw) as Array<{ title?: string; description?: string }>;
   } catch (err) {
-    log("error", `Failed to process .clawdup.todo.json: ${(err as Error).message}`);
+    log("error", `Failed to read .clawdup.todo.json: ${(err as Error).message}`);
+    return;
   } finally {
     try {
       unlinkSync(TODO_FILE_PATH);
       log("debug", "Deleted .clawdup.todo.json");
     } catch {
       // ignore if already gone
+    }
+  }
+
+  if (!Array.isArray(items)) {
+    log("warn", ".clawdup.todo.json does not contain an array, skipping");
+    return;
+  }
+
+  // Step 2: Fetch existing task names for deduplication.
+  let existingNames: Set<string>;
+  try {
+    existingNames = await getExistingTaskNames();
+    log("debug", `Found ${existingNames.size} existing task(s) for deduplication check`);
+  } catch (err) {
+    log("warn", `Failed to fetch existing tasks for deduplication: ${(err as Error).message}. Proceeding without dedup check.`);
+    existingNames = new Set();
+  }
+
+  // Step 3: Create tasks, skipping duplicates.
+  for (const item of items) {
+    if (!item.title) {
+      log("warn", "Skipping todo entry with no title");
+      continue;
+    }
+
+    const normalizedName = item.title.toLowerCase().trim();
+    if (existingNames.has(normalizedName)) {
+      log("info", `Skipping duplicate follow-up task: "${item.title}"`);
+      continue;
+    }
+
+    try {
+      const created = await createTask(item.title, item.description);
+      log("info", `Created follow-up task: "${item.title}" (${created.id})`);
+      // Track the newly created task to prevent duplicates within the same batch
+      existingNames.add(normalizedName);
+    } catch (err) {
+      log("error", `Failed to create follow-up task "${item.title}": ${(err as Error).message}`);
     }
   }
 }
@@ -1489,13 +1522,22 @@ async function pollForTasks(): Promise<void> {
     // Then, check for TODO tasks to implement
     const tasks = await getTasksByStatus(STATUS.TODO);
 
-    if (tasks.length === 0) {
-      log("debug", "No tasks found. Waiting...");
+    // Filter out tasks already processed in this session to prevent
+    // double-processing if a status update failed after successful work.
+    const eligibleTasks = tasks.filter((t) => !processedTaskIds.has(t.id));
+
+    if (eligibleTasks.length === 0) {
+      if (tasks.length > 0) {
+        log("debug", `${tasks.length} TODO task(s) found but all already processed in this session. Waiting...`);
+      } else {
+        log("debug", "No tasks found. Waiting...");
+      }
       return;
     }
 
-    // Process the highest-priority task
-    const task = tasks[0]!;
+    // Process the highest-priority eligible task
+    const task = eligibleTasks[0]!;
+    processedTaskIds.add(task.id);
 
     // Check if this is a returning task (already has a PR in its comments)
     const existingPrUrl = await findPRUrlInComments(task.id);
@@ -1543,6 +1585,7 @@ export async function startRunner(options?: { interactive?: boolean }): Promise<
   isShuttingDown = false;
   isProcessing = false;
   shouldRelaunchAfterMerge = false;
+  processedTaskIds.clear();
   interactiveMode = options?.interactive ?? false;
 
   if (DRY_RUN) {
