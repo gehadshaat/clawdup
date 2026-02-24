@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://gehadshaat.github.io/clawdup/sitemap.xml

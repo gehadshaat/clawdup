@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>How Clawdup Turns ClickUp Tasks into GitHub PRs in Minutes - clawdup Blog</title>
+  <meta name="description" content="A complete walkthrough of clawdup's architecture: from polling ClickUp for tasks, through AI-powered implementation with Claude Code, to creating pull requests ready for review.">
+  <meta name="keywords" content="clawdup, ClickUp, GitHub, pull requests, Claude Code, AI coding, automation architecture, developer tools">
+  <meta property="og:title" content="How Clawdup Turns ClickUp Tasks into GitHub PRs in Minutes">
+  <meta property="og:description" content="A deep dive into clawdup's pipeline: polling, branching, AI implementation, and PR creation.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://gehadshaat.github.io/clawdup/blog/how-clawdup-turns-clickup-tasks-into-github-prs.html">
+  <meta property="article:published_time" content="2026-02-22">
+  <meta property="article:author" content="Gehad Shaat">
+  <link rel="canonical" href="https://gehadshaat.github.io/clawdup/blog/how-clawdup-turns-clickup-tasks-into-github-prs.html">
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="blog.css">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "BlogPosting",
+    "headline": "How Clawdup Turns ClickUp Tasks into GitHub PRs in Minutes",
+    "description": "A complete walkthrough of clawdup's architecture and pipeline.",
+    "datePublished": "2026-02-22",
+    "author": { "@type": "Person", "name": "Gehad Shaat" },
+    "publisher": { "@type": "Person", "name": "Gehad Shaat" },
+    "url": "https://gehadshaat.github.io/clawdup/blog/how-clawdup-turns-clickup-tasks-into-github-prs.html",
+    "mainEntityOfPage": { "@type": "WebPage", "@id": "https://gehadshaat.github.io/clawdup/blog/how-clawdup-turns-clickup-tasks-into-github-prs.html" }
+  }
+  </script>
+</head>
+<body>
+
+  <nav class="nav">
+    <div class="nav-inner">
+      <a href="../" class="nav-logo">claw<span>dup</span></a>
+      <ul class="nav-links">
+        <li><a href="../#features">Features</a></li>
+        <li><a href="../#quickstart">Quick Start</a></li>
+        <li><a href="./">Blog</a></li>
+        <li><a href="https://github.com/gehadshaat/clawdup">GitHub</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <article class="blog-post">
+    <header class="blog-post-header">
+      <h1>How Clawdup Turns ClickUp Tasks into GitHub PRs in Minutes</h1>
+      <div class="blog-post-meta">
+        <span class="blog-tag">Deep Dive</span>
+        <span>February 22, 2026</span>
+        <span>8 min read</span>
+      </div>
+    </header>
+
+    <div class="blog-post-content">
+      <p>clawdup is an open-source pipeline that connects ClickUp task management to GitHub pull requests through AI-powered code implementation. This post walks through every stage of the pipeline, explaining how each component works and why it's designed the way it is.</p>
+
+      <h2>The Pipeline at a Glance</h2>
+
+      <p>At its core, clawdup runs a continuous loop:</p>
+
+      <pre>ClickUp Task → Git Branch → Claude Code → Commit → Push → GitHub PR → Status Update</pre>
+
+      <p>Each stage is handled by a dedicated module, keeping the codebase modular and each responsibility isolated. Let's walk through them.</p>
+
+      <h2>Stage 1: Polling ClickUp</h2>
+
+      <p>The pipeline starts with the <strong>runner</strong> module, which polls your ClickUp list every 30 seconds (configurable via <code>POLL_INTERVAL_MS</code>). It uses the ClickUp API v2 to fetch tasks with the "to do" status, sorted by priority.</p>
+
+      <p>When a task is found, the runner immediately moves it to "in progress" status. This prevents other instances of clawdup (or other developers) from picking up the same task — a simple but effective locking mechanism.</p>
+
+      <p>The ClickUp API client is minimal by design. It uses Node.js's native <code>fetch</code> (available in Node 18+) with no HTTP library dependencies. Error handling includes retry logic for transient failures and clear error messages for configuration issues.</p>
+
+      <h2>Stage 2: Branch Creation</h2>
+
+      <p>Once a task is claimed, the <strong>git-ops</strong> module creates a feature branch. The branch name follows a strict format:</p>
+
+      <pre>clickup/CU-{task-id}-{slug}</pre>
+
+      <p>For example, a task titled "Add user authentication" with ID <code>abc123</code> becomes <code>clickup/CU-abc123-add-user-authentication</code>.</p>
+
+      <p>This naming convention serves two purposes. First, it includes the ClickUp task ID prefixed with <code>CU-</code>, which ClickUp's GitHub integration recognizes and uses to automatically link the branch to the task. Second, the human-readable slug makes it easy to identify what a branch is for when browsing the repository.</p>
+
+      <p>The branch is created from the configured base branch (default: <code>main</code>), ensuring every task starts from a clean, up-to-date state.</p>
+
+      <h2>Stage 3: AI-Powered Implementation</h2>
+
+      <p>This is where the real work happens. The <strong>claude-worker</strong> module invokes Claude Code — Anthropic's AI coding CLI — with a carefully constructed prompt that includes:</p>
+
+      <ul>
+        <li><strong>The task description</strong> from ClickUp, sanitized to prevent prompt injection</li>
+        <li><strong>Project context</strong> from your <code>CLAUDE.md</code> file (coding conventions, architecture decisions, etc.)</li>
+        <li><strong>Security boundaries</strong> — explicit instructions about what the AI can and cannot do</li>
+        <li><strong>Custom instructions</strong> from your <code>clawdup.config.mjs</code> if configured</li>
+      </ul>
+
+      <p>Claude Code runs as a subprocess, and clawdup consumes its output as a JSONL stream. This streaming approach lets the pipeline track progress in real-time, log intermediate results, and detect problems early.</p>
+
+      <p>The implementation has a configurable timeout (default: 10 minutes via <code>CLAUDE_TIMEOUT_MS</code>) and a maximum number of agentic turns (default: 50 via <code>CLAUDE_MAX_TURNS</code>). If Claude needs clarification, it can signal this through a structured response, and clawdup will move the task to "require input" status and post a comment explaining what's needed.</p>
+
+      <h2>Stage 4: Commit, Push, and PR Creation</h2>
+
+      <p>After Claude Code finishes, clawdup checks if any files were actually changed. If so, it:</p>
+
+      <ol>
+        <li><strong>Commits</strong> the changes with a message formatted as <code>[CU-{task-id}] {description}</code></li>
+        <li><strong>Pushes</strong> the branch to the remote repository</li>
+        <li><strong>Creates a pull request</strong> using the GitHub CLI (<code>gh</code>), with the task title and a link back to the ClickUp task</li>
+      </ol>
+
+      <p>The PR title also includes the <code>CU-{task-id}</code> prefix, which means ClickUp's GitHub integration automatically links the PR to the task. Reviewers can click through from the PR to the task description and vice versa.</p>
+
+      <p>If no files were changed (Claude determined no code changes were needed), clawdup moves the task to "require input" and posts a comment explaining the situation.</p>
+
+      <h2>Stage 5: Status Management</h2>
+
+      <p>Throughout the pipeline, task statuses are updated in real-time:</p>
+
+      <ul>
+        <li><strong>to do → in progress</strong>: Task picked up by the automation</li>
+        <li><strong>in progress → in review</strong>: PR created, ready for human review</li>
+        <li><strong>in progress → require input</strong>: Claude needs clarification</li>
+        <li><strong>in progress → blocked</strong>: An error occurred</li>
+        <li><strong>approved → complete</strong>: PR merged after human approval</li>
+      </ul>
+
+      <p>This means your ClickUp board always reflects the actual state of work. There's no lag between "code is done" and "board is updated" — they happen simultaneously.</p>
+
+      <h2>The Merge Loop</h2>
+
+      <p>clawdup also watches for tasks in the "approved" status. When a reviewer moves a task to "approved," the pipeline automatically merges the associated PR and moves the task to "complete." This closes the full loop from task creation to code delivery.</p>
+
+      <p>The merge uses the GitHub CLI's merge command, which respects your repository's merge strategy settings (merge commit, squash, or rebase).</p>
+
+      <h2>Error Handling and Recovery</h2>
+
+      <p>Real-world automation needs to handle failures gracefully. clawdup includes several resilience mechanisms:</p>
+
+      <ul>
+        <li><strong>Crash recovery</strong>: If clawdup crashes while processing a task, it detects "orphaned" in-progress tasks on restart and either resumes or resets them</li>
+        <li><strong>Timeout protection</strong>: Claude Code execution has a hard timeout to prevent runaway processes</li>
+        <li><strong>Status-based error reporting</strong>: Failures move tasks to "blocked" status with a comment explaining what went wrong, making it easy for a human to investigate and retry</li>
+        <li><strong>Clean branch state</strong>: Each task starts from a fresh checkout of the base branch, preventing contamination between tasks</li>
+      </ul>
+
+      <h2>Configuration Cascade</h2>
+
+      <p>clawdup uses a layered configuration system:</p>
+
+      <ol>
+        <li><strong>Environment variables</strong> (highest priority)</li>
+        <li><strong>.clawdup.env file</strong> in the working directory</li>
+        <li><strong>clawdup.config.mjs</strong> for Claude-specific settings</li>
+        <li><strong>Defaults</strong> (lowest priority)</li>
+      </ol>
+
+      <p>This cascade means you can set project-wide defaults in a config file and override specific values per-environment using environment variables. In a monorepo, each package can have its own <code>.clawdup.env</code> pointing to a different ClickUp list while sharing the same repository.</p>
+
+      <h2>Why This Architecture</h2>
+
+      <p>Every design decision in clawdup serves the goal of being <strong>reliable, simple, and transparent</strong>:</p>
+
+      <ul>
+        <li><strong>Zero runtime dependencies</strong> means fewer things can break and no supply chain concerns</li>
+        <li><strong>CLI tools (git, gh, claude)</strong> instead of API libraries means leveraging well-tested, well-maintained tools</li>
+        <li><strong>Streaming JSONL parsing</strong> means real-time progress visibility</li>
+        <li><strong>Security-first input handling</strong> means you can safely feed untrusted task descriptions to the AI</li>
+      </ul>
+
+      <p>The result is a pipeline that does one thing well: turns ClickUp tasks into reviewed, mergeable pull requests.</p>
+    </div>
+
+    <nav class="blog-post-nav">
+      <a href="why-automated-task-to-pr-pipelines-are-the-future.html">&larr; Previous: Why Automated Pipelines</a>
+      <a href="zero-dependencies-lean-automation.html">Next: Zero Dependencies &rarr;</a>
+    </nav>
+  </article>
+
+  <footer class="footer">
+    <div class="footer-inner">
+      <ul class="footer-links">
+        <li><a href="https://github.com/gehadshaat/clawdup">GitHub</a></li>
+        <li><a href="https://www.npmjs.com/package/clawdup">npm</a></li>
+        <li><a href="https://github.com/gehadshaat/clawdup/issues">Issues</a></li>
+      </ul>
+      <p>Created by <a href="https://github.com/gehadshaat">Gehad Shaat</a>. Personal open-source project &mdash; not affiliated with ClickUp.</p>
+    </div>
+  </footer>
+
+</body>
+</html>
