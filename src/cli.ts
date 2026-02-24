@@ -106,6 +106,7 @@ Configuration:
     CLICKUP_LIST_ID=xxx          # Poll tasks from a list
     # OR
     CLICKUP_PARENT_TASK_ID=xxx   # Poll subtasks of a parent task
+    AUTO_APPROVE=true            # Auto-merge PRs without manual review
 
   Optionally create clawdup.config.mjs for custom Claude prompts.
   Run --init to generate example config files.
@@ -126,6 +127,8 @@ Flow:
   7. If needs input: comments on task, moves to "require input"
   8. If error: comments on task, moves to "blocked"
   9. Repeats
+
+  With AUTO_APPROVE=true, step 5 merges the PR immediately (skipping manual review).
 
 Signals:
   SIGINT/SIGTERM: Graceful shutdown (finishes current task, then exits)
@@ -217,6 +220,9 @@ CLICKUP_LIST_ID=
 
 # Git branch prefix
 # BRANCH_PREFIX=clickup
+
+# Auto-approve mode: merge PRs immediately after Claude completes (skip manual review)
+# AUTO_APPROVE=true
 
 # Log level: debug | info | warn | error
 # LOG_LEVEL=info

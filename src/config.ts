@@ -194,6 +194,9 @@ if (CLAUDE_MAX_TURNS > 500) {
   process.exit(1);
 }
 
+// Auto-approve mode: skip manual review and merge PRs immediately after Claude completes
+export const AUTO_APPROVE: boolean = (process.env.AUTO_APPROVE || "").toLowerCase() === "true";
+
 // Branch naming
 export const BRANCH_PREFIX: string = process.env.BRANCH_PREFIX || "clickup";
 
