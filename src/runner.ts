@@ -1350,6 +1350,7 @@ export async function startRunner(options?: { interactive?: boolean }): Promise<
     } catch (err) {
       log("error", `Failed to sync base branch before relaunch: ${(err as Error).message}`);
     }
+    releaseLock();
     return true;
   }
 
@@ -1373,6 +1374,7 @@ export async function startRunner(options?: { interactive?: boolean }): Promise<
         } catch (err) {
           log("error", `Failed to sync base branch before relaunch: ${(err as Error).message}`);
         }
+        releaseLock();
         resolve(true);
         return;
       }
