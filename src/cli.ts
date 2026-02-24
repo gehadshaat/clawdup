@@ -20,6 +20,9 @@ if (args.includes("--debug")) {
 if (args.includes("--json-log")) {
   process.env.LOG_FORMAT = "json";
 }
+if (args.includes("--dry-run")) {
+  process.env.DRY_RUN = "true";
+}
 
 async function main(): Promise<void> {
   // --init and --statuses don't need config loaded
@@ -92,6 +95,7 @@ Usage:
   clawdup                     Start continuous polling
   clawdup --once <task-id>    Process a single task
   clawdup --interactive       Run Claude in interactive mode (accepts user input)
+  clawdup --dry-run           Simulate the full flow without making any changes
   clawdup --debug             Enable debug-level logging with timing
   clawdup --json-log          Output logs in JSON format
   clawdup --check             Validate configuration

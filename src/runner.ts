@@ -2,7 +2,7 @@
 
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import { resolve } from "path";
-import { POLL_INTERVAL_MS, RELAUNCH_INTERVAL_MS, STATUS, BASE_BRANCH, PROJECT_ROOT, CLICKUP_LIST_ID, CLICKUP_PARENT_TASK_ID, AUTO_APPROVE } from "./config.js";
+import { POLL_INTERVAL_MS, RELAUNCH_INTERVAL_MS, STATUS, BASE_BRANCH, PROJECT_ROOT, CLICKUP_LIST_ID, CLICKUP_PARENT_TASK_ID, AUTO_APPROVE, DRY_RUN, BRANCH_PREFIX } from "./config.js";
 import { log, startTimer } from "./logger.js";
 import {
   getTasksByStatus,
@@ -197,11 +197,169 @@ async function processTodoFile(): Promise<void> {
 }
 
 /**
+ * Simulate processing a task in dry-run mode.
+ * Logs all actions that would be taken without performing any mutations.
+ */
+async function dryRunProcessTask(task: ClickUpTask): Promise<void> {
+  const taskId = task.id;
+  const slug = slugify(task.name);
+  const branchName = `${BRANCH_PREFIX}/CU-${taskId}-${slug}`;
+
+  log("info", `\n${"=".repeat(60)}`);
+  log("info", `[DRY RUN] Processing task: ${task.name} (${taskId})`);
+  log("info", `[DRY RUN] URL: ${task.url}`);
+  log("info", `${"=".repeat(60)}\n`);
+
+  if (!isValidTaskId(taskId)) {
+    log("error", `[DRY RUN] Invalid task ID format: ${taskId}. Would skip.`);
+    return;
+  }
+
+  const actions: string[] = [];
+
+  actions.push(`ClickUp: Update task ${taskId} status → "${STATUS.IN_PROGRESS}"`);
+
+  // Check for existing branch/PR (read-only operations)
+  const existingBranch = await findBranchForTask(taskId);
+  if (existingBranch) {
+    actions.push(`Git: Checkout existing branch "${existingBranch}"`);
+  } else {
+    actions.push(`Git: Create branch "${branchName}" from "${BASE_BRANCH}"`);
+  }
+
+  const existingPrUrl = await findPRUrlInComments(taskId);
+  if (existingPrUrl) {
+    actions.push(`GitHub: Use existing PR: ${existingPrUrl}`);
+  } else {
+    actions.push(`Git: Create empty commit and push branch`);
+    actions.push(`GitHub: Create draft PR "[CU-${taskId}] ${task.name}"`);
+  }
+
+  actions.push(`ClickUp: Add comment to task with PR link`);
+
+  // Fetch comments to show prompt stats
+  const comments = await getTaskComments(taskId);
+  const taskPrompt = formatTaskForClaude(task, comments);
+  actions.push(`Claude: Run Claude Code on task (prompt: ${taskPrompt.length} chars)`);
+
+  actions.push(`Git: Commit changes and push to branch`);
+  actions.push(`GitHub: Update PR body, mark as ready for review`);
+
+  if (AUTO_APPROVE) {
+    actions.push(`GitHub: Auto-merge PR (squash)`);
+    actions.push(`ClickUp: Update task status → "${STATUS.COMPLETED}"`);
+    actions.push(`ClickUp: Add comment confirming auto-merge`);
+  } else {
+    actions.push(`ClickUp: Update task status → "${STATUS.IN_REVIEW}"`);
+    actions.push(`ClickUp: Add comment with work summary`);
+  }
+
+  log("info", `[DRY RUN] Planned actions:`);
+  for (let i = 0; i < actions.length; i++) {
+    log("info", `[DRY RUN]   ${i + 1}. ${actions[i]}`);
+  }
+  log("info", `\n[DRY RUN] Task simulation complete.\n`);
+}
+
+/**
+ * Simulate processing an approved task in dry-run mode.
+ */
+async function dryRunProcessApprovedTask(task: ClickUpTask): Promise<void> {
+  const taskId = task.id;
+
+  log("info", `\n${"=".repeat(60)}`);
+  log("info", `[DRY RUN] Merging approved task: ${task.name} (${taskId})`);
+  log("info", `${"=".repeat(60)}\n`);
+
+  if (!isValidTaskId(taskId)) {
+    log("error", `[DRY RUN] Invalid task ID format: ${taskId}. Would skip.`);
+    return;
+  }
+
+  const actions: string[] = [];
+
+  const prUrl = await findPRUrlInComments(taskId);
+  if (!prUrl) {
+    log("warn", `[DRY RUN] No PR URL found in comments for task ${taskId}. Would block task.`);
+    return;
+  }
+
+  actions.push(`GitHub: Found PR from task comments: ${prUrl}`);
+  actions.push(`GitHub: Check PR state and mergeability`);
+  actions.push(`GitHub: Merge PR (squash)`);
+  actions.push(`ClickUp: Update task status → "${STATUS.COMPLETED}"`);
+  actions.push(`ClickUp: Add comment confirming merge`);
+
+  log("info", `[DRY RUN] Planned actions:`);
+  for (let i = 0; i < actions.length; i++) {
+    log("info", `[DRY RUN]   ${i + 1}. ${actions[i]}`);
+  }
+  log("info", `\n[DRY RUN] Approved task simulation complete.\n`);
+}
+
+/**
+ * Simulate processing a returning task in dry-run mode.
+ */
+async function dryRunProcessReturningTask(task: ClickUpTask, prUrl: string): Promise<void> {
+  const taskId = task.id;
+
+  log("info", `\n${"=".repeat(60)}`);
+  log("info", `[DRY RUN] Processing returning task: ${task.name} (${taskId})`);
+  log("info", `[DRY RUN] Existing PR: ${prUrl}`);
+  log("info", `${"=".repeat(60)}\n`);
+
+  if (!isValidTaskId(taskId)) {
+    log("error", `[DRY RUN] Invalid task ID format: ${taskId}. Would skip.`);
+    return;
+  }
+
+  const actions: string[] = [];
+
+  actions.push(`ClickUp: Update task status → "${STATUS.IN_PROGRESS}"`);
+  actions.push(`ClickUp: Add comment about continuing work`);
+
+  const branchName = await findBranchForTask(taskId);
+  if (branchName) {
+    actions.push(`Git: Checkout existing branch "${branchName}"`);
+    actions.push(`Git: Merge ${BASE_BRANCH} into branch`);
+  } else {
+    log("warn", `[DRY RUN] No branch found for returning task ${taskId}. Would block task.`);
+    return;
+  }
+
+  const comments = await getTaskComments(taskId);
+  const taskPrompt = formatTaskForClaude(task, comments);
+  actions.push(`Claude: Run Claude Code with review context (prompt: ${taskPrompt.length} chars)`);
+
+  actions.push(`Git: Commit changes and push to branch`);
+  actions.push(`GitHub: Update PR body, mark as ready for review`);
+
+  if (AUTO_APPROVE) {
+    actions.push(`GitHub: Auto-merge PR (squash)`);
+    actions.push(`ClickUp: Update task status → "${STATUS.COMPLETED}"`);
+  } else {
+    actions.push(`ClickUp: Update task status → "${STATUS.IN_REVIEW}"`);
+    actions.push(`ClickUp: Add comment with work summary`);
+  }
+
+  log("info", `[DRY RUN] Planned actions:`);
+  for (let i = 0; i < actions.length; i++) {
+    log("info", `[DRY RUN]   ${i + 1}. ${actions[i]}`);
+  }
+  log("info", `\n[DRY RUN] Returning task simulation complete.\n`);
+}
+
+/**
  * Process a single ClickUp task end-to-end.
  * Always starts from the latest base branch and creates a PR immediately
  * so that work is visible from the start.
  */
 async function processTask(task: ClickUpTask): Promise<void> {
+  if (DRY_RUN) {
+    await dryRunProcessTask(task);
+    return;
+  }
+
   const taskId = task.id;
   const taskName = task.name;
   const slug = slugify(taskName);
@@ -721,6 +879,11 @@ async function autoApproveAndMerge(
  * Process an approved task: find its PR and merge it.
  */
 async function processApprovedTask(task: ClickUpTask): Promise<void> {
+  if (DRY_RUN) {
+    await dryRunProcessApprovedTask(task);
+    return;
+  }
+
   const taskId = task.id;
   const taskName = task.name;
   const timer = startTimer();
@@ -898,6 +1061,11 @@ async function collectReviewFeedback(
  * gathers new comments for context, and runs Claude to continue/fix the work.
  */
 async function processReturningTask(task: ClickUpTask, prUrl: string): Promise<void> {
+  if (DRY_RUN) {
+    await dryRunProcessReturningTask(task, prUrl);
+    return;
+  }
+
   const taskId = task.id;
   const taskName = task.name;
   const timer = startTimer();
@@ -1350,15 +1518,19 @@ async function pollForTasks(): Promise<void> {
 export async function runSingleTask(taskId: string, options?: { interactive?: boolean }): Promise<void> {
   interactiveMode = options?.interactive ?? false;
 
-  // Prevent concurrent instances
-  acquireLock();
+  if (DRY_RUN) {
+    log("info", "\n=== DRY RUN MODE — no changes will be made ===\n");
+  }
+
+  // Prevent concurrent instances (skip in dry-run since we're read-only)
+  if (!DRY_RUN) acquireLock();
 
   try {
     const { getTask } = await import("./clickup-api.js");
     const task = await getTask(taskId);
     await processTask(task);
   } finally {
-    releaseLock();
+    if (!DRY_RUN) releaseLock();
   }
 }
 
@@ -1373,8 +1545,12 @@ export async function startRunner(options?: { interactive?: boolean }): Promise<
   shouldRelaunchAfterMerge = false;
   interactiveMode = options?.interactive ?? false;
 
-  // Prevent concurrent instances
-  acquireLock();
+  if (DRY_RUN) {
+    log("info", "\n=== DRY RUN MODE — no changes will be made ===\n");
+  }
+
+  // Prevent concurrent instances (skip in dry-run since we're read-only)
+  if (!DRY_RUN) acquireLock();
 
   log("info", "=== ClickUp Task Automation Runner ===");
   log("info", `Task source: ${CLICKUP_PARENT_TASK_ID ? `parent task ${CLICKUP_PARENT_TASK_ID} (subtasks)` : `list ${CLICKUP_LIST_ID}`}`);
@@ -1400,6 +1576,14 @@ export async function startRunner(options?: { interactive?: boolean }): Promise<
       "warn",
       "Status validation failed. The runner will continue but may encounter errors.",
     );
+  }
+
+  // In dry-run mode, skip state management and recovery — just poll once and exit
+  if (DRY_RUN) {
+    log("info", "Runner started in dry-run mode. Performing a single poll cycle...\n");
+    await pollForTasks();
+    log("info", "\n=== DRY RUN complete — no changes were made ===");
+    return false;
   }
 
   // Ensure we start from a clean state — forcefully clean up any

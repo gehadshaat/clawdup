@@ -2,7 +2,7 @@
 
 import { execFile } from "child_process";
 import { promisify } from "util";
-import { BASE_BRANCH, BRANCH_PREFIX, GIT_ROOT } from "./config.js";
+import { BASE_BRANCH, BRANCH_PREFIX, GIT_ROOT, DRY_RUN } from "./config.js";
 import { log } from "./logger.js";
 import type { PullRequestOptions } from "./types.js";
 
@@ -76,6 +76,10 @@ export async function getCurrentBranch(): Promise<string> {
  * even after a crash or interrupted operation.
  */
 export async function ensureCleanState(): Promise<void> {
+  if (DRY_RUN) {
+    log("info", "[DRY RUN] Would ensure git state is clean");
+    return;
+  }
   log("info", "Ensuring git state is clean before proceeding");
 
   // Abort any in-progress merge
@@ -129,6 +133,10 @@ export async function ensureCleanState(): Promise<void> {
  * Falls back to creating the local branch from remote if it doesn't exist locally.
  */
 export async function syncBaseBranch(): Promise<void> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would sync base branch: ${BASE_BRANCH}`);
+    return;
+  }
   log("info", `Syncing base branch: ${BASE_BRANCH}`);
   await ensureCleanState();
 
@@ -169,6 +177,10 @@ export async function createTaskBranch(
   slug: string,
 ): Promise<string> {
   const branchName = `${BRANCH_PREFIX}/CU-${taskId}-${slug}`;
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would create branch: ${branchName}`);
+    return branchName;
+  }
   log("info", `Creating branch: ${branchName}`);
 
   // Make sure base is up to date
@@ -224,6 +236,10 @@ export async function getChangesSummary(): Promise<{
  * Stage all changes and commit.
  */
 export async function commitChanges(message: string): Promise<string> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would commit: ${message}`);
+    return "dry-run";
+  }
   log("info", "Staging and committing changes");
   await git("add", "-A");
   await git("commit", "-m", message);
@@ -236,6 +252,10 @@ export async function commitChanges(message: string): Promise<string> {
  * Push the current branch to origin with retry logic.
  */
 export async function pushBranch(branchName: string): Promise<void> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would push branch: ${branchName}`);
+    return;
+  }
   const delays = [2000, 4000, 8000, 16000];
 
   for (let attempt = 0; attempt <= delays.length; attempt++) {
@@ -270,6 +290,10 @@ export async function createPullRequest({
   baseBranch,
   draft,
 }: PullRequestOptions): Promise<string> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would create PR: "${title}"${draft ? " (draft)" : ""} (branch: ${branchName})`);
+    return "https://github.com/dry-run/pull/0";
+  }
   log("info", `Creating PR: "${title}"${draft ? " (draft)" : ""}`);
   const args = [
     "pr",
@@ -295,6 +319,10 @@ export async function createPullRequest({
  * Create an empty commit (used to enable early PR creation).
  */
 export async function createEmptyCommit(message: string): Promise<void> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would create empty commit: ${message}`);
+    return;
+  }
   log("info", "Creating empty initial commit for early PR");
   await git("commit", "--allow-empty", "-m", message);
 }
@@ -303,6 +331,10 @@ export async function createEmptyCommit(message: string): Promise<void> {
  * Mark a draft PR as ready for review.
  */
 export async function markPRReady(prUrl: string): Promise<void> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would mark PR as ready: ${prUrl}`);
+    return;
+  }
   log("info", `Marking PR as ready for review: ${prUrl}`);
   await gh("pr", "ready", prUrl);
 }
@@ -311,6 +343,10 @@ export async function markPRReady(prUrl: string): Promise<void> {
  * Close a pull request without merging.
  */
 export async function closePullRequest(prUrl: string): Promise<void> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would close PR: ${prUrl}`);
+    return;
+  }
   log("info", `Closing PR: ${prUrl}`);
   await gh("pr", "close", prUrl);
 }
@@ -322,6 +358,10 @@ export async function updatePullRequest(
   prUrl: string,
   { title, body }: { title?: string; body?: string },
 ): Promise<void> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would update PR: ${prUrl}`);
+    return;
+  }
   log("info", `Updating PR: ${prUrl}`);
   const args = ["pr", "edit", prUrl];
   if (title) {
@@ -409,6 +449,10 @@ export async function findBranchForTask(
 export async function checkoutExistingBranch(
   branchName: string,
 ): Promise<void> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would checkout branch: ${branchName}`);
+    return;
+  }
   log("info", `Checking out existing branch: ${branchName}`);
 
   // Fetch latest for this branch from origin
@@ -464,6 +508,10 @@ export async function branchHasBeenPushed(
  * Uses force checkout (-f) to bypass broken index states.
  */
 export async function returnToBaseBranch(): Promise<void> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would return to ${BASE_BRANCH}`);
+    return;
+  }
   log("info", `Returning to ${BASE_BRANCH}`);
   await ensureCleanState();
   try {
@@ -480,6 +528,10 @@ export async function returnToBaseBranch(): Promise<void> {
  * left from previous runs that may no longer exist on the remote.
  */
 export async function pruneLocalBranches(): Promise<void> {
+  if (DRY_RUN) {
+    log("info", "[DRY RUN] Would prune local branches");
+    return;
+  }
   try {
     const output = await git("branch", "--list");
     const branches = output
@@ -508,6 +560,10 @@ export async function pruneLocalBranches(): Promise<void> {
  * Delete a local branch.
  */
 export async function deleteLocalBranch(branchName: string): Promise<void> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would delete branch: ${branchName}`);
+    return;
+  }
   try {
     await git("branch", "-D", branchName);
     log("info", `Deleted local branch: ${branchName}`);
@@ -521,6 +577,10 @@ export async function deleteLocalBranch(branchName: string): Promise<void> {
  * Uses squash merge by default for a clean history.
  */
 export async function mergePullRequest(prUrl: string): Promise<void> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would merge PR: ${prUrl}`);
+    return;
+  }
   log("info", `Merging PR: ${prUrl}`);
   await gh("pr", "merge", prUrl, "--squash", "--delete-branch", "--admin");
   log("info", `PR merged successfully: ${prUrl}`);
@@ -552,6 +612,10 @@ export async function getPRMergeability(prUrl: string): Promise<string> {
  * Returns true if merge completed cleanly, false if there are conflicts.
  */
 export async function mergeBaseBranch(): Promise<boolean> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would merge ${BASE_BRANCH} into current branch`);
+    return true;
+  }
   log("info", `Merging ${BASE_BRANCH} into current branch`);
   await git("fetch", "origin", BASE_BRANCH);
   try {
@@ -587,6 +651,10 @@ export async function getConflictedFiles(): Promise<string[]> {
  * Abort an in-progress merge.
  */
 export async function abortMerge(): Promise<void> {
+  if (DRY_RUN) {
+    log("info", "[DRY RUN] Would abort merge");
+    return;
+  }
   log("info", "Aborting merge");
   await git("merge", "--abort");
 }
@@ -595,6 +663,10 @@ export async function abortMerge(): Promise<void> {
  * Stage resolved files and commit the merge.
  */
 export async function commitMergeResolution(): Promise<void> {
+  if (DRY_RUN) {
+    log("info", "[DRY RUN] Would commit merge resolution");
+    return;
+  }
   log("info", "Committing merge resolution");
   await git("add", "-A");
   await git("commit", "--no-edit");

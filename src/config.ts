@@ -197,6 +197,9 @@ if (CLAUDE_MAX_TURNS > 500) {
 // Auto-approve mode: skip manual review and merge PRs immediately after Claude completes
 export const AUTO_APPROVE: boolean = (process.env.AUTO_APPROVE || "").toLowerCase() === "true";
 
+// Dry-run mode: simulate the full automation flow without making any changes
+export const DRY_RUN: boolean = (process.env.DRY_RUN || "").toLowerCase() === "true";
+
 // Branch naming
 export const BRANCH_PREFIX: string = process.env.BRANCH_PREFIX || "clickup";
 
