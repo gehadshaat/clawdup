@@ -1,7 +1,7 @@
 {
   "name": "clawdup",
   "version": "1.0.0",
-  "description": "Your AI intern that never sleeps. Polls ClickUp for tasks, mass-produces PRs via Claude Code, and saves you 6-7 days a week.",
+  "description": "Automated ClickUp-to-PR pipeline. Polls tasks, runs Claude Code, ships pull requests.",
   "type": "module",
   "bin": {
     "clawdup": "./bin/clawdup.js"
