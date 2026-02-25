@@ -12,6 +12,8 @@ Works with **any** project — just install, configure, and let it cook.
 >
 > **Want to understand the internals?** See the **[Architecture & State Flow](ARCHITECTURE.md)**.
 >
+> **Reviewing a clawdup PR?** See the **[PR Review & Merge Workflow](PR_WORKFLOW.md)**.
+>
 > **Looking for the full configuration reference?** See **[CONFIGURATION.md](CONFIGURATION.md)**.
 
 ## Quick Start
