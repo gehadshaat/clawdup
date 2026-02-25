@@ -53,6 +53,7 @@ import {
   getPRReviewDecision,
   getPRReviewComments,
   getPRInlineComments,
+  getPRCheckStatus,
 } from "./git-ops.js";
 import {
   runClaudeOnTask,
@@ -280,6 +281,7 @@ async function dryRunProcessTask(task: ClickUpTask): Promise<void> {
   actions.push(`GitHub: Update PR body, mark as ready for review`);
 
   if (AUTO_APPROVE) {
+    actions.push(`GitHub: Check CI/test status (block merge if failing)`);
     actions.push(`GitHub: Auto-merge PR (squash)`);
     actions.push(`ClickUp: Update task status → "${STATUS.COMPLETED}"`);
     actions.push(`ClickUp: Add comment confirming auto-merge`);
@@ -320,6 +322,7 @@ async function dryRunProcessApprovedTask(task: ClickUpTask): Promise<void> {
 
   actions.push(`GitHub: Found PR from task comments: ${prUrl}`);
   actions.push(`GitHub: Check PR state and mergeability`);
+  actions.push(`GitHub: Check CI/test status (block merge if failing)`);
   actions.push(`GitHub: Merge PR (squash)`);
   actions.push(`ClickUp: Update task status → "${STATUS.COMPLETED}"`);
   actions.push(`ClickUp: Add comment confirming merge`);
@@ -369,6 +372,7 @@ async function dryRunProcessReturningTask(task: ClickUpTask, prUrl: string): Pro
   actions.push(`GitHub: Update PR body, mark as ready for review`);
 
   if (AUTO_APPROVE) {
+    actions.push(`GitHub: Check CI/test status (block merge if failing)`);
     actions.push(`GitHub: Auto-merge PR (squash)`);
     actions.push(`ClickUp: Update task status → "${STATUS.COMPLETED}"`);
   } else {
@@ -874,6 +878,35 @@ async function autoApproveAndMerge(
       }
     }
 
+    // Check CI/check status before merging
+    const checkStatus = await getPRCheckStatus(prUrl);
+    log("info", `PR check status — passing: ${checkStatus.passing}, pending: ${checkStatus.pending}, failing: [${checkStatus.failing.join(", ")}]`, { taskId });
+
+    if (checkStatus.failing.length > 0) {
+      log("warn", `PR checks failed for task ${taskId}. Skipping auto-merge.`, { taskId });
+      await updateTaskStatus(taskId, STATUS.IN_REVIEW);
+      await addTaskComment(
+        taskId,
+        `⚠️ Auto-merge skipped — CI checks failed:\n\n` +
+          checkStatus.failing.map((name) => `- \`${name}\``).join("\n") +
+          `\n\nPR: ${prUrl}\n\n` +
+          `Please investigate the failing checks. Move this task to "${STATUS.APPROVED}" to retry merge after fixes.`,
+      );
+      return false;
+    }
+
+    if (checkStatus.pending) {
+      log("warn", `PR checks still pending for task ${taskId}. Skipping auto-merge.`, { taskId });
+      await updateTaskStatus(taskId, STATUS.IN_REVIEW);
+      await addTaskComment(
+        taskId,
+        `⏳ Auto-merge deferred — CI checks are still running.\n\n` +
+          `PR: ${prUrl}\n\n` +
+          `Move this task to "${STATUS.APPROVED}" to retry merge once checks complete.`,
+      );
+      return false;
+    }
+
     await mergePullRequest(prUrl);
     await updateTaskStatus(taskId, STATUS.COMPLETED);
     await addTaskComment(
@@ -983,6 +1016,37 @@ async function processApprovedTask(task: ClickUpTask): Promise<void> {
       if (!resolved) {
         return; // resolveConflictsWithMerge handles status updates
       }
+    }
+
+    // Check CI/check status before merging
+    const checkStatus = await getPRCheckStatus(prUrl);
+    log("info", `PR check status for task ${taskId} — passing: ${checkStatus.passing}, pending: ${checkStatus.pending}, failing: [${checkStatus.failing.join(", ")}]`);
+
+    if (checkStatus.failing.length > 0) {
+      log("warn", `PR checks failed for task ${taskId}. Cannot merge.`);
+      await notifyTaskCreator(
+        taskId,
+        task.creator,
+        `⚠️ Cannot merge — CI checks failed:\n\n` +
+          checkStatus.failing.map((name) => `- \`${name}\``).join("\n") +
+          `\n\nPR: ${prUrl}\n\n` +
+          `Please investigate the failing checks. Move this task back to "${STATUS.APPROVED}" to retry merge after fixes.`,
+      );
+      await updateTaskStatus(taskId, STATUS.BLOCKED);
+      return;
+    }
+
+    if (checkStatus.pending) {
+      log("warn", `PR checks still pending for task ${taskId}. Deferring merge.`);
+      await notifyTaskCreator(
+        taskId,
+        task.creator,
+        `⏳ Merge deferred — CI checks are still running.\n\n` +
+          `PR: ${prUrl}\n\n` +
+          `Move this task back to "${STATUS.APPROVED}" to retry merge once checks complete.`,
+      );
+      await updateTaskStatus(taskId, STATUS.BLOCKED);
+      return;
     }
 
     // Merge the PR

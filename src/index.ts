@@ -34,6 +34,7 @@ export {
   getPRReviewDecision,
   getPRReviewComments,
   getPRInlineComments,
+  getPRCheckStatus,
 } from "./git-ops.js";
 export { runClaudeOnTask, runClaudeOnReviewFeedback, generateWorkSummary, scanOutputForSafetyIssues } from "./claude-worker.js";
 export { runPreflightChecks, runPreflightOrAbort, printPreflightResults } from "./preflight.js";

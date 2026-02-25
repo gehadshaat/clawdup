@@ -608,6 +608,65 @@ export async function getPRMergeability(prUrl: string): Promise<string> {
 }
 
 /**
+ * Check the CI/check status of a pull request.
+ * Returns an object with the overall status and any failing checks.
+ * Uses `gh pr checks` to query GitHub Actions and other status checks.
+ */
+export async function getPRCheckStatus(prUrl: string): Promise<{
+  passing: boolean;
+  pending: boolean;
+  failing: string[];
+}> {
+  try {
+    // Query all check runs for the PR as JSON
+    const result = await gh(
+      "pr",
+      "checks",
+      prUrl,
+      "--json",
+      "name,state,conclusion",
+      "--jq",
+      '[.[] | {name, state, conclusion}]',
+    );
+
+    if (!result || result === "[]") {
+      // No checks configured — treat as passing
+      return { passing: true, pending: false, failing: [] };
+    }
+
+    const checks = JSON.parse(result) as Array<{
+      name: string;
+      state: string;
+      conclusion: string;
+    }>;
+
+    const failing: string[] = [];
+    let hasPending = false;
+
+    for (const check of checks) {
+      const state = (check.state || "").toUpperCase();
+      const conclusion = (check.conclusion || "").toUpperCase();
+
+      if (state === "PENDING" || state === "QUEUED" || state === "IN_PROGRESS") {
+        hasPending = true;
+      } else if (conclusion === "FAILURE" || conclusion === "CANCELLED" || conclusion === "TIMED_OUT") {
+        failing.push(check.name);
+      }
+    }
+
+    return {
+      passing: failing.length === 0 && !hasPending,
+      pending: hasPending,
+      failing,
+    };
+  } catch {
+    // If we can't determine check status, treat as unknown (passing)
+    // to avoid blocking merges when gh checks aren't available
+    return { passing: true, pending: false, failing: [] };
+  }
+}
+
+/**
  * Attempt to merge the base branch into the current branch.
  * Returns true if merge completed cleanly, false if there are conflicts.
  */
