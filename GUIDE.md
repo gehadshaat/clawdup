@@ -1,6 +1,6 @@
 # clawdup - Complete Setup & Usage Guide
 
-This guide walks you through everything you need to set up and use **clawdup**, an automated pipeline that connects ClickUp tasks to Claude Code for AI-powered implementation with automatic GitHub PR creation.
+Welcome, future time-saver. This guide walks you through setting up **clawdup** — your tireless AI intern that turns ClickUp tasks into GitHub PRs while you sip coffee (or whatever you do with all that reclaimed time).
 
 ---
 
@@ -33,17 +33,17 @@ This guide walks you through everything you need to set up and use **clawdup**, 
 
 ## Overview
 
-clawdup automates the software development workflow by:
+clawdup automates the boring parts of the software development workflow:
 
-1. Polling a ClickUp list for tasks marked "to do"
-2. Picking the highest-priority task
-3. Creating a git branch linked to the ClickUp task
-4. Running Claude Code (Anthropic's AI coding assistant) to implement the task
-5. Committing changes, pushing, and creating a GitHub pull request
-6. Updating the ClickUp task status throughout the process
-7. Automatically merging the PR once a human reviewer approves it
+1. Polls your ClickUp list for tasks marked "to do"
+2. Picks the highest-priority task (it has taste)
+3. Creates a git branch linked to the ClickUp task
+4. Unleashes Claude Code to implement the task
+5. Commits, pushes, and creates a GitHub pull request
+6. Updates the ClickUp task status at every step
+7. Merges the PR once you give it the thumbs up
 
-This means you can write a task description in ClickUp, and clawdup will attempt to implement it, create a PR for review, and merge it when approved — all without manual intervention.
+**TL;DR:** Write a task description in ClickUp. Go live your life. Come back to a PR ready for review. Approve it. Done. You just saved a day.
 
 ---
 
@@ -272,18 +272,20 @@ cd your-project
 npm install -D clawdup
 ```
 
-Add convenience scripts to your `package.json`:
+Add some scripts to your `package.json` — the fun ones are encouraged:
 
 ```json
 {
   "scripts": {
-    "clawdup": "clawdup",
-    "clawdup:check": "clawdup --check",
-    "clawdup:setup": "clawdup --setup",
-    "clawdup:once": "clawdup --once"
+    "cook": "clawdup",
+    "vibe-check": "clawdup --check",
+    "summon": "clawdup --setup",
+    "yolo": "clawdup --once"
   }
 }
 ```
+
+Now `npm run cook` lets it cook, `npm run vibe-check` validates your setup, and `npm run yolo` processes a single task when you're feeling decisive.
 
 ### Option B: Global Install
 
@@ -430,27 +432,31 @@ Fix any issues reported before proceeding.
 
 ## Running the Automation
 
-### Continuous Polling (Default)
+### Let It Cook (Continuous Polling)
 
-Start the automation and let it continuously poll for tasks:
+Start the automation and let it do its thing:
 
 ```bash
 clawdup
+# or, if you set up the fun scripts:
+npm run cook
 ```
 
 This will:
-1. Validate your configuration
-2. Recover any tasks left "in progress" from a previous crash
+1. Validate your configuration (vibe check)
+2. Recover any tasks left "in progress" from a previous crash (it cleans up after itself)
 3. Poll your ClickUp list every 30 seconds (configurable)
 4. Process tasks one at a time in priority order
-5. Keep running until you stop it
+5. Keep running until you stop it — it genuinely does not get tired
 
-### Process a Single Task
+### YOLO Mode (Single Task)
 
 To process one specific task without continuous polling:
 
 ```bash
 clawdup --once <task-id>
+# or
+npm run yolo -- <task-id>
 ```
 
 The task ID is the alphanumeric identifier from ClickUp (visible in the task URL or the task detail panel).
@@ -458,7 +464,7 @@ The task ID is the alphanumeric identifier from ClickUp (visible in the task URL
 ### Stopping the Automation
 
 Press `Ctrl+C` to gracefully shut down. clawdup will:
-1. Finish processing the current task (if any)
+1. Finish processing the current task (if any) — it's polite like that
 2. Return to the base branch
 3. Exit cleanly
 
@@ -468,16 +474,16 @@ Sending `SIGTERM` also triggers graceful shutdown.
 
 ## Writing Effective Tasks
 
-The quality of the automation output depends heavily on how you write your tasks. Here are best practices:
+clawdup is only as smart as the tasks you feed it. Think of it like ordering food — "give me something good" gets you a mystery plate, but "chicken shawarma, extra garlic, no pickles" gets you exactly what you want.
 
 ### Task Title
 
 Write a clear, one-line summary of what needs to be done:
 
-- **Good:** "Add email validation to the signup form"
-- **Good:** "Fix null pointer error in UserService.getProfile"
-- **Bad:** "Fix bug" (too vague)
-- **Bad:** "Make improvements" (not actionable)
+- **Chef's kiss:** "Add email validation to the signup form"
+- **Solid:** "Fix null pointer error in UserService.getProfile"
+- **Please no:** "Fix bug" (which bug? where? the AI will cry)
+- **Absolutely not:** "Make improvements" (to... what?)
 
 ### Task Description
 
@@ -843,21 +849,21 @@ If Claude discovers follow-up work during a task, it creates a `.clawdup.todo.js
 
 ### Can I use this with any project?
 
-Yes. clawdup works with any project that lives in a GitHub repository. It doesn't assume any specific language, framework, or tooling. Claude Code handles the actual implementation and adapts to your codebase.
+Yes — JavaScript, Python, Rust, Go, COBOL (okay maybe not COBOL). clawdup works with any project in a GitHub repository. It doesn't assume any specific language, framework, or tooling. Claude Code adapts to your codebase.
 
 ### Does it work with private repositories?
 
-Yes, as long as:
-- Your `gh` CLI is authenticated with access to the repository
+Absolutely. As long as:
+- Your `gh` CLI is authenticated with access to the repo
 - Git is configured with push access (SSH key or credentials)
 
 ### Can multiple people run clawdup on the same list?
 
-Not recommended. clawdup is designed to run as a single instance per list to avoid conflicts. If two instances pick up the same task, they'll create conflicting branches and PRs.
+Not recommended. clawdup is a solo act per list — if two instances pick up the same task, they'll fight over it like seagulls over a chip.
 
 ### How do I retry a failed task?
 
-Move the task back to "to do" in ClickUp. On the next poll, clawdup will pick it up again. If it was moved to "require input", add the requested information before moving it back.
+Move the task back to "to do" in ClickUp. clawdup will pick it up on the next poll. If it was moved to "require input", add the requested information first — it asked for a reason.
 
 ### Can I customize which tools Claude Code can use?
 
@@ -889,4 +895,4 @@ BASE_BRANCH=develop
 
 ### What happens if I stop clawdup mid-task?
 
-`Ctrl+C` triggers a graceful shutdown — clawdup finishes the current task before exiting. If the process is killed forcefully (e.g., `kill -9`), the task will remain "in progress". On the next startup, clawdup recovers orphaned tasks automatically.
+`Ctrl+C` triggers a graceful shutdown — clawdup finishes what it's working on before exiting (it doesn't just abandon code mid-sentence). If the process is killed forcefully (e.g., `kill -9`), the task will remain "in progress". No worries — on the next startup, clawdup recovers orphaned tasks automatically. It's resilient like that.
