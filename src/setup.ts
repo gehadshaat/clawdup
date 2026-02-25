@@ -320,9 +320,8 @@ export function addPackageJsonScripts(): boolean {
 
   const SCRIPTS_TO_ADD: [string, string][] = [
     ["cook", "clawdup"],
-    ["cook:once", "clawdup --once"],
-    ["vibe-check", "clawdup --doctor"],
-    ["clawdup:check", "clawdup --check"],
+    ["clawdup:once", "clawdup --once"],
+    ["clawdup:vibe-check", "clawdup --check"],
     ["clawdup:setup", "clawdup --setup"],
     ["clawdup:init", "clawdup --init"],
   ];
@@ -632,13 +631,13 @@ Next steps:
      npm install
 
   2. Run a health check:
-     npm run vibe-check
+     npm run clawdup:vibe-check
 
   3. Start the automation:
      npm run cook
 
   4. Or process a single task:
-     npm run cook:once -- <task-id>
+     npm run clawdup:once -- <task-id>
 
   5. Set up the recommended statuses in your ClickUp list:
      npx clawdup --statuses

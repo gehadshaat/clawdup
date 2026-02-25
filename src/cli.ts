@@ -121,9 +121,9 @@ Quick Start:
   npx clawdup --init            Non-interactive: create config files + scripts
 
   After setup, use the added npm scripts:
-    npm run cook                Start continuous polling
-    npm run cook:once           Process a single task
-    npm run vibe-check          Run environment health checks
+    npm run cook                     Start continuous polling
+    npm run clawdup:once             Process a single task
+    npm run clawdup:vibe-check       Validate configuration
 
 Configuration:
   Create a .clawdup.env file in your project root with:
@@ -290,8 +290,8 @@ Done! Next steps:
   2. Optionally customize clawdup.config.mjs
   3. Add .clawdup.env to your .gitignore
   4. Install dependencies: npm install
-  5. Run: npm run vibe-check   (validate config)
-  6. Run: npm run cook          (start automation)
+  5. Run: npm run clawdup:vibe-check   (validate config)
+  6. Run: npm run cook                  (start automation)
 `);
 }
 
