@@ -196,6 +196,8 @@ Customize status names to match your ClickUp list configuration. Names are case-
 
 ## Relaunch Behavior
 
+> For a complete guide on single-runner deployment, locking, and how relaunch interacts with the lock lifecycle, see **[Runner Deployment Guide](RUNNER_DEPLOYMENT.md)**.
+
 The runner periodically restarts itself to pick up fresh code and avoid long-running process issues.
 
 **How it works:**

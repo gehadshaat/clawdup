@@ -227,6 +227,30 @@ Clawdup scans task content for known prompt injection patterns (e.g., "ignore pr
 
 ---
 
+### Another Clawdup Instance Is Already Running
+
+**Symptoms:**
+- Error at startup: `Another Clawdup instance is already running (PID ..., started ...).`
+- Clawdup exits immediately
+
+**What happens:**
+A `.clawdup.lock` file exists and its recorded PID is still a live process. This prevents concurrent instances from corrupting git state or racing on ClickUp tasks.
+
+**Recovery:**
+1. If another instance is legitimately running, wait for it to finish or stop it gracefully (`kill <pid>` or `Ctrl+C`).
+2. If the lock is stale (e.g., after a crash or `kill -9`), remove it manually:
+   ```bash
+   # Verify the PID is not actually clawdup
+   ps -p $(jq -r .pid .clawdup.lock) -o pid,cmd
+   # If not clawdup, remove the lock
+   rm .clawdup.lock
+   ```
+3. Restart Clawdup — preflight checks also auto-clean stale locks from dead PIDs.
+
+For a complete guide on single-runner enforcement, deployment patterns, and operational tips, see **[Runner Deployment Guide](RUNNER_DEPLOYMENT.md)**.
+
+---
+
 ### Working Tree Not Clean
 
 **Symptoms:**

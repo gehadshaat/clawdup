@@ -455,6 +455,8 @@ This ensures the runner always operates on the latest merged code without manual
 
 ## Concurrency & Locking
 
+Clawdup is a **single-runner-per-repo** system — only one instance should be active for a given repository and ClickUp configuration at any time. For a complete guide on why, how locking works, deployment patterns, and operational tips, see **[Runner Deployment Guide](RUNNER_DEPLOYMENT.md)**.
+
 ### Lock File (`.clawdup.lock`)
 
 Prevents multiple Clawdup instances from running simultaneously in the same project directory.
