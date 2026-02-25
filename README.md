@@ -1,16 +1,18 @@
 # clawdup
 
-Automated pipeline that polls a ClickUp list for tasks, uses Claude Code to implement them, creates GitHub PRs, and manages task statuses through their full lifecycle.
+Automated ClickUp-to-PR pipeline powered by Claude Code.
 
-Works with **any** project — just install, configure, and run.
+Write a ClickUp task. Come back to a PR. clawdup handles everything in between — polling, branching, implementation, and PR creation — so you can focus on the work that actually needs a human.
 
-> **New to clawdup?** Read the **[Complete Setup & Usage Guide](GUIDE.md)** for step-by-step instructions, including how to sign up for ClickUp, configure statuses, install all prerequisites, and get everything running.
+Works with **any** project — just install, configure, and let it cook.
+
+> **New to clawdup?** Read the **[Complete Setup & Usage Guide](GUIDE.md)** to go from zero to autopilot.
 >
-> **Something broken?** See the **[Troubleshooting & Recovery Guide](TROUBLESHOOTING.md)** for common failure scenarios and how to fix them.
+> **Something broken?** See the **[Troubleshooting & Recovery Guide](TROUBLESHOOTING.md)**.
 >
-> **Want to understand the internals?** See the **[Architecture & State Flow](ARCHITECTURE.md)** for how the core loop, git operations, and status transitions work.
+> **Want to understand the internals?** See the **[Architecture & State Flow](ARCHITECTURE.md)**.
 >
-> **Looking for the full configuration reference?** See **[CONFIGURATION.md](CONFIGURATION.md)** for all CLI flags, environment variables, validation rules, and advanced options.
+> **Looking for the full configuration reference?** See **[CONFIGURATION.md](CONFIGURATION.md)**.
 
 ## Quick Start
 
@@ -24,10 +26,10 @@ npx clawdup --init
 # Set up your config
 clawdup --setup
 
-# Validate everything
+# Validate everything (aka vibe check)
 clawdup --check
 
-# Start the automation
+# Let it cook
 clawdup
 ```
 
@@ -46,8 +48,9 @@ clawdup
                                          → moves to                   │
                                            "require input"            ▼
                                                                ┌──────────────┐
-                                                               │  Move task   │
-                                                               │ to "approved"│
+                                                               │  You approve │
+                                                               │  (the human  │
+                                                               │    part)     │
                                                                └──────┬───────┘
                                                                       │
                                                                       ▼
@@ -58,19 +61,19 @@ clawdup
                                                                └──────────────┘
 ```
 
-### Full Flow
+### The Full Rundown
 
-1. **Poll** — Checks ClickUp list every 30s for tasks with "to do" status
-2. **Pick** — Selects the highest-priority task
+1. **Poll** — Checks your ClickUp list every 30s for tasks marked "to do"
+2. **Pick** — Grabs the highest-priority task
 3. **Branch** — Creates `clickup/CU-{task-id}-{slug}` from the base branch (auto-links to ClickUp)
-4. **Work** — Runs Claude Code with the task description + your CLAUDE.md as context
+4. **Cook** — Runs Claude Code with the task description + your CLAUDE.md as context
 5. **Result handling:**
-   - **Success** — Commits, pushes, creates PR, moves task to "in review"
-   - **Needs input** — Comments on task with what's missing, moves to "require input"
-   - **Error** — Comments with error details, moves to "blocked"
-   - **No changes** — Comments that no changes were produced, moves to "require input"
-6. **Approval** — When a reviewer moves a task to "approved", the automation merges the PR
-7. **Repeat** — Returns to base branch and polls for the next task
+   - **Nailed it** — Commits, pushes, creates PR, moves task to "in review"
+   - **Confused** — Comments on task with what's missing, moves to "require input"
+   - **Something broke** — Comments with error details, moves to "blocked"
+   - **Nothing to do** — Comments that no changes were needed, moves to "require input"
+6. **Approval** — When you move a task to "approved", the automation merges the PR
+7. **Repeat** — Returns to the base branch and picks up the next task
 
 ## Installation
 
@@ -84,18 +87,20 @@ npm install -D clawdup
 pnpm add -D clawdup
 ```
 
-Then add to the package's `package.json` scripts:
+Then add some scripts to your `package.json`:
 
 ```json
 {
   "scripts": {
-    "clawdup": "clawdup",
-    "clawdup:check": "clawdup --check",
-    "clawdup:setup": "clawdup --setup",
-    "clawdup:once": "clawdup --once"
+    "cook": "clawdup",
+    "vibe-check": "clawdup --check",
+    "summon": "clawdup --setup",
+    "yolo": "clawdup --once"
   }
 }
 ```
+
+`npm run cook` starts continuous polling. `npm run vibe-check` validates your setup. `npm run yolo` processes a single task.
 
 ### Monorepo / Workspace
 
@@ -236,24 +241,33 @@ Enable at: ClickUp Settings > Integrations > GitHub.
 ## CLI Reference
 
 ```bash
-clawdup                     # Start continuous polling
-clawdup --once <task-id>    # Process a single task
-clawdup --interactive       # Run Claude in interactive mode (accepts user input)
-clawdup --check             # Validate configuration
+clawdup                     # Let it cook (continuous polling)
+clawdup --once <task-id>    # YOLO one task
+clawdup --interactive       # Pair-program with the AI (accepts user input)
+clawdup --check             # Vibe check your configuration
 clawdup --statuses          # Show recommended ClickUp statuses
-clawdup --setup             # Interactive setup wizard
+clawdup --setup             # Summon the setup wizard
 clawdup --init              # Create config files in current directory
-clawdup --dry-run           # Simulate full flow without making changes
-clawdup --debug             # Enable debug-level logging
+clawdup --dry-run           # Dress rehearsal (no real changes)
+clawdup --debug             # Enable debug logging
 clawdup --json-log          # Output logs in JSON format
 clawdup --help              # Show help
+```
+
+Or if you set up the fun scripts:
+
+```bash
+npm run cook                # Let it cook
+npm run vibe-check          # Make sure everything's good
+npm run summon              # Conjure the setup wizard
+npm run yolo                # Process one task, no questions asked
 ```
 
 For the full configuration reference including all environment variables, validation rules, and advanced options, see **[CONFIGURATION.md](CONFIGURATION.md)**.
 
 ## CI Dry-Run Workflow
 
-The repository includes a GitHub Actions workflow (`.github/workflows/dry-run.yml`) that runs Clawup in `--dry-run` mode on every pull request. This catches regressions in CLI arguments, configuration loading, and core logic before they impact real repos or tasks.
+The repo includes a GitHub Actions workflow (`.github/workflows/dry-run.yml`) that runs clawdup in `--dry-run` mode on every PR — a dress rehearsal that catches regressions without touching anything.
 
 ### How it works
 
@@ -283,7 +297,7 @@ The repository includes a GitHub Actions workflow (`.github/workflows/dry-run.ym
   run: node dist/cli.js --dry-run
 ```
 
-The dry-run mode performs a single poll cycle: it reads tasks from ClickUp, simulates what actions would be taken (branch creation, Claude invocation, PR creation, status updates), and exits — without mutating git, GitHub, or ClickUp state.
+The dry-run mode performs a single poll cycle: it reads tasks from ClickUp, simulates what actions would be taken (branch creation, Claude invocation, PR creation, status updates), and exits — no side effects.
 
 ## Programmatic API
 
@@ -301,21 +315,21 @@ import { createTaskBranch, createPullRequest } from "clawdup/git-ops";
 - **[Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)** (`claude` command)
 - **[GitHub CLI](https://cli.github.com/)** (`gh` command, authenticated)
 - **Git** (configured with push access)
-- **ClickUp GitHub integration** (optional but recommended)
+- **ClickUp GitHub integration** (optional but recommended for auto-linking)
 
 ## Writing Good Tasks
 
-For best results, write ClickUp tasks with:
+The quality of clawdup's output depends on the quality of your tasks.
 
 - **Clear title** — What needs to be done in one line
-- **Detailed description** — Specifics about the implementation
-- **Acceptance criteria** — Use ClickUp checklists
-- **File hints** — Mention specific files or components if relevant
+- **Detailed description** — The more context, the better the output
+- **Acceptance criteria** — Use ClickUp checklists so clawdup knows when it's done
+- **File hints** — Mention specific files or components when relevant
 
 ## Disclaimer
 
-This project is a personal open-source tool created and maintained by a ClickUp engineer. It is **not** an official ClickUp product, nor is it endorsed, supported, or affiliated with ClickUp in any way. Use it at your own risk.
+This project is a personal open-source tool created and maintained by a ClickUp engineer. It is **not** an official ClickUp product, nor is it endorsed, supported, or affiliated with ClickUp in any way. Use at your own risk.
 
 ## License
 
-MIT
+MIT — go wild.
