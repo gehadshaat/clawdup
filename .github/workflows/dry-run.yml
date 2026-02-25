@@ -1,12 +1,10 @@
-# CI workflow that exercises Clawup in dry-run mode on every PR.
-# Catches regressions in CLI arguments, configuration loading, and core logic
-# before they impact real repos/tasks.
+# CI workflow that builds Clawup and optionally exercises it in dry-run mode.
+# Always validates that the project compiles and the CLI is loadable.
+# If ClickUp secrets are configured, also runs a full dry-run.
 #
-# Required repository secrets:
+# Optional repository secrets (enable full dry-run):
 #   CLICKUP_API_TOKEN       - ClickUp API token (read-only access is sufficient)
 #   CLICKUP_LIST_ID         - ClickUp list ID to poll (use a dedicated CI test list)
-#
-# Optional secrets:
 #   CLICKUP_PARENT_TASK_ID  - Alternative to CLICKUP_LIST_ID (poll subtasks instead)
 
 name: Dry Run
@@ -40,7 +38,24 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: CLI smoke test
+        run: node dist/cli.js --help
+
+      - name: Check secrets availability
+        id: secrets-check
+        run: |
+          if [ -n "$CLICKUP_API_TOKEN" ]; then
+            echo "has_secrets=true" >> "$GITHUB_OUTPUT"
+            echo "ClickUp secrets are configured — full dry-run will execute."
+          else
+            echo "has_secrets=false" >> "$GITHUB_OUTPUT"
+            echo "ClickUp secrets not configured — skipping full dry-run (build + smoke test passed)."
+          fi
+        env:
+          CLICKUP_API_TOKEN: ${{ secrets.CLICKUP_API_TOKEN }}
+
       - name: Run Clawup dry-run
+        if: steps.secrets-check.outputs.has_secrets == 'true'
         env:
           CLICKUP_API_TOKEN: ${{ secrets.CLICKUP_API_TOKEN }}
           CLICKUP_LIST_ID: ${{ secrets.CLICKUP_LIST_ID }}
@@ -52,7 +67,7 @@ jobs:
           echo "Exit code: $?"
 
       - name: Check for error markers in logs
-        if: always()
+        if: steps.secrets-check.outputs.has_secrets == 'true'
         run: |
           if grep -qi "Fatal error:" dry-run.log; then
             echo "::error::Dry run produced fatal errors"
@@ -65,7 +80,7 @@ jobs:
           echo "No error markers found in logs."
 
       - name: Upload dry-run logs
-        if: always()
+        if: steps.secrets-check.outputs.has_secrets == 'true' && always()
         uses: actions/upload-artifact@v4
         with:
           name: dry-run-logs
