@@ -267,6 +267,87 @@ async function checkCliDependencies(): Promise<void> {
   }
 }
 
+/**
+ * Read clawdup's own version from its package.json.
+ */
+function getClawdupVersion(): string {
+  try {
+    const pkgPath = resolve(
+      new URL(".", import.meta.url).pathname,
+      "../package.json",
+    );
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf-8")) as { version: string };
+    return pkg.version;
+  } catch {
+    return "latest";
+  }
+}
+
+/**
+ * Add clawdup as a devDependency and convenience npm scripts to the
+ * target project's package.json.  Safe to call multiple times — existing
+ * scripts are not overwritten.
+ */
+export function addPackageJsonScripts(): boolean {
+  const cwd = process.cwd();
+  const pkgPath = resolve(cwd, "package.json");
+
+  if (!existsSync(pkgPath)) {
+    console.log("  No package.json found. Skipping package.json setup.");
+    console.log("  Run 'npm init' first to create a package.json.\n");
+    return false;
+  }
+
+  const raw = readFileSync(pkgPath, "utf-8");
+  const pkg = JSON.parse(raw) as Record<string, unknown>;
+
+  let changed = false;
+
+  // --- devDependencies ---
+  const devDeps = (pkg.devDependencies ?? {}) as Record<string, string>;
+  if (!devDeps.clawdup) {
+    const version = getClawdupVersion();
+    devDeps.clawdup = `^${version}`;
+    pkg.devDependencies = devDeps;
+    console.log(`  Added clawdup@^${version} to devDependencies`);
+    changed = true;
+  } else {
+    console.log("  SKIP  clawdup already in devDependencies");
+  }
+
+  // --- npm scripts ---
+  const scripts = (pkg.scripts ?? {}) as Record<string, string>;
+
+  const SCRIPTS_TO_ADD: [string, string][] = [
+    ["cook", "clawdup"],
+    ["clawdup:once", "clawdup --once"],
+    ["clawdup:vibe-check", "clawdup --check"],
+    ["clawdup:setup", "clawdup --setup"],
+    ["clawdup:init", "clawdup --init"],
+  ];
+
+  for (const [name, cmd] of SCRIPTS_TO_ADD) {
+    if (!scripts[name]) {
+      scripts[name] = cmd;
+      console.log(`  Added script: "${name}" → "${cmd}"`);
+      changed = true;
+    } else {
+      console.log(`  SKIP  script "${name}" already exists`);
+    }
+  }
+
+  pkg.scripts = scripts;
+
+  if (changed) {
+    writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
+    console.log(`\n  Updated: ${pkgPath}`);
+  } else {
+    console.log("\n  package.json already up to date.");
+  }
+
+  return changed;
+}
+
 export async function runSetup(): Promise<void> {
   const cwd = process.cwd();
   const envPath = resolve(cwd, ".clawdup.env");
@@ -535,23 +616,31 @@ LOG_LEVEL=info
     }
   }
 
+  // Add clawdup to package.json with convenience scripts
+  console.log("\nStep 3: Package.json Integration");
+  console.log("─".repeat(40));
+  addPackageJsonScripts();
+
   console.log(`
 ╔══════════════════════════════════════════════╗
 ║              Setup Complete!                  ║
 ╚══════════════════════════════════════════════╝
 
 Next steps:
-  1. Set up the recommended statuses in your ClickUp list:
-     clawdup --statuses
+  1. Install dependencies:
+     npm install
 
-  2. Validate your configuration:
-     clawdup --check
+  2. Run a health check:
+     npm run clawdup:vibe-check
 
   3. Start the automation:
-     clawdup
+     npm run cook
 
   4. Or process a single task:
-     clawdup --once <task-id>
+     npm run clawdup:once -- <task-id>
+
+  5. Set up the recommended statuses in your ClickUp list:
+     npx clawdup --statuses
 `);
 
   rl.close();
