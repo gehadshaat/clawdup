@@ -1,7 +1,7 @@
 {
   "name": "clawdup",
   "version": "1.0.0",
-  "description": "Automated pipeline that polls ClickUp for tasks, uses Claude Code to implement them, and creates GitHub PRs",
+  "description": "Automated ClickUp-to-PR pipeline. Polls tasks, runs Claude Code, ships pull requests.",
   "type": "module",
   "bin": {
     "clawdup": "./bin/clawdup.js"
@@ -43,7 +43,11 @@
   "scripts": {
     "build": "tsc",
     "test": "tsc -p tsconfig.test.json && node --test dist-test/test/**/*.test.js",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "cook": "clawdup",
+    "vibe-check": "clawdup --check",
+    "summon": "clawdup --setup",
+    "yolo": "clawdup --once"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
