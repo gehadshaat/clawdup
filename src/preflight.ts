@@ -3,7 +3,7 @@
 // connectivity before the main runner proceeds. Can also be invoked manually
 // via `clawdup --doctor`.
 
-import { existsSync, readFileSync, statSync } from "fs";
+import { existsSync, readFileSync, unlinkSync } from "fs";
 import { resolve } from "path";
 import { execFile } from "child_process";
 import { promisify } from "util";
@@ -14,8 +14,37 @@ const execFileAsync = promisify(execFile);
 
 const LOCK_FILE_PATH = resolve(PROJECT_ROOT, ".clawdup.lock");
 
-/** Maximum age (in ms) before a lock file is considered stale — 2 hours. */
-const STALE_LOCK_AGE_MS = 2 * 60 * 60 * 1000;
+/**
+ * Check whether a given PID belongs to a running Clawdup/Node process.
+ * Returns `true` if the process is alive and appears to be clawdup (or we
+ * cannot tell because we're not on Linux). Returns `false` if the process
+ * is dead or is alive but clearly not a node/clawdup process (PID reuse).
+ */
+function isClawdupProcess(pid: number): boolean {
+  // Self-check: if the lock was written by this process, it's ours.
+  if (pid === process.pid) return true;
+
+  // Is the process alive at all?
+  try {
+    process.kill(pid, 0);
+  } catch {
+    return false; // process is dead
+  }
+
+  // Process is alive — try to verify it's actually node/clawdup on Linux.
+  if (process.platform === "linux") {
+    try {
+      const cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf-8").toLowerCase();
+      return cmdline.includes("node") || cmdline.includes("clawdup");
+    } catch {
+      // Can't read /proc entry (permissions, race) — assume it could be clawdup.
+      return true;
+    }
+  }
+
+  // Non-Linux: no /proc, so assume it could be clawdup.
+  return true;
+}
 
 export interface PreflightCheckResult {
   name: string;
@@ -135,6 +164,9 @@ async function checkRemoteAndBaseBranch(): Promise<PreflightCheckResult> {
 
 /**
  * Check for a stale or conflicting .clawdup.lock file.
+ *
+ * Auto-cleans stale locks (dead PID, PID reuse, self-owned) so that
+ * `acquireLock()` in the runner doesn't need a separate cleanup path.
  */
 function checkLockFile(): PreflightCheckResult {
   if (!existsSync(LOCK_FILE_PATH)) {
@@ -145,48 +177,50 @@ function checkLockFile(): PreflightCheckResult {
     const raw = readFileSync(LOCK_FILE_PATH, "utf-8");
     const data = JSON.parse(raw) as { pid: number; startedAt: string };
 
-    // Check if the process that owns the lock is still running
-    let processRunning = false;
-    try {
-      process.kill(data.pid, 0);
-      processRunning = true;
-    } catch {
-      // Process is not running
-    }
+    if (!isClawdupProcess(data.pid)) {
+      // Process is either dead or alive-but-not-clawdup (PID reuse).
+      // Either way the lock is stale — clean it up.
+      unlinkSync(LOCK_FILE_PATH);
 
-    if (processRunning) {
+      let reason: string;
+      try {
+        process.kill(data.pid, 0);
+        // Process is alive but not clawdup → PID reuse
+        reason = `PID ${data.pid} is alive but is not a Clawdup process (PID reuse)`;
+      } catch {
+        reason = `PID ${data.pid} is no longer running`;
+      }
+
       return {
         name: "Lock file",
-        ok: false,
-        message: `Another Clawdup instance is running (PID ${data.pid}, started ${data.startedAt}).`,
-        fix: `Wait for the other instance to finish, or stop it and remove ${LOCK_FILE_PATH}`,
+        ok: true,
+        message: `Stale lock removed (${reason}).`,
       };
     }
 
-    // Process is dead — check age
-    const stat = statSync(LOCK_FILE_PATH);
-    const ageMs = Date.now() - stat.mtimeMs;
-    if (ageMs > STALE_LOCK_AGE_MS) {
+    // isClawdupProcess returned true — the lock owner is (or might be) a
+    // live Clawdup instance.
+    if (data.pid === process.pid) {
       return {
         name: "Lock file",
-        ok: false,
-        message: `Stale lock file detected (PID ${data.pid} is no longer running, age: ${Math.round(ageMs / 60000)}min).`,
-        fix: `Remove the stale lock: rm ${LOCK_FILE_PATH}`,
+        ok: true,
+        message: "Lock file belongs to the current process.",
       };
     }
 
-    // Recent lock from a dead process — warn but don't fail
-    return {
-      name: "Lock file",
-      ok: true,
-      message: `Stale lock from PID ${data.pid} (no longer running). Will be cleaned up on start.`,
-    };
-  } catch {
     return {
       name: "Lock file",
       ok: false,
-      message: "Lock file exists but is corrupted.",
-      fix: `Remove the corrupted lock: rm ${LOCK_FILE_PATH}`,
+      message: `Another Clawdup instance is running (PID ${data.pid}, started ${data.startedAt}).`,
+      fix: `Wait for the other instance to finish, or stop it and remove ${LOCK_FILE_PATH}`,
+    };
+  } catch {
+    // Corrupted lock file — auto-clean it.
+    try { unlinkSync(LOCK_FILE_PATH); } catch { /* already gone */ }
+    return {
+      name: "Lock file",
+      ok: true,
+      message: "Removed corrupted lock file.",
     };
   }
 }
