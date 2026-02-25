@@ -333,3 +333,5 @@ This project is a personal open-source tool created and maintained by a ClickUp 
 ## License
 
 MIT — go wild.
+
+<!-- GA test: 2026-02-25 -->
