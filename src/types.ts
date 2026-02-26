@@ -60,6 +60,7 @@ export interface ClaudeResult {
   output: string;
   needsInput: boolean;
   error?: string;
+  rateLimited?: boolean;
 }
 
 export interface UserConfig {
