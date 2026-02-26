@@ -52,3 +52,5 @@ export type {
   PullRequestOptions,
 } from "./types.js";
 export type { PreflightCheckResult, PreflightResult } from "./preflight.js";
+export { detectPackageManager, globalInstallCommand, installCommand, runScriptCommand, initCommand } from "./package-manager.js";
+export type { PackageManager } from "./package-manager.js";

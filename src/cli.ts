@@ -11,6 +11,12 @@
 
 import { resolve } from "path";
 import { existsSync, writeFileSync } from "fs";
+import {
+  detectPackageManager,
+  globalInstallCommand,
+  installCommand,
+  runScriptCommand,
+} from "./package-manager.js";
 
 const args = process.argv.slice(2);
 
@@ -95,6 +101,7 @@ async function main(): Promise<void> {
 }
 
 function printUsage(): void {
+  const pm = detectPackageManager(process.cwd());
   console.log(`
 clawdup
 ===================
@@ -117,13 +124,13 @@ Usage:
   clawdup --help              Show this help
 
 Quick Start:
-  npx clawdup --setup           One-line setup: config + package.json scripts
-  npx clawdup --init            Non-interactive: create config files + scripts
+  ${pm === "pnpm" ? "pnpm dlx" : "npx"} clawdup --setup           One-line setup: config + package.json scripts
+  ${pm === "pnpm" ? "pnpm dlx" : "npx"} clawdup --init            Non-interactive: create config files + scripts
 
-  After setup, use the added npm scripts:
-    npm run cook                     Start continuous polling
-    npm run clawdup:once             Process a single task
-    npm run clawdup:vibe-check       Validate configuration
+  After setup, use the added scripts:
+    ${runScriptCommand(pm, "cook")}                     Start continuous polling
+    ${runScriptCommand(pm, "clawdup:once")}             Process a single task
+    ${runScriptCommand(pm, "clawdup:vibe-check")}       Validate configuration
 
 Configuration:
   Create a .clawdup.env file in your project root with:
@@ -284,14 +291,15 @@ Run the formatter/linter after making changes to ensure code style is correct.
     console.log(`  CREATE  ${configDest}`);
   }
 
+  const pm = detectPackageManager(cwd);
   console.log(`
 Done! Next steps:
   1. Edit .clawdup.env with your ClickUp API token and list ID
   2. Optionally customize clawdup.config.mjs
   3. Add .clawdup.env to your .gitignore
-  4. Install dependencies: npm install
-  5. Run: npm run clawdup:vibe-check   (validate config)
-  6. Run: npm run cook                  (start automation)
+  4. Install dependencies: ${installCommand(pm)}
+  5. Run: ${runScriptCommand(pm, "clawdup:vibe-check")}   (validate config)
+  6. Run: ${runScriptCommand(pm, "cook")}                  (start automation)
 `);
 }
 
@@ -390,7 +398,7 @@ async function runChecks({
     console.error(
       '  Claude Code: FAILED - "claude" command not found or not working',
     );
-    console.error('    Install: npm install -g @anthropic-ai/claude-code');
+    console.error(`    Install: ${globalInstallCommand(detectPackageManager(process.cwd()), "@anthropic-ai/claude-code")}`);
     console.error('    Docs: https://docs.anthropic.com/en/docs/claude-code');
     allGood = false;
   }
@@ -476,10 +484,11 @@ async function rebuildBeforeRelaunch(): Promise<void> {
   // Resolve clawdup's own package root from the compiled CLI location
   // (dist/cli.js -> package root)
   const clawdupRoot = resolveFn(dirnameFn(fileURLToPath(import.meta.url)), "..");
+  const pm = detectPackageManager(clawdupRoot);
 
   log("info", "Rebuilding to pick up latest code changes...");
   try {
-    await execFileAsync("npm", ["run", "build"], {
+    await execFileAsync(pm, ["run", "build"], {
       cwd: clawdupRoot,
       timeout: 120000,
     });
