@@ -136,6 +136,66 @@ npx clawdup --init
 npx clawdup
 ```
 
+### Installing from GitHub (Private Repo)
+
+If clawdup is not published to npm (or you want to install a specific branch/fork from a private repository), you can install directly from GitHub.
+
+#### Prerequisites
+
+You need GitHub access configured via one of:
+- **SSH key** added to your GitHub account (`ssh -T git@github.com` should succeed)
+- **GitHub CLI** authenticated (`gh auth login`)
+- **Personal Access Token (PAT)** with `repo` scope
+
+#### Install Methods
+
+```bash
+# Install globally from a private repo via SSH
+npm install -g git+ssh://git@github.com/gehadshaat/clawdup.git
+
+# Install as a dev dependency via SSH
+npm install -D git+ssh://git@github.com/gehadshaat/clawdup.git
+
+# Install a specific branch
+npm install -D git+ssh://git@github.com/gehadshaat/clawdup.git#main
+
+# Install via HTTPS (will prompt for credentials or use a PAT)
+npm install -D git+https://github.com/gehadshaat/clawdup.git
+
+# Install via HTTPS with a PAT
+npm install -D git+https://<PAT>@github.com/gehadshaat/clawdup.git
+```
+
+After installing, the `clawdup` command is available (globally or via `npx`). The `prepublishOnly` script in `package.json` runs `npm run build` automatically, so the `dist/` directory is compiled during install.
+
+#### Clone and Link (for Development)
+
+If you want to modify clawdup itself or debug issues:
+
+```bash
+# Clone the repo
+git clone git@github.com:gehadshaat/clawdup.git
+cd clawdup
+
+# Install dev dependencies and build
+npm install
+npm run build
+
+# Link globally so 'clawdup' command is available everywhere
+npm link
+
+# Now go to your project and use it
+cd /path/to/your-project
+clawdup --check
+```
+
+To unlink later:
+
+```bash
+cd /path/to/clawdup
+npm unlink -g
+```
+
 ## Configuration
 
 ### 1. Environment File

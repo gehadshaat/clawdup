@@ -343,6 +343,114 @@ clawdup --once {task-id}
 clawdup --once {task-id} --interactive
 ```
 
+## Installing from GitHub (Private Repo)
+
+### "Permission denied (publickey)" when installing via SSH
+
+**Symptoms:**
+- `npm install git+ssh://git@github.com/...` fails with `Permission denied (publickey)`
+
+**Recovery:**
+1. Verify your SSH key is added to GitHub:
+   ```bash
+   ssh -T git@github.com
+   # Should print: "Hi username! You've been authenticated..."
+   ```
+2. If it fails, add your SSH key:
+   ```bash
+   # Generate a key if you don't have one
+   ssh-keygen -t ed25519 -C "your_email@example.com"
+   # Add to your SSH agent
+   eval "$(ssh-agent -s)"
+   ssh-add ~/.ssh/id_ed25519
+   ```
+3. Add the public key (`~/.ssh/id_ed25519.pub`) to GitHub: **Settings > SSH and GPG keys > New SSH key**
+
+---
+
+### "Repository not found" when installing via HTTPS
+
+**Symptoms:**
+- `npm install git+https://github.com/...` fails with `repository not found`
+
+**Recovery:**
+1. Ensure you have access to the private repo on GitHub
+2. Use a Personal Access Token (PAT) with `repo` scope:
+   - Go to GitHub **Settings > Developer settings > Personal access tokens > Tokens (classic)**
+   - Generate a new token with `repo` scope
+   - Install using: `npm install -D git+https://<PAT>@github.com/gehadshaat/clawdup.git`
+3. Or configure git to use `gh` for authentication:
+   ```bash
+   gh auth login
+   gh auth setup-git
+   ```
+
+---
+
+### Build fails during `npm install` from GitHub
+
+**Symptoms:**
+- Install starts but fails with TypeScript compilation errors
+- Error mentions missing `dist/` directory or cannot find module
+
+**Recovery:**
+1. Make sure you have a compatible Node.js version (18+):
+   ```bash
+   node --version
+   ```
+2. Try cloning and building manually to see full error output:
+   ```bash
+   git clone git@github.com:gehadshaat/clawdup.git
+   cd clawdup
+   npm install
+   npm run build
+   ```
+3. If `tsc` fails, check that TypeScript is installed:
+   ```bash
+   npx tsc --version
+   ```
+
+---
+
+### `clawdup` command not found after install from GitHub
+
+**Symptoms:**
+- `npm install -g git+ssh://...` succeeded but `clawdup` command is not available
+
+**Recovery:**
+1. Check where npm installs global binaries:
+   ```bash
+   npm config get prefix
+   ```
+2. Make sure that `<prefix>/bin` is in your `PATH`:
+   ```bash
+   echo $PATH
+   # If missing, add to your shell profile (~/.bashrc, ~/.zshrc):
+   export PATH="$(npm config get prefix)/bin:$PATH"
+   ```
+3. Verify the binary is linked:
+   ```bash
+   npm ls -g clawdup
+   which clawdup
+   ```
+
+---
+
+### `npm link` not reflecting local changes
+
+**Symptoms:**
+- You edited source files but `clawdup` still runs old code
+
+**Recovery:**
+1. Rebuild after making changes:
+   ```bash
+   cd /path/to/clawdup
+   npm run build
+   ```
+   `npm link` creates a symlink to the repo, but `clawdup` runs compiled code from `dist/`. You must rebuild after source changes.
+
+---
+
 ## When to Escalate
 
 Collect this information before asking for help:
