@@ -300,6 +300,61 @@ npx clawdup --init
 npx clawdup
 ```
 
+### Option D: Install from GitHub (Private Repo)
+
+If clawdup is not published to npm or you need a specific branch from a private repository, install directly from GitHub.
+
+**Prerequisites:** You need GitHub access configured via SSH key, GitHub CLI (`gh auth login`), or a Personal Access Token (PAT) with `repo` scope.
+
+```bash
+# Via SSH (recommended for private repos)
+npm install -D git+ssh://git@github.com/gehadshaat/clawdup.git
+
+# Via SSH — specific branch
+npm install -D git+ssh://git@github.com/gehadshaat/clawdup.git#main
+
+# Via HTTPS (prompts for credentials or uses a PAT)
+npm install -D git+https://github.com/gehadshaat/clawdup.git
+
+# Via HTTPS with a Personal Access Token
+npm install -D git+https://<YOUR_PAT>@github.com/gehadshaat/clawdup.git
+
+# Global install via SSH
+npm install -g git+ssh://git@github.com/gehadshaat/clawdup.git
+```
+
+The package compiles TypeScript automatically during install (via the `prepublishOnly` script).
+
+### Option E: Clone and Link (for Development / Debugging)
+
+If you want to modify clawdup itself or debug an issue locally:
+
+```bash
+# 1. Clone the repo
+git clone git@github.com:gehadshaat/clawdup.git
+cd clawdup
+
+# 2. Install dependencies and build
+npm install
+npm run build
+
+# 3. Link globally
+npm link
+
+# 4. Go to your project and use it
+cd /path/to/your-project
+clawdup --check
+```
+
+This creates a symlink so the `clawdup` command points to your local clone. Any changes you make to the source (after running `npm run build`) are immediately reflected.
+
+To unlink:
+
+```bash
+cd /path/to/clawdup
+npm unlink -g
+```
+
 ---
 
 ## Step 9: Configure clawdup
