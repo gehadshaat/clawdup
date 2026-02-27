@@ -19,6 +19,7 @@ import {
   getExistingTaskNames,
   getNewReviewFeedback,
   getCommentText,
+  getUnresolvedDependencies,
 } from "./clickup-api.js";
 import {
   detectGitHubRepo,
@@ -1600,8 +1601,39 @@ async function pollForTasks(): Promise<void> {
       return;
     }
 
-    // Process the highest-priority eligible task
-    const task = eligibleTasks[0]!;
+    // Find the first eligible task whose dependencies are all resolved
+    let task: ClickUpTask | null = null;
+    for (const candidate of eligibleTasks) {
+      if (isShuttingDown) return;
+
+      try {
+        const unresolved = await getUnresolvedDependencies(candidate.id);
+        if (unresolved.length > 0) {
+          const depList = unresolved
+            .map((d) => `"${d.name}" (${d.id}, status: ${d.status})`)
+            .join(", ");
+          log(
+            "info",
+            `Task "${candidate.name}" (${candidate.id}) has ${unresolved.length} unresolved dependency/ies: ${depList}. Skipping for now.`,
+          );
+          continue;
+        }
+      } catch (err) {
+        log(
+          "warn",
+          `Failed to check dependencies for task ${candidate.id}: ${(err as Error).message}. Processing anyway.`,
+        );
+      }
+
+      task = candidate;
+      break;
+    }
+
+    if (!task) {
+      log("debug", `${eligibleTasks.length} TODO task(s) found but all have unresolved dependencies. Waiting...`);
+      return;
+    }
+
     processedTaskIds.add(task.id);
 
     // Check if this is a returning task (already has a PR in its comments)
@@ -1638,6 +1670,23 @@ export async function runSingleTask(taskId: string, options?: { interactive?: bo
 
     const { getTask } = await import("./clickup-api.js");
     const task = await getTask(taskId);
+
+    // Warn about unresolved dependencies (but still proceed since this is an explicit single-task run)
+    try {
+      const unresolved = await getUnresolvedDependencies(taskId);
+      if (unresolved.length > 0) {
+        const depList = unresolved
+          .map((d) => `"${d.name}" (${d.id}, status: ${d.status})`)
+          .join(", ");
+        log(
+          "warn",
+          `Task has ${unresolved.length} unresolved dependency/ies: ${depList}. Proceeding anyway since this is a direct task run.`,
+        );
+      }
+    } catch (err) {
+      log("warn", `Could not check dependencies: ${(err as Error).message}`);
+    }
+
     await processTask(task);
   } finally {
     if (!DRY_RUN) releaseLock();

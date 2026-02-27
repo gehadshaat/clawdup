@@ -17,6 +17,8 @@ export {
   detectInjectionPatterns,
   getListInfo,
   validateStatuses,
+  getTaskDependencies,
+  getUnresolvedDependencies,
 } from "./clickup-api.js";
 export {
   detectGitHubRepo,
@@ -47,6 +49,7 @@ export type {
   ClickUpList,
   ClickUpComment,
   ClickUpCommentBlock,
+  ClickUpDependency,
   ClaudeResult,
   UserConfig,
   PullRequestOptions,
