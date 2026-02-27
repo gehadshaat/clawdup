@@ -5,6 +5,7 @@
 //   clawdup --interactive  Run Claude in interactive mode (accepts user input)
 //   clawdup --check      Validate config and exit
 //   clawdup --doctor     Run preflight environment health checks
+//   clawdup --audit      Audit backlog for duplicates, stale tasks, and overlaps
 //   clawdup --statuses   Show recommended ClickUp statuses
 //   clawdup --setup      Interactive setup wizard
 //   clawdup --init       Create example config files in current directory
@@ -64,6 +65,14 @@ async function main(): Promise<void> {
     process.exit(result.passed ? 0 : 1);
   }
 
+  // --audit requires config but not the full runner
+  if (args.includes("--audit")) {
+    const { runAuditAndReport } = await import("./audit.js");
+    const annotate = args.includes("--annotate");
+    await runAuditAndReport({ annotate });
+    process.exit(0);
+  }
+
   // Everything below requires config to be loaded
   const { startRunner, runSingleTask } = await import("./runner.js");
   const { validateStatuses, getListInfo, getTask } = await import("./clickup-api.js");
@@ -118,6 +127,8 @@ Usage:
   clawdup --json-log          Output logs in JSON format
   clawdup --check             Validate configuration
   clawdup --doctor            Run preflight environment health checks
+  clawdup --audit             Audit backlog for duplicates and stale tasks
+  clawdup --audit --annotate  Audit and add comments to flagged tasks
   clawdup --statuses          Show recommended ClickUp statuses
   clawdup --setup             Interactive setup wizard
   clawdup --init              Create config files in current directory
