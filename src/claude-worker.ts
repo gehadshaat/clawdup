@@ -12,7 +12,6 @@ import {
   CLAUDE_TIMEOUT_MS,
   CLAUDE_MAX_TURNS,
   CLAUDE_MODEL,
-  CLAUDE_FALLBACK_MODELS,
   PROJECT_ROOT,
   GIT_ROOT,
   userConfig,
@@ -73,22 +72,33 @@ function isRateLimited(output: string, stderr: string): boolean {
 }
 
 /**
- * Get the ordered list of models to try (primary + fallbacks).
- * Returns [undefined] if no models are configured (use CLI default).
+ * Built-in fallback models to try when the current model hits a usage limit.
+ * These use short names accepted by the Claude CLI.
+ * Order: general-purpose first, then cheaper/faster, then most capable.
+ */
+const BUILT_IN_FALLBACK_MODELS = ["sonnet", "haiku", "opus"];
+
+/**
+ * Get the ordered list of models to try (primary + built-in fallbacks).
+ * No configuration required — falls back through available models automatically.
  */
 function getModelsToTry(): (string | undefined)[] {
   const models: (string | undefined)[] = [];
+
+  // Start with the explicitly configured model, or CLI default
   if (CLAUDE_MODEL) {
     models.push(CLAUDE_MODEL);
+  } else {
+    models.push(undefined); // use CLI default
   }
-  for (const m of CLAUDE_FALLBACK_MODELS) {
+
+  // Add built-in fallbacks (skip any that match the primary model)
+  for (const m of BUILT_IN_FALLBACK_MODELS) {
     if (m !== CLAUDE_MODEL) {
       models.push(m);
     }
   }
-  if (models.length === 0) {
-    models.push(undefined); // use default
-  }
+
   return models;
 }
 
