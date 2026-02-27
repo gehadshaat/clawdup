@@ -3,7 +3,7 @@
 
 import { CLICKUP_API_TOKEN, CLICKUP_LIST_ID, CLICKUP_PARENT_TASK_ID, STATUS, DRY_RUN } from "./config.js";
 import { log } from "./logger.js";
-import type { ClickUpTask, ClickUpUser, ClickUpList, ClickUpComment } from "./types.js";
+import type { ClickUpTask, ClickUpUser, ClickUpList, ClickUpComment, ClickUpDependency } from "./types.js";
 
 const BASE_URL = "https://api.clickup.com/api/v2";
 
@@ -172,6 +172,62 @@ export async function getTasksByStatus(status: string): Promise<ClickUpTask[]> {
  */
 export async function getTask(taskId: string): Promise<ClickUpTask> {
   return request<ClickUpTask>("GET", `/task/${taskId}`);
+}
+
+/**
+ * Get dependencies for a task.
+ * Returns both `dependencies` (tasks this task blocks) and `waiting_on` (tasks this task waits on).
+ */
+export async function getTaskDependencies(
+  taskId: string,
+): Promise<{ dependencies: ClickUpDependency[]; waitingOn: ClickUpDependency[] }> {
+  const data = await request<{
+    dependencies: ClickUpDependency[];
+    waiting_on: ClickUpDependency[];
+  }>("GET", `/task/${taskId}/dependency`);
+  return {
+    dependencies: data.dependencies || [],
+    waitingOn: data.waiting_on || [],
+  };
+}
+
+/**
+ * Check if a task has unresolved dependencies (tasks it's waiting on that aren't completed).
+ * Returns an array of { id, name, status } for each unresolved dependency.
+ * Returns an empty array if all dependencies are resolved.
+ */
+export async function getUnresolvedDependencies(
+  taskId: string,
+): Promise<Array<{ id: string; name: string; status: string }>> {
+  const { waitingOn } = await getTaskDependencies(taskId);
+
+  if (waitingOn.length === 0) return [];
+
+  const unresolved: Array<{ id: string; name: string; status: string }> = [];
+
+  for (const dep of waitingOn) {
+    try {
+      const depTask = await getTask(dep.depends_on);
+      const status = depTask.status?.status?.toLowerCase() || "";
+      if (status !== STATUS.COMPLETED.toLowerCase()) {
+        unresolved.push({
+          id: depTask.id,
+          name: depTask.name,
+          status: depTask.status?.status || "unknown",
+        });
+      }
+    } catch (err) {
+      log("warn", `Could not fetch dependency task ${dep.depends_on}: ${(err as Error).message}`);
+      // Treat unreachable dependencies as unresolved to be safe
+      unresolved.push({
+        id: dep.depends_on,
+        name: "(unknown)",
+        status: "unreachable",
+      });
+    }
+  }
+
+  return unresolved;
 }
 
 /**

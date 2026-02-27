@@ -68,6 +68,14 @@ export interface UserConfig {
   claudeArgs?: string[];
 }
 
+export interface ClickUpDependency {
+  task_id: string;
+  depends_on: string;
+  type: number;
+  date_created?: string;
+  userid?: string;
+}
+
 export interface PullRequestOptions {
   title: string;
   body: string;
