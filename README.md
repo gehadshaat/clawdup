@@ -37,9 +37,9 @@ clawdup
 
 ```
 ┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-│   ClickUp    │     │  Git Branch  │     │  Claude Code  │     │  GitHub PR   │
-│   "to do"    │────>│   created    │────>│  implements   │────>│   created    │
-│              │     │              │     │   the task    │     │              │
+│   ClickUp    │     │  Git Branch  │     │  Claude Code │     │  GitHub PR   │
+│   "to do"    │────>│   created    │────>│  implements  │────>│   created    │
+│              │     │              │     │   the task   │     │              │
 └──────────────┘     └──────────────┘     └──────────────┘     └──────────────┘
        │                                         │                     │
        ▼                                         ▼                     ▼
