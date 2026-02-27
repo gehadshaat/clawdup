@@ -203,6 +203,9 @@ if (CLAUDE_MAX_TURNS > 500) {
   process.exit(1);
 }
 
+// Claude model selection (optional — if not set, uses CLI default)
+export const CLAUDE_MODEL: string = process.env.CLAUDE_MODEL || "";
+
 // Auto-approve mode: skip manual review and merge PRs immediately after Claude completes
 export const AUTO_APPROVE: boolean = (process.env.AUTO_APPROVE || "").toLowerCase() === "true";
 
