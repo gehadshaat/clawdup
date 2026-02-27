@@ -196,6 +196,57 @@ cd /path/to/clawdup
 npm unlink -g
 ```
 
+## ClickUp Setup
+
+If you're new to ClickUp, follow these steps to get everything ready. For a more detailed walkthrough, see the **[Complete Setup & Usage Guide](GUIDE.md)**.
+
+### 1. Create a ClickUp Account
+
+1. Go to [clickup.com](https://clickup.com) and click **"Get Started Free"**
+2. Sign up with your email, Google account, or SSO
+3. Follow the onboarding to create your **Workspace**
+
+> The free tier is sufficient for using clawdup.
+
+### 2. Create a Space and List
+
+1. In your Workspace, click **"+"** in the left sidebar and create a **Space** (e.g., "Engineering")
+2. Inside the Space, click **"+ Add List"** and name it (e.g., "Automation Tasks")
+
+clawdup polls a specific **List** for tasks — this is the list you'll point it to.
+
+### 3. Set Up List Statuses
+
+Your list needs these statuses for clawdup to manage the task lifecycle. Open the list, go to **"..." > List Settings > Statuses**, and add:
+
+| Status          | Type   | Color     |
+| --------------- | ------ | --------- |
+| `to do`         | open   | `#d3d3d3` |
+| `in progress`   | active | `#4194f6` |
+| `in review`     | active | `#a875ff` |
+| `approved`      | active | `#2ecd6f` |
+| `require input` | active | `#f9d900` |
+| `blocked`       | active | `#f44336` |
+| `complete`      | closed | `#6bc950` |
+
+> **Tip:** Run `clawdup --statuses` after installation for a quick reference.
+
+### 4. Generate a ClickUp API Token
+
+1. Click your avatar in the bottom-left corner of ClickUp
+2. Go to **Settings > Apps** (under your personal settings)
+3. Under **"API Token"**, click **"Generate"**
+4. Copy the token — it looks like `pk_12345678_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX`
+
+> **Keep this token secret.** It grants full access to your workspace. Never commit it to version control.
+
+### 5. Find Your List ID
+
+1. Open your list in ClickUp
+2. Click **"..."** next to the list name and select **"Copy Link"**
+3. The URL looks like: `https://app.clickup.com/12345678/v/li/901234567890`
+4. The **List ID** is the number at the end: `901234567890`
+
 ## Configuration
 
 ### 1. Environment File
