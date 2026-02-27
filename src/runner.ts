@@ -1621,8 +1621,9 @@ async function pollForTasks(): Promise<void> {
       } catch (err) {
         log(
           "warn",
-          `Failed to check dependencies for task ${candidate.id}: ${(err as Error).message}. Processing anyway.`,
+          `Failed to check dependencies for task ${candidate.id}: ${(err as Error).message}. Skipping to be safe.`,
         );
+        continue;
       }
 
       task = candidate;
