@@ -3,7 +3,10 @@
 # Prerequisites:
 #   1. Create an NPM access token (Automation type recommended)
 #   2. Add it as a repository secret named NPM_TOKEN
-#   3. Create a GitHub release (which creates a git tag)
+#
+# Typical flow:
+#   Run the "Release" workflow (release.yml) which bumps the version,
+#   creates a git tag, and publishes a GitHub release — triggering this workflow.
 #
 # The workflow validates that the package.json version matches the release tag,
 # builds the project, and publishes to NPM.
