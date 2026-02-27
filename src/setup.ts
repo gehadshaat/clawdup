@@ -4,6 +4,13 @@
 import { createInterface } from "readline";
 import { existsSync, writeFileSync, readFileSync } from "fs";
 import { resolve } from "path";
+import {
+  detectPackageManager,
+  globalInstallCommand,
+  installCommand,
+  runScriptCommand,
+  initCommand,
+} from "./package-manager.js";
 
 const rl = createInterface({
   input: process.stdin,
@@ -228,7 +235,7 @@ async function checkCliDependencies(): Promise<void> {
       name: "Claude Code (claude)",
       command: "claude",
       args: ["--version"],
-      installHint: "npm install -g @anthropic-ai/claude-code",
+      installHint: globalInstallCommand(detectPackageManager(process.cwd()), "@anthropic-ai/claude-code"),
       format: (s) => s.trim(),
     },
   ];
@@ -294,7 +301,7 @@ export function addPackageJsonScripts(): boolean {
 
   if (!existsSync(pkgPath)) {
     console.log("  No package.json found. Skipping package.json setup.");
-    console.log("  Run 'npm init' first to create a package.json.\n");
+    console.log(`  Run '${initCommand(detectPackageManager(cwd))}' first to create a package.json.\n`);
     return false;
   }
 
@@ -621,6 +628,8 @@ LOG_LEVEL=info
   console.log("─".repeat(40));
   addPackageJsonScripts();
 
+  const pm = detectPackageManager(cwd);
+  const dlx = pm === "pnpm" ? "pnpm dlx" : "npx";
   console.log(`
 ╔══════════════════════════════════════════════╗
 ║              Setup Complete!                  ║
@@ -628,19 +637,19 @@ LOG_LEVEL=info
 
 Next steps:
   1. Install dependencies:
-     npm install
+     ${installCommand(pm)}
 
   2. Run a health check:
-     npm run clawdup:vibe-check
+     ${runScriptCommand(pm, "clawdup:vibe-check")}
 
   3. Start the automation:
-     npm run cook
+     ${runScriptCommand(pm, "cook")}
 
   4. Or process a single task:
-     npm run clawdup:once -- <task-id>
+     ${runScriptCommand(pm, "clawdup:once")} -- <task-id>
 
   5. Set up the recommended statuses in your ClickUp list:
-     npx clawdup --statuses
+     ${dlx} clawdup --statuses
 `);
 
   rl.close();
