@@ -96,6 +96,96 @@ function sortByPriorityAndDate(tasks: ClickUpTask[]): void {
 }
 
 /**
+ * Get all open tasks in the configured list (regardless of status).
+ * Returns tasks sorted by priority (urgent first) then by date created.
+ */
+async function getAllListTasks(includeClosed: boolean = false): Promise<ClickUpTask[]> {
+  const listId = await getEffectiveListId();
+  const params = new URLSearchParams({
+    include_closed: includeClosed ? "true" : "false",
+    subtasks: "true",
+    order_by: "created",
+    reverse: "false",
+  });
+
+  let allTasks: ClickUpTask[] = [];
+  let page = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    params.set("page", String(page));
+    const data = await request<{ tasks: ClickUpTask[] }>(
+      "GET",
+      `/list/${listId}/task?${params.toString()}`,
+    );
+    const tasks = data.tasks || [];
+    allTasks = allTasks.concat(tasks);
+    // ClickUp returns up to 100 tasks per page; fewer means last page
+    hasMore = tasks.length >= 100;
+    page++;
+  }
+
+  sortByPriorityAndDate(allTasks);
+  log("info", `Found ${allTasks.length} task(s) in list ${listId}`);
+  return allTasks;
+}
+
+/**
+ * Get all subtasks of the configured parent task (regardless of status).
+ * Fetches full details for each subtask.
+ */
+async function getAllParentSubtasks(includeClosed: boolean = false): Promise<ClickUpTask[]> {
+  const parent = await request<ClickUpTask>(
+    "GET",
+    `/task/${CLICKUP_PARENT_TASK_ID}?include_subtasks=true`,
+  );
+
+  const subtasks = parent.subtasks || [];
+  const matching = includeClosed
+    ? subtasks
+    : subtasks.filter(
+        (s) => s.status?.status?.toLowerCase() !== STATUS.COMPLETED.toLowerCase(),
+      );
+
+  const fullTasks: ClickUpTask[] = [];
+  for (const sub of matching) {
+    const task = await getTask(sub.id);
+    fullTasks.push(task);
+  }
+
+  sortByPriorityAndDate(fullTasks);
+  log("info", `Found ${fullTasks.length} subtask(s) under parent task ${CLICKUP_PARENT_TASK_ID}`);
+  return fullTasks;
+}
+
+/**
+ * Get all tasks from the configured list/parent.
+ * In list mode, queries the configured list.
+ * In parent task mode, queries subtasks of the configured parent task.
+ */
+export async function getAllTasks(includeClosed: boolean = false): Promise<ClickUpTask[]> {
+  if (CLICKUP_PARENT_TASK_ID) {
+    return getAllParentSubtasks(includeClosed);
+  }
+  return getAllListTasks(includeClosed);
+}
+
+/**
+ * Update a task's title and/or description.
+ */
+export async function updateTask(
+  taskId: string,
+  updates: { name?: string; description?: string; status?: string },
+): Promise<void> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would update task ${taskId}: ${JSON.stringify(updates)}`);
+    return;
+  }
+  log("info", `Updating task ${taskId}`);
+  await request("PUT", `/task/${taskId}`, updates as Record<string, unknown>);
+}
+
+/**
  * Get all tasks in the configured list with a specific status.
  * Returns tasks sorted by priority (urgent first) then by date created.
  */
