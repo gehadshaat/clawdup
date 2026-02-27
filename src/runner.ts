@@ -1603,18 +1603,20 @@ async function pollForTasks(): Promise<void> {
 
     // Find the first eligible task whose dependencies are all resolved
     let task: ClickUpTask | null = null;
+    let blockedCount = 0;
     for (const candidate of eligibleTasks) {
       if (isShuttingDown) return;
 
       try {
         const unresolved = await getUnresolvedDependencies(candidate.id);
         if (unresolved.length > 0) {
+          blockedCount++;
           const depList = unresolved
             .map((d) => `"${d.name}" (${d.id}, status: ${d.status})`)
             .join(", ");
           log(
             "info",
-            `Task "${candidate.name}" (${candidate.id}) has ${unresolved.length} unresolved dependency/ies: ${depList}. Skipping for now.`,
+            `Task "${candidate.name}" (${candidate.id}) will NOT be worked on — it has ${unresolved.length} unresolved dependency/ies that must be completed first: ${depList}`,
           );
           continue;
         }
@@ -1630,8 +1632,15 @@ async function pollForTasks(): Promise<void> {
     }
 
     if (!task) {
-      log("debug", `${eligibleTasks.length} TODO task(s) found but all have unresolved dependencies. Waiting...`);
+      log(
+        "info",
+        `${eligibleTasks.length} TODO task(s) found but all ${blockedCount} are blocked by unresolved dependencies — none will be worked on until their dependencies are completed. Waiting for next poll cycle...`,
+      );
       return;
+    }
+
+    if (blockedCount > 0) {
+      log("info", `Skipped ${blockedCount} task(s) due to unresolved dependencies. Picking next eligible task.`);
     }
 
     processedTaskIds.add(task.id);
