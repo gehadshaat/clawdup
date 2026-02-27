@@ -1,0 +1,64 @@
+# Publishes the package to NPM when a GitHub release is created.
+#
+# Prerequisites:
+#   1. Create an NPM access token (Automation type recommended)
+#   2. Add it as a repository secret named NPM_TOKEN
+#
+# Typical flow:
+#   Run the "Release" workflow (release.yml) which bumps the version,
+#   creates a git tag, and publishes a GitHub release — triggering this workflow.
+#
+# The workflow validates that the package.json version matches the release tag,
+# builds the project, and publishes to NPM.
+
+name: Publish to NPM
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish to NPM
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Validate version matches tag
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          # Strip leading 'v' if present (e.g., v1.2.3 → 1.2.3)
+          TAG_VERSION="${TAG#v}"
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::Tag version ($TAG_VERSION) does not match package.json version ($PKG_VERSION)"
+            echo "Update package.json version to $TAG_VERSION before releasing."
+            exit 1
+          fi
+          echo "Version $PKG_VERSION matches tag $TAG"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: CLI smoke test
+        run: node dist/cli.js --help
+
+      - name: Publish to NPM
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
