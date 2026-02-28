@@ -13,6 +13,8 @@ Works with **any** project — just install, configure, and let it cook.
 > **Want to understand the internals?** See the **[Architecture & State Flow](ARCHITECTURE.md)**.
 >
 > **Looking for the full configuration reference?** See **[CONFIGURATION.md](CONFIGURATION.md)**.
+>
+> **Want to contribute?** Start with the **[Contributor Onboarding Guide](CONTRIBUTING.md)**.
 
 ## Quick Start
 
@@ -436,6 +438,10 @@ The quality of clawdup's output depends on the quality of your tasks.
 - **Detailed description** — The more context, the better the output
 - **Acceptance criteria** — Use ClickUp checklists so clawdup knows when it's done
 - **File hints** — Mention specific files or components when relevant
+
+## Contributing
+
+Want to contribute to clawdup? Read the **[Contributor Onboarding Guide](CONTRIBUTING.md)** — it walks you through local setup, the codebase, and your first PR.
 
 ## Disclaimer
 
