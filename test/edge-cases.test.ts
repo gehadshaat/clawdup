@@ -706,3 +706,439 @@ describe("conflict resolution decision flow", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Task dependency handling
+// Motivating task: CU-86afu000t
+//
+// Tests the dependency resolution logic used in pollForTasks and runSingleTask.
+// getUnresolvedDependencies checks each "waiting_on" dependency's status.
+// A task is eligible only when ALL its dependencies have status === COMPLETED.
+// ---------------------------------------------------------------------------
+
+// Default completed status, matching config.ts STATUS.COMPLETED
+const STATUS_COMPLETED = "complete";
+
+/**
+ * Replicate the core dependency resolution logic from clickup-api.ts
+ * getUnresolvedDependencies.
+ *
+ * Given a list of dependency tasks with their statuses, returns the ones
+ * that are NOT completed (i.e., still blocking the dependent task).
+ */
+function resolveUnresolved(
+  deps: Array<{ id: string; name: string; status: string | null }>,
+): Array<{ id: string; name: string; status: string }> {
+  const unresolved: Array<{ id: string; name: string; status: string }> = [];
+  for (const dep of deps) {
+    const status = (dep.status || "").toLowerCase();
+    if (status !== STATUS_COMPLETED.toLowerCase()) {
+      unresolved.push({ id: dep.id, name: dep.name, status: dep.status || "unknown" });
+    }
+  }
+  return unresolved;
+}
+
+/**
+ * Replicate the polling loop's dependency-check logic from runner.ts
+ * pollForTasks. Given a list of candidate tasks and a function that returns
+ * their unresolved dependencies, returns the first eligible task and a count
+ * of how many were blocked.
+ */
+function selectEligibleTask(
+  candidates: Array<{ id: string; name: string }>,
+  getUnresolved: (id: string) => Array<{ id: string; name: string; status: string }>,
+): { task: { id: string; name: string } | null; blockedCount: number; logs: string[] } {
+  let task: { id: string; name: string } | null = null;
+  let blockedCount = 0;
+  const logs: string[] = [];
+
+  for (const candidate of candidates) {
+    const unresolved = getUnresolved(candidate.id);
+    if (unresolved.length > 0) {
+      blockedCount++;
+      const depList = unresolved
+        .map((d) => `"${d.name}" (${d.id}, status: ${d.status})`)
+        .join(", ");
+      logs.push(
+        `Task "${candidate.name}" (${candidate.id}) will NOT be worked on — it has ${unresolved.length} unresolved dependency/ies that must be completed first: ${depList}`,
+      );
+      continue;
+    }
+    task = candidate;
+    break;
+  }
+
+  if (!task) {
+    logs.push(
+      `${candidates.length} TODO task(s) found but all ${blockedCount} are blocked by unresolved dependencies — none will be worked on until their dependencies are completed. Waiting for next poll cycle...`,
+    );
+  } else if (blockedCount > 0) {
+    logs.push(
+      `Skipped ${blockedCount} task(s) due to unresolved dependencies. Picking next eligible task.`,
+    );
+  }
+
+  return { task, blockedCount, logs };
+}
+
+// ---------------------------------------------------------------------------
+// Dependency resolution: simple waiting-on dependency
+// Motivating task: CU-86afu000t
+// ---------------------------------------------------------------------------
+describe("dependency resolution: simple waiting-on", () => {
+  // Task A waits on Task B (not complete) → A is skipped.
+  // After B is completed, A becomes eligible.
+
+  it("task with incomplete dependency is blocked", () => {
+    const deps = [{ id: "taskB", name: "Task B", status: "to do" }];
+    const unresolved = resolveUnresolved(deps);
+    assert.equal(unresolved.length, 1);
+    assert.equal(unresolved[0]!.id, "taskB");
+  });
+
+  it("task with completed dependency is eligible", () => {
+    const deps = [{ id: "taskB", name: "Task B", status: "complete" }];
+    const unresolved = resolveUnresolved(deps);
+    assert.equal(unresolved.length, 0);
+  });
+
+  it("task with no dependencies is eligible", () => {
+    const deps: Array<{ id: string; name: string; status: string }> = [];
+    const unresolved = resolveUnresolved(deps);
+    assert.equal(unresolved.length, 0);
+  });
+
+  it("completed status comparison is case-insensitive", () => {
+    // STATUS.COMPLETED defaults to "complete"; the check lowercases both sides
+    const deps = [{ id: "taskB", name: "Task B", status: "Complete" }];
+    const unresolved = resolveUnresolved(deps);
+    assert.equal(unresolved.length, 0);
+  });
+
+  it("treats null/empty status as unresolved", () => {
+    const deps = [{ id: "taskB", name: "Task B", status: null as unknown as string }];
+    const unresolved = resolveUnresolved(deps);
+    assert.equal(unresolved.length, 1);
+    assert.equal(unresolved[0]!.status, "unknown");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Dependency resolution: multiple unresolved dependencies
+// Motivating task: CU-86afu000t
+// ---------------------------------------------------------------------------
+describe("dependency resolution: multiple dependencies", () => {
+  it("task blocked when only some dependencies are complete", () => {
+    // Task A waits on B and C; only B is complete → A remains blocked
+    const deps = [
+      { id: "taskB", name: "Task B", status: "complete" },
+      { id: "taskC", name: "Task C", status: "in progress" },
+    ];
+    const unresolved = resolveUnresolved(deps);
+    assert.equal(unresolved.length, 1);
+    assert.equal(unresolved[0]!.id, "taskC");
+  });
+
+  it("task eligible when all dependencies are complete", () => {
+    const deps = [
+      { id: "taskB", name: "Task B", status: "complete" },
+      { id: "taskC", name: "Task C", status: "complete" },
+    ];
+    const unresolved = resolveUnresolved(deps);
+    assert.equal(unresolved.length, 0);
+  });
+
+  it("returns all unresolved when none are complete", () => {
+    const deps = [
+      { id: "taskB", name: "Task B", status: "to do" },
+      { id: "taskC", name: "Task C", status: "in progress" },
+      { id: "taskD", name: "Task D", status: "blocked" },
+    ];
+    const unresolved = resolveUnresolved(deps);
+    assert.equal(unresolved.length, 3);
+  });
+
+  it("unreachable dependencies are treated as unresolved", () => {
+    // When getTask fails, clickup-api.ts treats the dep as unreachable
+    const deps = [
+      { id: "taskB", name: "(unknown)", status: "unreachable" },
+      { id: "taskC", name: "Task C", status: "complete" },
+    ];
+    const unresolved = resolveUnresolved(deps);
+    assert.equal(unresolved.length, 1);
+    assert.equal(unresolved[0]!.status, "unreachable");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Polling loop: dependency-based task selection
+// Motivating task: CU-86afu000t
+// ---------------------------------------------------------------------------
+describe("polling: dependency-based task selection", () => {
+  it("selects first task with no unresolved dependencies", () => {
+    const candidates = [
+      { id: "task1", name: "Task 1" },
+      { id: "task2", name: "Task 2" },
+      { id: "task3", name: "Task 3" },
+    ];
+
+    // task1 and task2 are blocked; task3 is eligible
+    const depsMap: Record<string, Array<{ id: string; name: string; status: string }>> = {
+      task1: [{ id: "dep1", name: "Dep 1", status: "to do" }],
+      task2: [{ id: "dep2", name: "Dep 2", status: "in progress" }],
+      task3: [],
+    };
+
+    const result = selectEligibleTask(candidates, (id) => depsMap[id] || []);
+    assert.ok(result.task !== null);
+    assert.equal(result.task!.id, "task3");
+    assert.equal(result.blockedCount, 2);
+  });
+
+  it("selects the first eligible task (stops checking after finding one)", () => {
+    const candidates = [
+      { id: "task1", name: "Task 1" },
+      { id: "task2", name: "Task 2" },
+      { id: "task3", name: "Task 3" },
+    ];
+
+    // task1 is blocked; task2 and task3 are eligible → should pick task2
+    const depsMap: Record<string, Array<{ id: string; name: string; status: string }>> = {
+      task1: [{ id: "dep1", name: "Dep 1", status: "to do" }],
+      task2: [],
+      task3: [],
+    };
+
+    const result = selectEligibleTask(candidates, (id) => depsMap[id] || []);
+    assert.equal(result.task!.id, "task2");
+    assert.equal(result.blockedCount, 1);
+  });
+
+  it("returns null when all tasks are blocked by dependencies", () => {
+    const candidates = [
+      { id: "task1", name: "Task 1" },
+      { id: "task2", name: "Task 2" },
+    ];
+
+    const depsMap: Record<string, Array<{ id: string; name: string; status: string }>> = {
+      task1: [{ id: "dep1", name: "Dep 1", status: "to do" }],
+      task2: [{ id: "dep2", name: "Dep 2", status: "in progress" }],
+    };
+
+    const result = selectEligibleTask(candidates, (id) => depsMap[id] || []);
+    assert.equal(result.task, null);
+    assert.equal(result.blockedCount, 2);
+  });
+
+  it("logs 'all blocked' message when no task is eligible", () => {
+    const candidates = [
+      { id: "task1", name: "Task 1" },
+      { id: "task2", name: "Task 2" },
+      { id: "task3", name: "Task 3" },
+    ];
+
+    const depsMap: Record<string, Array<{ id: string; name: string; status: string }>> = {
+      task1: [{ id: "dep1", name: "Dep 1", status: "to do" }],
+      task2: [{ id: "dep2", name: "Dep 2", status: "blocked" }],
+      task3: [{ id: "dep3", name: "Dep 3", status: "in progress" }],
+    };
+
+    const result = selectEligibleTask(candidates, (id) => depsMap[id] || []);
+    assert.equal(result.task, null);
+    // Should include the "all blocked" log message
+    const allBlockedLog = result.logs.find((l) => l.includes("blocked by unresolved dependencies"));
+    assert.ok(allBlockedLog, "Should log that all tasks are blocked");
+    assert.ok(allBlockedLog!.includes("3 TODO task(s)"));
+    assert.ok(allBlockedLog!.includes("all 3 are blocked"));
+  });
+
+  it("logs skip count when some tasks are blocked", () => {
+    const candidates = [
+      { id: "task1", name: "Task 1" },
+      { id: "task2", name: "Task 2" },
+    ];
+
+    const depsMap: Record<string, Array<{ id: string; name: string; status: string }>> = {
+      task1: [{ id: "dep1", name: "Dep 1", status: "to do" }],
+      task2: [],
+    };
+
+    const result = selectEligibleTask(candidates, (id) => depsMap[id] || []);
+    assert.ok(result.task !== null);
+    const skipLog = result.logs.find((l) => l.includes("Skipped"));
+    assert.ok(skipLog, "Should log skipped count");
+    assert.ok(skipLog!.includes("Skipped 1 task(s)"));
+  });
+
+  it("logs per-task skip reason with dependency details", () => {
+    const candidates = [
+      { id: "task1", name: "Build Feature" },
+      { id: "task2", name: "Task 2" },
+    ];
+
+    const depsMap: Record<string, Array<{ id: string; name: string; status: string }>> = {
+      task1: [
+        { id: "depA", name: "Design Doc", status: "in progress" },
+        { id: "depB", name: "API Review", status: "to do" },
+      ],
+      task2: [],
+    };
+
+    const result = selectEligibleTask(candidates, (id) => depsMap[id] || []);
+    const taskLog = result.logs.find((l) => l.includes("Build Feature"));
+    assert.ok(taskLog, "Should log the blocked task by name");
+    assert.ok(taskLog!.includes("2 unresolved dependency/ies"));
+    assert.ok(taskLog!.includes('"Design Doc"'));
+    assert.ok(taskLog!.includes('"API Review"'));
+    assert.ok(taskLog!.includes("status: in progress"));
+    assert.ok(taskLog!.includes("status: to do"));
+  });
+
+  it("handles task with no dependency data (eligible by default)", () => {
+    const candidates = [{ id: "task1", name: "Task 1" }];
+    const result = selectEligibleTask(candidates, () => []);
+    assert.ok(result.task !== null);
+    assert.equal(result.blockedCount, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Single-task mode: dependency behavior
+// Motivating task: CU-86afu000t
+//
+// When runSingleTask is invoked on a task with unresolved dependencies,
+// it logs a warning but proceeds anyway (explicit user intent overrides).
+// ---------------------------------------------------------------------------
+describe("single-task mode: dependency behavior", () => {
+  /**
+   * Replicate the single-task dependency check from runner.ts runSingleTask.
+   * Returns { proceed: true, warning?: string }.
+   */
+  function checkSingleTaskDeps(
+    unresolved: Array<{ id: string; name: string; status: string }>,
+  ): { proceed: boolean; warning: string | null } {
+    if (unresolved.length > 0) {
+      const depList = unresolved
+        .map((d) => `"${d.name}" (${d.id}, status: ${d.status})`)
+        .join(", ");
+      return {
+        proceed: true, // Always proceeds in single-task mode
+        warning: `Task has ${unresolved.length} unresolved dependency/ies: ${depList}. Proceeding anyway since this is a direct task run.`,
+      };
+    }
+    return { proceed: true, warning: null };
+  }
+
+  it("proceeds with warning when dependencies are unresolved", () => {
+    const unresolved = [
+      { id: "depA", name: "Setup Infrastructure", status: "in progress" },
+    ];
+    const result = checkSingleTaskDeps(unresolved);
+    assert.equal(result.proceed, true);
+    assert.ok(result.warning !== null);
+    assert.ok(result.warning!.includes("1 unresolved dependency/ies"));
+    assert.ok(result.warning!.includes("Proceeding anyway"));
+    assert.ok(result.warning!.includes("direct task run"));
+  });
+
+  it("proceeds without warning when no dependencies", () => {
+    const result = checkSingleTaskDeps([]);
+    assert.equal(result.proceed, true);
+    assert.equal(result.warning, null);
+  });
+
+  it("warning includes all unresolved dependency details", () => {
+    const unresolved = [
+      { id: "depA", name: "Task A", status: "to do" },
+      { id: "depB", name: "Task B", status: "blocked" },
+    ];
+    const result = checkSingleTaskDeps(unresolved);
+    assert.ok(result.warning!.includes("2 unresolved dependency/ies"));
+    assert.ok(result.warning!.includes('"Task A"'));
+    assert.ok(result.warning!.includes('"Task B"'));
+    assert.ok(result.warning!.includes("status: to do"));
+    assert.ok(result.warning!.includes("status: blocked"));
+  });
+
+  // Key difference from polling: single-task mode ALWAYS proceeds
+  it("always proceeds regardless of number of unresolved dependencies", () => {
+    const manyUnresolved = Array.from({ length: 5 }, (_, i) => ({
+      id: `dep${i}`,
+      name: `Dep ${i}`,
+      status: "to do",
+    }));
+    const result = checkSingleTaskDeps(manyUnresolved);
+    assert.equal(result.proceed, true);
+    assert.ok(result.warning!.includes("5 unresolved dependency/ies"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Dependency chain scenarios
+// Motivating task: CU-86afu000t
+//
+// Multi-level dependency chains: Task A → Task B → Task C.
+// Each level only checks its direct "waiting_on" dependencies.
+// ---------------------------------------------------------------------------
+describe("dependency chains and mixed statuses", () => {
+  it("task with mixed dependency statuses: only non-complete are unresolved", () => {
+    const deps = [
+      { id: "d1", name: "Completed Dep", status: "complete" },
+      { id: "d2", name: "In Progress Dep", status: "in progress" },
+      { id: "d3", name: "Complete Dep 2", status: "Complete" }, // different casing
+      { id: "d4", name: "Todo Dep", status: "to do" },
+    ];
+    const unresolved = resolveUnresolved(deps);
+    assert.equal(unresolved.length, 2);
+    assert.ok(unresolved.some((u) => u.id === "d2"));
+    assert.ok(unresolved.some((u) => u.id === "d4"));
+  });
+
+  it("non-standard statuses are treated as unresolved", () => {
+    // Only "complete" (case-insensitive) counts as resolved
+    const deps = [
+      { id: "d1", name: "Custom Status", status: "done" },
+      { id: "d2", name: "Another Custom", status: "finished" },
+      { id: "d3", name: "Approved", status: "approved" },
+    ];
+    const unresolved = resolveUnresolved(deps);
+    assert.equal(unresolved.length, 3, "Only 'complete' status resolves a dependency");
+  });
+
+  it("multi-level chain: only direct dependencies matter for eligibility", () => {
+    // Task A waits on B, B waits on C.
+    // When checking A, only B's status matters (not C's).
+    // If B is complete, A is eligible — even if C is not complete.
+    const taskADeps = [{ id: "taskB", name: "Task B", status: "complete" }];
+    const taskBDeps = [{ id: "taskC", name: "Task C", status: "to do" }];
+
+    const taskAUnresolved = resolveUnresolved(taskADeps);
+    const taskBUnresolved = resolveUnresolved(taskBDeps);
+
+    assert.equal(taskAUnresolved.length, 0, "Task A is eligible (B is complete)");
+    assert.equal(taskBUnresolved.length, 1, "Task B is blocked (C is not complete)");
+  });
+
+  it("polling selects first unblocked task in a dependency chain", () => {
+    // Three tasks: C has no deps, B waits on C (complete), A waits on B (in progress)
+    // The getUnresolved callback returns already-filtered unresolved deps,
+    // mirroring getUnresolvedDependencies which only returns non-complete ones.
+    const candidates = [
+      { id: "taskA", name: "Task A" },
+      { id: "taskB", name: "Task B" },
+      { id: "taskC", name: "Task C" },
+    ];
+
+    const depsMap: Record<string, Array<{ id: string; name: string; status: string }>> = {
+      taskA: [{ id: "taskB", name: "Task B", status: "in progress" }], // B not complete → blocked
+      taskB: [], // C is complete → no unresolved deps
+      taskC: [],
+    };
+
+    const result = selectEligibleTask(candidates, (id) => depsMap[id] || []);
+    // taskA is blocked (B is in progress), taskB is eligible (C is complete)
+    assert.equal(result.task!.id, "taskB");
+    assert.equal(result.blockedCount, 1);
+  });
+});
