@@ -164,6 +164,16 @@ Project context file used by Claude Code. Automatically included in every task p
 | `POLL_INTERVAL_MS` | `30000` (30s) | How often to poll ClickUp for new tasks. Minimum: 5000ms (5s). |
 | `RELAUNCH_INTERVAL_MS` | `600000` (10min) | How often to restart the runner process. Set to `0` to disable. Minimum when enabled: 60000ms (1min). See [Relaunch Behavior](#relaunch-behavior). |
 
+### Concurrency Limits
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `CLAWUP_MAX_OPEN_PRS` | `0` (unlimited) | Maximum number of open Clawup-created PRs (by branch convention) before the runner stops picking up new tasks. Set to `0` to disable. |
+| `CLAWUP_MAX_TASKS_PER_RUN` | `0` (unlimited) | Maximum number of tasks to process in a single runner session. Once reached, the runner continues polling but skips new work until relaunched. Set to `0` to disable. |
+| `CLAWUP_MIN_TASK_DELAY_MS` | `0` (no delay) | Minimum delay (in milliseconds) between starting consecutive tasks. Useful for rate-limiting automation. The first task in a session is never delayed. Set to `0` to disable. |
+
+When a limit is reached, Clawup logs which limit was hit and how to adjust it, then continues monitoring without picking up new work. Approved task merges are **not** affected by these limits.
+
 ### Claude Code
 
 | Variable | Default | Description |
@@ -242,6 +252,9 @@ Clawdup validates configuration at startup and fails fast with clear error messa
 - `CLAUDE_TIMEOUT_MS` must be >= 30000 (30s).
 - `CLAUDE_MAX_TURNS` must be between 1 and 500.
 - `BRANCH_PREFIX` must contain only alphanumeric characters, hyphens, and underscores.
+- `CLAWUP_MAX_OPEN_PRS` must be a non-negative integer (`0` = unlimited).
+- `CLAWUP_MAX_TASKS_PER_RUN` must be a non-negative integer (`0` = unlimited).
+- `CLAWUP_MIN_TASK_DELAY_MS` must be a non-negative integer (`0` = no delay).
 - `LOG_LEVEL` must be one of: `debug`, `info`, `warn`, `error`.
 
 ### Extended checks (`--check` flag)

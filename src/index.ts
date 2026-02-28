@@ -37,10 +37,11 @@ export {
   getPRReviewComments,
   getPRInlineComments,
   getPRCheckStatus,
+  countOpenClawupPRs,
 } from "./git-ops.js";
 export { runClaudeOnTask, runClaudeOnReviewFeedback, generateWorkSummary, scanOutputForSafetyIssues } from "./claude-worker.js";
 export { runPreflightChecks, runPreflightOrAbort, printPreflightResults } from "./preflight.js";
-export { STATUS, PROJECT_ROOT, GIT_ROOT, DRY_RUN } from "./config.js";
+export { STATUS, PROJECT_ROOT, GIT_ROOT, DRY_RUN, MAX_OPEN_PRS, MAX_TASKS_PER_RUN, MIN_TASK_DELAY_MS } from "./config.js";
 export { log, setLogLevel, setJsonOutput, isDebug, startTimer } from "./logger.js";
 export type { LogLevel, LogContext } from "./logger.js";
 export type {
