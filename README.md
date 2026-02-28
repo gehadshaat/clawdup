@@ -13,6 +13,8 @@ Works with **any** project — just install, configure, and let it cook.
 > **Want to understand the internals?** See the **[Architecture & State Flow](ARCHITECTURE.md)**.
 >
 > **Looking for the full configuration reference?** See **[CONFIGURATION.md](CONFIGURATION.md)**.
+>
+> **Using task dependencies?** See **[DEPENDENCIES.md](DEPENDENCIES.md)** for how Clawup handles sequencing.
 
 ## Quick Start
 

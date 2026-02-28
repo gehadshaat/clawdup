@@ -2,7 +2,7 @@
 
 This guide covers common Clawdup automation failures, how to diagnose them, and how to recover.
 
-> For a detailed understanding of how the pipeline works and how status transitions are managed, see the **[Architecture & State Flow](ARCHITECTURE.md)** document.
+> For a detailed understanding of how the pipeline works and how status transitions are managed, see the **[Architecture & State Flow](ARCHITECTURE.md)** document. For task dependency behavior, see **[DEPENDENCIES.md](DEPENDENCIES.md)**.
 
 ## Overview
 
@@ -224,6 +224,27 @@ Clawdup scans task content for known prompt injection patterns (e.g., "ignore pr
 3. Move back to **"to do"**
 
 **Note:** This is a safety feature. If a task legitimately contains phrases like "ignore previous" in its description (e.g., documenting prompt injection), consider rephrasing.
+
+---
+
+### Tasks Skipped Due to Dependencies
+
+**Symptoms:**
+- Log message: `Task "X" will NOT be worked on — it has N unresolved dependency/ies...`
+- Log message: `N TODO task(s) found but all N are blocked by unresolved dependencies`
+- Tasks remain in TODO status and are never picked up
+
+**What happens:**
+Clawup checks each TODO task's "waiting on" dependencies before processing it. If any dependency task has a status other than `complete`, the task is skipped.
+
+**Recovery:**
+1. Check which tasks are blocking — the log message lists their names, IDs, and current statuses.
+2. Ensure prerequisite tasks have been completed (status = `complete`, meaning their PR was merged).
+3. If a prerequisite is stuck in `in review` or `approved`, merge its PR or move it to `complete`.
+4. If a dependency was added by mistake, remove it in ClickUp (task settings > dependencies).
+5. To force-run a blocked task, use `clawdup --once <task-id>` which bypasses dependency checks with a warning.
+
+For the full dependency guide, see **[DEPENDENCIES.md](DEPENDENCIES.md)**.
 
 ---
 
