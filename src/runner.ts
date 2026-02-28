@@ -667,6 +667,43 @@ async function processTaskWithSubtasks(task: ClickUpTask): Promise<void> {
         await updateTaskStatus(taskId, STATUS.COMPLETED);
         return;
       }
+
+      // Merge base branch to pick up latest changes (returning task scenario)
+      const mergedCleanly = await mergeBaseBranch();
+      if (!mergedCleanly) {
+        const conflictedFiles = await getConflictedFiles();
+        log("info", `Branch has conflicts with base: ${conflictedFiles.join(", ")}`);
+
+        const conflictResult = await runClaudeOnConflictResolution(conflictedFiles, branchName);
+        if (!conflictResult.success) {
+          await abortMerge();
+          await notifyTaskCreator(
+            taskId,
+            task.creator,
+            `⚠️ Branch has merge conflicts that could not be resolved automatically.\n\n` +
+              `Conflicted files:\n${conflictedFiles.map((f) => `- \`${f}\``).join("\n")}\n\n` +
+              `Please resolve conflicts manually.\nPR: ${prUrl}`,
+          );
+          await updateTaskStatus(taskId, STATUS.BLOCKED);
+          return;
+        }
+
+        const remaining = await getConflictedFiles();
+        if (remaining.length > 0) {
+          await abortMerge();
+          await notifyTaskCreator(
+            taskId,
+            task.creator,
+            `⚠️ Some merge conflicts remain after automatic resolution:\n${remaining.map((f) => `- \`${f}\``).join("\n")}\n\nPlease resolve manually.\nPR: ${prUrl}`,
+          );
+          await updateTaskStatus(taskId, STATUS.BLOCKED);
+          return;
+        }
+
+        if (await hasChanges()) {
+          await commitMergeResolution();
+        }
+      }
     }
 
     await addTaskComment(
@@ -2014,19 +2051,19 @@ async function pollForTasks(): Promise<void> {
 
     processedTaskIds.add(task.id);
 
-    // Check if this is a returning task (already has a PR in its comments)
-    const existingPrUrl = await findPRUrlInComments(task.id);
-    if (existingPrUrl) {
-      await processReturningTask(task, existingPrUrl);
+    // Check if task has subtasks — subtask flow takes priority over returning-task flow
+    const taskWithSubtasks = await getTaskWithSubtasks(task.id);
+    const todoSubtasks = (taskWithSubtasks.subtasks || []).filter(
+      (s) => s.status?.status?.toLowerCase() === STATUS.TODO.toLowerCase(),
+    );
+    if (todoSubtasks.length > 0) {
+      log("info", `Task ${task.id} has ${todoSubtasks.length} TODO subtask(s). Processing as continuous PR.`);
+      await processTaskWithSubtasks(taskWithSubtasks);
     } else {
-      // Check if task has subtasks — if so, process as a continuous PR
-      const taskWithSubtasks = await getTaskWithSubtasks(task.id);
-      const todoSubtasks = (taskWithSubtasks.subtasks || []).filter(
-        (s) => s.status?.status?.toLowerCase() === STATUS.TODO.toLowerCase(),
-      );
-      if (todoSubtasks.length > 0) {
-        log("info", `Task ${task.id} has ${todoSubtasks.length} TODO subtask(s). Processing as continuous PR.`);
-        await processTaskWithSubtasks(taskWithSubtasks);
+      // No subtasks — check if this is a returning task (already has a PR in its comments)
+      const existingPrUrl = await findPRUrlInComments(task.id);
+      if (existingPrUrl) {
+        await processReturningTask(task, existingPrUrl);
       } else {
         await processTask(task);
       }
