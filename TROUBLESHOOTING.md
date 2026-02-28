@@ -316,6 +316,33 @@ When a task is moved to "approved", Clawdup tries to merge its PR. If the PR was
 
 ---
 
+### CI Failure Notifications
+
+**Symptoms:**
+- ClickUp comment: `🔴 CI failed for PR #{number}` with workflow/job/step details
+- Task may be moved to **"blocked"** (if merge was attempted) or **"in review"** (if auto-merge was skipped)
+
+**What happens:**
+When GitHub Actions workflows fail on a Clawup-managed PR, a structured diagnostic comment is posted to the corresponding ClickUp task. This happens in two ways:
+
+1. **From the runner:** When Clawup detects CI failures while attempting to merge an approved task, it posts detailed failure diagnostics including the workflow name, failing jobs/steps, and a link to the run.
+2. **From GitHub Actions:** The `ci-failure-notify.yml` workflow monitors CI runs on Clawup branches (`clickup/CU-*`) and automatically posts failure summaries to ClickUp when they complete with a failure status.
+
+Comments are deduplicated — the same workflow run URL won't produce multiple comments.
+
+**Recovery:**
+1. Click the workflow run link in the ClickUp comment to see the full logs
+2. Fix the failing step (build error, test failure, etc.)
+3. Push the fix to the PR branch
+4. Move the task back to **"approved"** to retry the merge
+
+**Configuration:**
+- The `ci-failure-notify.yml` workflow requires the `CLICKUP_API_TOKEN` repository secret
+- By default it monitors the "Dry Run" workflow — add more workflow names to the `workflows:` list to monitor additional CI pipelines
+- The workflow only triggers for branches matching the Clawup naming convention (`clickup/CU-*`)
+
+---
+
 ## Where to Look in Logs
 
 Clawdup logs all operations with timestamps and severity levels. Set `LOG_LEVEL=debug` in `.clawdup.env` for verbose output.

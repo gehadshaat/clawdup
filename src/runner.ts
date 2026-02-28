@@ -66,6 +66,7 @@ import {
   generateWorkSummary,
 } from "./claude-worker.js";
 import { runPreflightOrAbort } from "./preflight.js";
+import { postCIFailureDiagnostics } from "./ci-diagnostics.js";
 import type { ClickUpTask, ClaudeResult } from "./types.js";
 
 let isShuttingDown = false;
@@ -886,13 +887,17 @@ async function autoApproveAndMerge(
     if (checkStatus.failing.length > 0) {
       log("warn", `PR checks failed for task ${taskId}. Skipping auto-merge.`, { taskId });
       await updateTaskStatus(taskId, STATUS.IN_REVIEW);
-      await addTaskComment(
-        taskId,
-        `⚠️ Auto-merge skipped — CI checks failed:\n\n` +
-          checkStatus.failing.map((name) => `- \`${name}\``).join("\n") +
-          `\n\nPR: ${prUrl}\n\n` +
-          `Please investigate the failing checks. Move this task to "${STATUS.APPROVED}" to retry merge after fixes.`,
-      );
+      // Post detailed CI failure diagnostics, fall back to basic comment
+      const posted = await postCIFailureDiagnostics(taskId, prUrl);
+      if (!posted) {
+        await addTaskComment(
+          taskId,
+          `⚠️ Auto-merge skipped — CI checks failed:\n\n` +
+            checkStatus.failing.map((name) => `- \`${name}\``).join("\n") +
+            `\n\nPR: ${prUrl}\n\n` +
+            `Please investigate the failing checks. Move this task to "${STATUS.APPROVED}" to retry merge after fixes.`,
+        );
+      }
       return false;
     }
 
@@ -1025,14 +1030,18 @@ async function processApprovedTask(task: ClickUpTask): Promise<void> {
 
     if (checkStatus.failing.length > 0) {
       log("warn", `PR checks failed for task ${taskId}. Cannot merge.`);
-      await notifyTaskCreator(
-        taskId,
-        task.creator,
-        `⚠️ Cannot merge — CI checks failed:\n\n` +
-          checkStatus.failing.map((name) => `- \`${name}\``).join("\n") +
-          `\n\nPR: ${prUrl}\n\n` +
-          `Please investigate the failing checks. Move this task back to "${STATUS.APPROVED}" to retry merge after fixes.`,
-      );
+      // Post detailed CI failure diagnostics, fall back to basic comment
+      const posted = await postCIFailureDiagnostics(taskId, prUrl);
+      if (!posted) {
+        await notifyTaskCreator(
+          taskId,
+          task.creator,
+          `⚠️ Cannot merge — CI checks failed:\n\n` +
+            checkStatus.failing.map((name) => `- \`${name}\``).join("\n") +
+            `\n\nPR: ${prUrl}\n\n` +
+            `Please investigate the failing checks. Move this task back to "${STATUS.APPROVED}" to retry merge after fixes.`,
+        );
+      }
       await updateTaskStatus(taskId, STATUS.BLOCKED);
       return;
     }

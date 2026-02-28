@@ -667,6 +667,64 @@ export async function getPRCheckStatus(prUrl: string): Promise<{
 }
 
 /**
+ * Get the head branch name for a pull request.
+ */
+export async function getPRHeadBranch(prUrl: string): Promise<string> {
+  return gh("pr", "view", prUrl, "--json", "headRefName", "--jq", ".headRefName");
+}
+
+/**
+ * Get the PR number from a PR URL.
+ */
+export async function getPRNumber(prUrl: string): Promise<number> {
+  const result = await gh("pr", "view", prUrl, "--json", "number", "--jq", ".number");
+  return parseInt(result, 10);
+}
+
+/**
+ * Get the most recent failed workflow runs for a branch.
+ * Returns run metadata including ID, name, URL, and conclusion.
+ */
+export async function getFailedWorkflowRuns(
+  branchName: string,
+  limit: number = 1,
+): Promise<Array<{ databaseId: number; name: string; url: string; conclusion: string }>> {
+  try {
+    const result = await gh(
+      "run", "list",
+      "--branch", branchName,
+      "--status", "failure",
+      "--limit", String(limit),
+      "--json", "databaseId,name,url,conclusion",
+    );
+    if (!result || result === "[]") return [];
+    return JSON.parse(result) as Array<{ databaseId: number; name: string; url: string; conclusion: string }>;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Get job details for a workflow run, including step-level info.
+ * Only returns jobs that failed.
+ */
+export async function getWorkflowRunJobs(
+  runId: number,
+): Promise<Array<{ name: string; conclusion: string; steps: Array<{ name: string; conclusion: string }> }>> {
+  try {
+    const result = await gh(
+      "run", "view", String(runId),
+      "--json", "jobs",
+      "--jq", '[.jobs[] | select(.conclusion == "failure") | {name, conclusion, steps: [.steps[] | {name, conclusion}]}]',
+    );
+    if (!result || result === "[]") return [];
+    return JSON.parse(result) as Array<{ name: string; conclusion: string; steps: Array<{ name: string; conclusion: string }> }>;
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Attempt to merge the base branch into the current branch.
  * Returns true if merge completed cleanly, false if there are conflicts.
  */
