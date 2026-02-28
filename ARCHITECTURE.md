@@ -2,7 +2,7 @@
 
 This document provides an authoritative overview of how Clawdup works — how it discovers tasks, sequences git operations, manages status transitions, and handles restarts.
 
-> For setup instructions, see [GUIDE.md](GUIDE.md). For configuration reference, see [CONFIGURATION.md](CONFIGURATION.md). For failure recovery, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+> For setup instructions, see [GUIDE.md](GUIDE.md). For configuration reference, see [CONFIGURATION.md](CONFIGURATION.md). For failure recovery, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md). For task dependency handling, see [DEPENDENCIES.md](DEPENDENCIES.md).
 
 ---
 
@@ -108,7 +108,7 @@ Tasks are sorted by:
 1. **Priority** (ascending ID: 1=urgent, 2=high, 3=normal, 4=low, 99=none)
 2. **Creation date** (oldest first, for FIFO within same priority)
 
-The first task in the sorted list that hasn't been processed in the current session is selected.
+The first task in the sorted list that hasn't been processed in the current session is selected. Tasks with unresolved dependencies are skipped — see [DEPENDENCIES.md](DEPENDENCIES.md) for details.
 
 ### Per-Session Deduplication
 
@@ -210,7 +210,8 @@ pollForTasks()
   │
   ├─ 2. Fetch tasks with TODO status
   │     └─ Filter out already-processed tasks (processedTaskIds)
-  │     └─ Pick first task (highest priority, oldest)
+  │     └─ Check dependencies for each candidate (skip if unresolved)
+  │     └─ Pick first eligible task (highest priority, oldest)
   │           │
   │           ├─ Has existing PR URL in comments?
   │           │   └─ YES → processReturningTask() (review redo)
