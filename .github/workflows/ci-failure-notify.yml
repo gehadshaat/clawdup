@@ -1,0 +1,109 @@
+# Posts CI failure summaries to ClickUp when GitHub Actions workflows fail
+# on Clawup-managed branches (clickup/CU-{taskId}-*).
+#
+# Required repository secret:
+#   CLICKUP_API_TOKEN - ClickUp API token with comment permissions
+#
+# This workflow monitors the "Dry Run" workflow. Add more workflow names
+# to the list below to monitor additional CI pipelines.
+
+name: CI Failure Notify
+
+on:
+  workflow_run:
+    workflows: ["Dry Run"]
+    types: [completed]
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: read
+
+jobs:
+  notify-clickup:
+    name: Notify ClickUp on CI Failure
+    runs-on: ubuntu-latest
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      startsWith(github.event.workflow_run.head_branch, 'clickup/CU-')
+
+    steps:
+      - name: Post CI failure summary to ClickUp
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLICKUP_API_TOKEN: ${{ secrets.CLICKUP_API_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          BRANCH="${{ github.event.workflow_run.head_branch }}"
+          RUN_ID="${{ github.event.workflow_run.id }}"
+          RUN_URL="${{ github.event.workflow_run.html_url }}"
+          WORKFLOW_NAME="${{ github.event.workflow_run.name }}"
+
+          # Extract task ID from branch name (clickup/CU-{taskId}-{slug})
+          TASK_ID=$(echo "$BRANCH" | sed -n 's|.*/CU-\([a-zA-Z0-9]*\)-.*|\1|p')
+          if [ -z "$TASK_ID" ]; then
+            echo "Could not extract task ID from branch: $BRANCH"
+            exit 0
+          fi
+
+          if [ -z "$CLICKUP_API_TOKEN" ]; then
+            echo "CLICKUP_API_TOKEN secret not configured. Skipping notification."
+            exit 0
+          fi
+
+          echo "Task ID: $TASK_ID"
+          echo "Branch: $BRANCH"
+          echo "Workflow: $WORKFLOW_NAME"
+
+          # Get PR number and URL for this branch
+          PR_NUMBER="unknown"
+          PR_URL="unknown"
+          PR_JSON=$(gh pr list --repo "${{ github.repository }}" \
+            --head "$BRANCH" --json number,url --limit 1 2>/dev/null || echo "[]")
+          PR_NUMBER=$(echo "$PR_JSON" | jq -r '.[0].number // "unknown"')
+          PR_URL=$(echo "$PR_JSON" | jq -r '.[0].url // "unknown"')
+
+          # Get failing job names
+          FAILING_JOBS=$(gh api "repos/${{ github.repository }}/actions/runs/${RUN_ID}/jobs" \
+            --jq '[.jobs[] | select(.conclusion == "failure") | .name] | join(", ")' 2>/dev/null || echo "unknown")
+
+          # Get failing steps per job
+          FAILING_DETAILS=$(gh api "repos/${{ github.repository }}/actions/runs/${RUN_ID}/jobs" \
+            --jq '[.jobs[] | select(.conclusion == "failure") | "  - " + .name + "\n" + ([.steps[] | select(.conclusion == "failure") | "    - Step: " + .name] | join("\n"))] | join("\n")' 2>/dev/null || echo "")
+
+          # Check for existing comment with same run URL (deduplication)
+          COMMENTS_JSON=$(curl -sf \
+            -H "Authorization: $CLICKUP_API_TOKEN" \
+            "https://api.clickup.com/api/v2/task/${TASK_ID}/comment" 2>/dev/null || echo '{"comments":[]}')
+          DUPLICATE_COUNT=$(echo "$COMMENTS_JSON" | \
+            jq -r "[.comments[].comment_text // \"\" | select(contains(\"$RUN_URL\"))] | length" 2>/dev/null || echo "0")
+
+          if [ "$DUPLICATE_COUNT" -gt 0 ]; then
+            echo "CI failure comment already exists for run $RUN_URL. Skipping."
+            exit 0
+          fi
+
+          # Build the comment
+          COMMENT="🔴 CI failed for PR #${PR_NUMBER}
+
+          PR: ${PR_URL}
+          Workflow: ${WORKFLOW_NAME}
+          Run: ${RUN_URL}
+
+          Failing jobs:
+          ${FAILING_DETAILS:-  - ${FAILING_JOBS}}
+
+          See TROUBLESHOOTING.md for common CI failure recovery steps."
+
+          # Remove leading whitespace from heredoc-style indentation
+          COMMENT=$(echo "$COMMENT" | sed 's/^          //')
+
+          # Post comment to ClickUp
+          curl -sf -X POST \
+            -H "Authorization: $CLICKUP_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg text "$COMMENT" '{comment_text: $text, notify_all: true}')" \
+            "https://api.clickup.com/api/v2/task/${TASK_ID}/comment"
+
+          echo "Posted CI failure notification to ClickUp task $TASK_ID"

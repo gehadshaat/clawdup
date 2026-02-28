@@ -37,7 +37,19 @@ export {
   getPRReviewComments,
   getPRInlineComments,
   getPRCheckStatus,
+  getPRHeadBranch,
+  getPRNumber,
+  getFailedWorkflowRuns,
+  getWorkflowRunJobs,
 } from "./git-ops.js";
+export {
+  extractTaskIdFromBranch,
+  isClawupBranch,
+  getCIFailureDetails,
+  formatCIFailureComment,
+  postCIFailureDiagnostics,
+} from "./ci-diagnostics.js";
+export type { CIFailureInfo } from "./ci-diagnostics.js";
 export { runClaudeOnTask, runClaudeOnReviewFeedback, generateWorkSummary, scanOutputForSafetyIssues } from "./claude-worker.js";
 export { runPreflightChecks, runPreflightOrAbort, printPreflightResults } from "./preflight.js";
 export { STATUS, PROJECT_ROOT, GIT_ROOT, DRY_RUN } from "./config.js";
