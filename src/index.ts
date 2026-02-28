@@ -3,6 +3,7 @@ export { startRunner, runSingleTask } from "./runner.js";
 export {
   getTasksByStatus,
   getTask,
+  getTaskWithSubtasks,
   updateTaskStatus,
   addTaskComment,
   addTaskCommentForUser,
@@ -12,6 +13,7 @@ export {
   getNewReviewFeedback,
   getCommentText,
   formatTaskForClaude,
+  formatSubtaskForClaude,
   slugify,
   isValidTaskId,
   detectInjectionPatterns,

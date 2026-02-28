@@ -6,11 +6,14 @@ import { POLL_INTERVAL_MS, RELAUNCH_INTERVAL_MS, STATUS, BASE_BRANCH, PROJECT_RO
 import { log, startTimer } from "./logger.js";
 import {
   getTasksByStatus,
+  getTask,
+  getTaskWithSubtasks,
   getTaskComments,
   updateTaskStatus,
   addTaskComment,
   notifyTaskCreator,
   formatTaskForClaude,
+  formatSubtaskForClaude,
   slugify,
   isValidTaskId,
   validateStatuses,
@@ -589,6 +592,372 @@ async function processTask(task: ClickUpTask): Promise<void> {
     // Pick up any follow-up tasks Claude created
     await processTodoFile();
   }
+}
+
+/**
+ * Process a task that has subtasks by creating a single PR with one commit per subtask.
+ * Each TODO subtask is implemented sequentially, and all commits are pushed together.
+ */
+async function processTaskWithSubtasks(task: ClickUpTask): Promise<void> {
+  if (DRY_RUN) {
+    await dryRunProcessTaskWithSubtasks(task);
+    return;
+  }
+
+  const taskId = task.id;
+  const taskName = task.name;
+  const slug = slugify(taskName);
+  let branchName: string | null = null;
+  let prUrl: string | null = null;
+  const timer = startTimer();
+
+  const allSubtasks = task.subtasks || [];
+  const todoSubtasks = allSubtasks.filter(
+    (s) => s.status?.status?.toLowerCase() === STATUS.TODO.toLowerCase(),
+  );
+
+  log("info", `\n${"=".repeat(60)}`);
+  log("info", `Processing task with ${todoSubtasks.length} subtask(s): ${taskName} (${taskId})`, { taskId });
+  log("info", `URL: ${task.url}`);
+  log("info", `${"=".repeat(60)}\n`);
+
+  if (!isValidTaskId(taskId)) {
+    log("error", `Invalid task ID format: ${taskId}. Skipping.`);
+    return;
+  }
+
+  try {
+    // Step 1: Move parent task to "In Progress"
+    await updateTaskStatus(taskId, STATUS.IN_PROGRESS);
+
+    // Step 2: Create a feature branch from the latest base branch
+    branchName = await createTaskBranch(taskId, slug);
+    log("info", `Working on branch: ${branchName}`);
+
+    // Step 3: Create a PR immediately so work is visible from the start
+    prUrl = await findExistingPR(branchName);
+
+    if (!prUrl) {
+      await createEmptyCommit(
+        `[CU-${taskId}] Starting work on: ${taskName}`,
+      );
+      await pushBranch(branchName);
+      prUrl = await createPullRequest({
+        title: `[CU-${taskId}] ${taskName}`,
+        body:
+          `🤖 Automation is working on this task with ${todoSubtasks.length} subtask(s).\n\n` +
+          `**Task:** ${task.url}\n\n` +
+          `Subtasks to implement:\n${todoSubtasks.map((s) => `- [ ] ${s.name}`).join("\n")}\n\n` +
+          `This PR will be updated as each subtask is completed.`,
+        branchName,
+        baseBranch: BASE_BRANCH,
+        draft: true,
+      });
+      log("info", `Draft PR created: ${prUrl}`);
+    } else {
+      log("info", `Existing PR found: ${prUrl}`);
+
+      const prState = await getPRState(prUrl);
+      if (prState === "merged") {
+        log("info", `PR already merged for task ${taskId}. Marking complete.`);
+        await addTaskComment(
+          taskId,
+          `✅ The associated PR was already merged: ${prUrl}\n\nMoving task to complete.`,
+        );
+        await updateTaskStatus(taskId, STATUS.COMPLETED);
+        return;
+      }
+    }
+
+    await addTaskComment(
+      taskId,
+      `🤖 Automation picked up this task and is now working on it.\n\n` +
+        `PR: ${prUrl}\n\n` +
+        `Subtasks to implement:\n${todoSubtasks.map((s) => `- ${s.name}`).join("\n")}`,
+    );
+
+    // Step 4: Process each subtask as a separate commit
+    const headBeforeSubtasks = await getHeadHash();
+    const subtaskResults: Array<{
+      subtask: ClickUpTask;
+      success: boolean;
+      error?: string;
+    }> = [];
+
+    for (const subtaskStub of todoSubtasks) {
+      if (isShuttingDown) break;
+
+      // Fetch full subtask details
+      const subtask = await getTask(subtaskStub.id);
+      const subtaskId = subtask.id;
+      const subtaskName = subtask.name;
+
+      log("info", `\n--- Subtask: ${subtaskName} (${subtaskId}) ---`);
+
+      if (!isValidTaskId(subtaskId)) {
+        log("error", `Invalid subtask ID format: ${subtaskId}. Skipping.`);
+        subtaskResults.push({ subtask, success: false, error: "Invalid subtask ID" });
+        continue;
+      }
+
+      try {
+        // Move subtask to IN_PROGRESS
+        await updateTaskStatus(subtaskId, STATUS.IN_PROGRESS);
+
+        // Format subtask with parent context and run Claude
+        const headBefore = await getHeadHash();
+        const subtaskComments = await getTaskComments(subtaskId);
+        const subtaskPrompt = formatSubtaskForClaude(task, subtask, allSubtasks, subtaskComments);
+        const result = await runClaudeOnTask(subtaskPrompt, subtaskId, { interactive: interactiveMode });
+        const headAfter = await getHeadHash();
+        const claudeCommitted = headBefore !== headAfter;
+
+        // Process any follow-up tasks from this subtask
+        await processTodoFile();
+
+        if (result.needsInput) {
+          log("info", `Subtask ${subtaskId} needs more input`);
+          const reason = extractNeedsInputReason(result.output);
+          await notifyTaskCreator(
+            subtaskId,
+            subtask.creator,
+            `🔍 Subtask needs more information:\n\n${reason}`,
+          );
+          await updateTaskStatus(subtaskId, STATUS.REQUIRE_INPUT);
+          subtaskResults.push({ subtask, success: false, error: `Needs input: ${reason}` });
+          continue;
+        }
+
+        if (!result.success) {
+          log("error", `Subtask ${subtaskId} failed: ${result.error}`);
+          // Commit partial changes if any
+          const uncommitted = await hasChanges();
+          if (uncommitted) {
+            await commitChanges(`[CU-${subtaskId}] WIP: ${subtaskName} (partial - automation error)`);
+          }
+          await updateTaskStatus(subtaskId, STATUS.BLOCKED);
+          subtaskResults.push({ subtask, success: false, error: result.error });
+          continue;
+        }
+
+        // Commit if Claude didn't
+        const uncommittedChanges = await hasChanges();
+        if (uncommittedChanges) {
+          log("warn", "Claude left uncommitted changes — committing as fallback");
+          await commitChanges(`[CU-${subtaskId}] ${subtaskName}`);
+        } else if (!claudeCommitted) {
+          log("warn", `Claude completed subtask ${subtaskId} but made no changes`);
+          await updateTaskStatus(subtaskId, STATUS.COMPLETED);
+          await addTaskComment(subtaskId, `✅ Subtask completed (no code changes needed). PR: ${prUrl}`);
+          subtaskResults.push({ subtask, success: true });
+          continue;
+        }
+
+        // Mark subtask as complete
+        await updateTaskStatus(subtaskId, STATUS.COMPLETED);
+        await addTaskComment(subtaskId, `✅ Subtask implemented as part of PR: ${prUrl}`);
+        subtaskResults.push({ subtask, success: true });
+
+        log("info", `Subtask ${subtaskId} completed successfully`);
+      } catch (err) {
+        log("error", `Error processing subtask ${subtaskId}: ${(err as Error).message}`);
+        try {
+          await updateTaskStatus(subtaskId, STATUS.BLOCKED);
+        } catch {
+          log("debug", `Could not update subtask ${subtaskId} status`);
+        }
+        subtaskResults.push({ subtask, success: false, error: (err as Error).message });
+      }
+    }
+
+    // Step 5: Check if any commits were produced
+    const headAfterSubtasks = await getHeadHash();
+    const anySubtaskCommitted = headBeforeSubtasks !== headAfterSubtasks;
+    const successCount = subtaskResults.filter((r) => r.success).length;
+    const failCount = subtaskResults.filter((r) => !r.success).length;
+
+    if (!anySubtaskCommitted) {
+      log("warn", `No commits produced for task ${taskId} with subtasks`);
+      await notifyTaskCreator(
+        taskId,
+        task.creator,
+        `⚠️ Automation processed ${todoSubtasks.length} subtask(s) but no code changes were produced.\n\n` +
+          `This may mean the subtask descriptions weren't actionable.\n\n` +
+          `Please review and provide more specific instructions if needed.`,
+      );
+      await updateTaskStatus(taskId, STATUS.REQUIRE_INPUT);
+      await closePRAndCleanup(prUrl, branchName);
+      return;
+    }
+
+    // Step 6: Push all commits and update PR
+    await pushBranch(branchName);
+
+    const { stat, files } = await getChangesSummary();
+    const subtaskSummary = subtaskResults
+      .map((r) => `- ${r.success ? "✅" : "❌"} ${r.subtask.name}${r.error ? `: ${r.error}` : ""}`)
+      .join("\n");
+
+    const prBody = [
+      `## Summary`,
+      `Automated implementation for ClickUp task: [${task.name}](${task.url})`,
+      ``,
+      `## Subtasks (${successCount}/${subtaskResults.length} completed)`,
+      subtaskSummary,
+      ``,
+      ...(task.text_content ? [`## Task Description`, task.text_content.slice(0, 500), ...(task.text_content.length > 500 ? ["..."] : []), ``] : []),
+      ...(files.length > 0 ? [`## Files Changed`, ...files.map((f) => `- \`${f}\``), ``] : []),
+      `## Test Plan`,
+      `- [ ] Review the changes manually`,
+      `- [ ] Verify build succeeds`,
+      `- [ ] Run tests`,
+      `- [ ] Visual review if applicable`,
+      ``,
+      `---`,
+      `*Automated by [clawdup](https://github.com)*`,
+      `ClickUp Task: ${task.url}`,
+    ].join("\n");
+
+    await updatePullRequest(prUrl, { body: prBody });
+    await markPRReady(prUrl);
+
+    // Step 7: Update parent task status
+    const workSummary = [
+      `**Subtasks completed:** ${successCount}/${subtaskResults.length}`,
+      ``,
+      subtaskSummary,
+      ``,
+      ...(stat ? [`**Diff stats:**\n\`\`\`\n${stat}\n\`\`\``] : []),
+    ].join("\n");
+
+    if (failCount > 0 && successCount === 0) {
+      // All subtasks failed
+      await updateTaskStatus(taskId, STATUS.BLOCKED);
+      await addTaskComment(
+        taskId,
+        `❌ Automation could not complete any subtasks.\n\n${workSummary}\n\nPR: ${prUrl}`,
+      );
+    } else if (AUTO_APPROVE && failCount === 0) {
+      await autoApproveAndMerge(task, prUrl, branchName, workSummary);
+    } else {
+      await updateTaskStatus(taskId, STATUS.IN_REVIEW);
+      await addTaskComment(
+        taskId,
+        `${failCount > 0 ? "⚠️" : "✅"} Automation completed! The pull request is ready for review:\n\n` +
+          `${prUrl}\n\n` +
+          `Branch: \`${branchName}\`\n\n` +
+          `${workSummary}\n\n` +
+          `Please review the PR. When ready, move this task to "${STATUS.APPROVED}" and the automation will merge it.`,
+      );
+    }
+
+    log("info", `Task ${taskId} with subtasks completed: ${successCount}/${subtaskResults.length} subtasks done. PR: ${prUrl}`, { taskId, elapsed: timer() });
+  } catch (err) {
+    log("error", `Error processing task ${taskId} with subtasks: ${(err as Error).message}`, { taskId, elapsed: timer() });
+
+    try {
+      await notifyTaskCreator(
+        taskId,
+        task.creator,
+        `❌ Automation encountered an error:\n\n\`\`\`\n${(err as Error).message}\n\`\`\`\n\n` +
+          `The task has been moved to "Blocked". Please investigate and retry.\n\n` +
+          (prUrl ? `PR: ${prUrl}` : ""),
+      );
+      await updateTaskStatus(taskId, STATUS.BLOCKED);
+    } catch (commentErr) {
+      log(
+        "error",
+        `Failed to update task status: ${(commentErr as Error).message}`,
+      );
+    }
+
+    if (branchName) {
+      if (prUrl) {
+        try {
+          await closePullRequest(prUrl);
+        } catch {
+          log("debug", "Could not close PR during error cleanup");
+        }
+      }
+      await cleanupBranch(branchName);
+    }
+  } finally {
+    try {
+      await returnToBaseBranch();
+    } catch {
+      log("warn", "Could not return to base branch");
+    }
+    await processTodoFile();
+  }
+}
+
+/**
+ * Simulate processing a task with subtasks in dry-run mode.
+ */
+async function dryRunProcessTaskWithSubtasks(task: ClickUpTask): Promise<void> {
+  const taskId = task.id;
+  const slug = slugify(task.name);
+  const branchName = `${BRANCH_PREFIX}/CU-${taskId}-${slug}`;
+  const allSubtasks = task.subtasks || [];
+  const todoSubtasks = allSubtasks.filter(
+    (s) => s.status?.status?.toLowerCase() === STATUS.TODO.toLowerCase(),
+  );
+
+  log("info", `\n${"=".repeat(60)}`);
+  log("info", `[DRY RUN] Processing task with ${todoSubtasks.length} subtask(s): ${task.name} (${taskId})`);
+  log("info", `[DRY RUN] URL: ${task.url}`);
+  log("info", `${"=".repeat(60)}\n`);
+
+  if (!isValidTaskId(taskId)) {
+    log("error", `[DRY RUN] Invalid task ID format: ${taskId}. Would skip.`);
+    return;
+  }
+
+  const actions: string[] = [];
+
+  actions.push(`ClickUp: Update parent task ${taskId} status → "${STATUS.IN_PROGRESS}"`);
+
+  const existingBranch = await findBranchForTask(taskId);
+  if (existingBranch) {
+    actions.push(`Git: Checkout existing branch "${existingBranch}"`);
+  } else {
+    actions.push(`Git: Create branch "${branchName}" from "${BASE_BRANCH}"`);
+  }
+
+  const existingPrUrl = await findPRUrlInComments(taskId);
+  if (existingPrUrl) {
+    actions.push(`GitHub: Use existing PR: ${existingPrUrl}`);
+  } else {
+    actions.push(`Git: Create empty commit and push branch`);
+    actions.push(`GitHub: Create draft PR "[CU-${taskId}] ${task.name}"`);
+  }
+
+  actions.push(`ClickUp: Add comment to parent task with PR link and subtask list`);
+
+  for (const subtask of todoSubtasks) {
+    actions.push(`--- Subtask: ${subtask.name} (${subtask.id}) ---`);
+    actions.push(`  ClickUp: Update subtask ${subtask.id} status → "${STATUS.IN_PROGRESS}"`);
+    actions.push(`  Claude: Run Claude Code on subtask (commit as [CU-${subtask.id}])`);
+    actions.push(`  ClickUp: Update subtask ${subtask.id} status → "${STATUS.COMPLETED}"`);
+  }
+
+  actions.push(`Git: Push all commits to branch`);
+  actions.push(`GitHub: Update PR body with subtask results, mark as ready for review`);
+
+  if (AUTO_APPROVE) {
+    actions.push(`GitHub: Check CI/test status (block merge if failing)`);
+    actions.push(`GitHub: Auto-merge PR (squash)`);
+    actions.push(`ClickUp: Update parent task status → "${STATUS.COMPLETED}"`);
+  } else {
+    actions.push(`ClickUp: Update parent task status → "${STATUS.IN_REVIEW}"`);
+    actions.push(`ClickUp: Add comment with work summary`);
+  }
+
+  log("info", `[DRY RUN] Planned actions:`);
+  for (let i = 0; i < actions.length; i++) {
+    log("info", `[DRY RUN]   ${i + 1}. ${actions[i]}`);
+  }
+  log("info", `\n[DRY RUN] Task with subtasks simulation complete.\n`);
 }
 
 /**
@@ -1650,7 +2019,17 @@ async function pollForTasks(): Promise<void> {
     if (existingPrUrl) {
       await processReturningTask(task, existingPrUrl);
     } else {
-      await processTask(task);
+      // Check if task has subtasks — if so, process as a continuous PR
+      const taskWithSubtasks = await getTaskWithSubtasks(task.id);
+      const todoSubtasks = (taskWithSubtasks.subtasks || []).filter(
+        (s) => s.status?.status?.toLowerCase() === STATUS.TODO.toLowerCase(),
+      );
+      if (todoSubtasks.length > 0) {
+        log("info", `Task ${task.id} has ${todoSubtasks.length} TODO subtask(s). Processing as continuous PR.`);
+        await processTaskWithSubtasks(taskWithSubtasks);
+      } else {
+        await processTask(task);
+      }
     }
   } catch (err) {
     log("error", `Polling error: ${(err as Error).message}`);
@@ -1677,8 +2056,7 @@ export async function runSingleTask(taskId: string, options?: { interactive?: bo
     // Run preflight checks before processing the task
     await runPreflightOrAbort();
 
-    const { getTask } = await import("./clickup-api.js");
-    const task = await getTask(taskId);
+    const task = await getTaskWithSubtasks(taskId);
 
     // Warn about unresolved dependencies (but still proceed since this is an explicit single-task run)
     try {
@@ -1696,7 +2074,16 @@ export async function runSingleTask(taskId: string, options?: { interactive?: bo
       log("warn", `Could not check dependencies: ${(err as Error).message}`);
     }
 
-    await processTask(task);
+    // Check if task has subtasks — if so, process as a continuous PR
+    const todoSubtasks = (task.subtasks || []).filter(
+      (s) => s.status?.status?.toLowerCase() === STATUS.TODO.toLowerCase(),
+    );
+    if (todoSubtasks.length > 0) {
+      log("info", `Task ${taskId} has ${todoSubtasks.length} TODO subtask(s). Processing as continuous PR.`);
+      await processTaskWithSubtasks(task);
+    } else {
+      await processTask(task);
+    }
   } finally {
     if (!DRY_RUN) releaseLock();
   }

@@ -175,6 +175,13 @@ export async function getTask(taskId: string): Promise<ClickUpTask> {
 }
 
 /**
+ * Get a single task by ID with its subtasks included.
+ */
+export async function getTaskWithSubtasks(taskId: string): Promise<ClickUpTask> {
+  return request<ClickUpTask>("GET", `/task/${taskId}?include_subtasks=true`);
+}
+
+/**
  * Get dependencies for a task.
  * Returns both `dependencies` (tasks this task blocks) and `waiting_on` (tasks this task waits on).
  */
@@ -516,6 +523,124 @@ export function formatTaskForClaude(
   }
 
   // Include comments if any (limited to most recent N)
+  if (comments && comments.length > 0) {
+    const recentComments = comments.slice(-MAX_COMMENTS_COUNT);
+    parts.push("## Comments");
+    if (comments.length > MAX_COMMENTS_COUNT) {
+      parts.push(`(showing ${MAX_COMMENTS_COUNT} most recent of ${comments.length} comments)`);
+    }
+    for (const comment of recentComments) {
+      const text = getCommentText(comment);
+      if (!text.trim()) continue;
+      const user = comment.user?.username || "Unknown";
+      const date = comment.date
+        ? new Date(parseInt(comment.date)).toISOString().split("T")[0]
+        : "";
+      const header = date ? `**${user}** (${date}):` : `**${user}**:`;
+      parts.push(`${header}\n${truncate(text, MAX_COMMENT_LENGTH)}\n`);
+    }
+  }
+
+  return parts.join("\n");
+}
+
+/**
+ * Format a subtask for Claude, including parent task context.
+ * Used when processing tasks that have subtasks, where each subtask
+ * is implemented as a separate commit within a single PR.
+ */
+export function formatSubtaskForClaude(
+  parentTask: ClickUpTask,
+  subtask: ClickUpTask,
+  allSubtasks: ClickUpTask[],
+  comments?: ClickUpComment[],
+): string {
+  // Check for injection patterns in all untrusted content
+  const allContent = [
+    parentTask.name,
+    parentTask.text_content || parentTask.description || "",
+    subtask.name,
+    subtask.text_content || subtask.description || "",
+    ...(comments || []).map((c) => getCommentText(c)),
+  ].join("\n");
+
+  const injectionMatches = detectInjectionPatterns(allContent);
+  if (injectionMatches.length > 0) {
+    log(
+      "warn",
+      `Potential prompt injection detected in subtask ${subtask.id}: ${injectionMatches.join(", ")}`,
+    );
+  }
+
+  const parts: string[] = [];
+
+  // Parent task context
+  parts.push(`# Parent Task: ${truncate(parentTask.name, 200)}`);
+  parts.push(`Parent Task ID: ${parentTask.id}`);
+  parts.push(`Parent URL: ${parentTask.url}`);
+  parts.push("");
+
+  if (parentTask.text_content) {
+    parts.push("## Parent Task Description");
+    parts.push(truncate(parentTask.text_content, MAX_DESCRIPTION_LENGTH));
+    parts.push("");
+  } else if (parentTask.description) {
+    parts.push("## Parent Task Description");
+    parts.push(truncate(parentTask.description, MAX_DESCRIPTION_LENGTH));
+    parts.push("");
+  }
+
+  // All subtasks for context
+  if (allSubtasks.length > 0) {
+    parts.push("## All Subtasks");
+    for (const sub of allSubtasks) {
+      const isCurrent = sub.id === subtask.id;
+      const status = sub.status?.status || "unknown";
+      const prefix = isCurrent ? "→" : " ";
+      parts.push(`${prefix} [${status}] ${truncate(sub.name, MAX_CHECKLIST_ITEM_LENGTH)}${isCurrent ? " ← (implementing this one)" : ""}`);
+    }
+    parts.push("");
+  }
+
+  // The specific subtask to implement
+  parts.push(`# Subtask to Implement: ${truncate(subtask.name, 200)}`);
+  parts.push(`Task ID: ${subtask.id}`);
+  parts.push(`URL: ${subtask.url}`);
+
+  if (subtask.priority) {
+    parts.push(`Priority: ${subtask.priority.priority}`);
+  }
+
+  if (subtask.tags && subtask.tags.length > 0) {
+    parts.push(`Tags: ${subtask.tags.map((t) => t.name).join(", ")}`);
+  }
+
+  parts.push("");
+
+  if (subtask.text_content) {
+    parts.push("## Description");
+    parts.push(truncate(subtask.text_content, MAX_DESCRIPTION_LENGTH));
+    parts.push("");
+  } else if (subtask.description) {
+    parts.push("## Description");
+    parts.push(truncate(subtask.description, MAX_DESCRIPTION_LENGTH));
+    parts.push("");
+  }
+
+  // Checklist items
+  if (subtask.checklists && subtask.checklists.length > 0) {
+    parts.push("## Checklist");
+    for (const checklist of subtask.checklists) {
+      parts.push(`### ${truncate(checklist.name, MAX_CHECKLIST_ITEM_LENGTH)}`);
+      for (const item of checklist.items || []) {
+        const check = item.resolved ? "[x]" : "[ ]";
+        parts.push(`- ${check} ${truncate(item.name, MAX_CHECKLIST_ITEM_LENGTH)}`);
+      }
+    }
+    parts.push("");
+  }
+
+  // Comments on the subtask
   if (comments && comments.length > 0) {
     const recentComments = comments.slice(-MAX_COMMENTS_COUNT);
     parts.push("## Comments");
