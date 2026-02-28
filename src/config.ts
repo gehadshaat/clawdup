@@ -212,6 +212,25 @@ export const AUTO_APPROVE: boolean = (process.env.AUTO_APPROVE || "").toLowerCas
 // Dry-run mode: simulate the full automation flow without making any changes
 export const DRY_RUN: boolean = (process.env.DRY_RUN || "").toLowerCase() === "true";
 
+// Concurrency limits
+export const MAX_OPEN_PRS: number = parsePositiveInt(
+  "CLAWUP_MAX_OPEN_PRS",
+  process.env.CLAWUP_MAX_OPEN_PRS,
+  0, // 0 = no limit
+);
+
+export const MAX_TASKS_PER_RUN: number = parsePositiveInt(
+  "CLAWUP_MAX_TASKS_PER_RUN",
+  process.env.CLAWUP_MAX_TASKS_PER_RUN,
+  0, // 0 = no limit
+);
+
+export const MIN_TASK_DELAY_MS: number = parsePositiveInt(
+  "CLAWUP_MIN_TASK_DELAY_MS",
+  process.env.CLAWUP_MIN_TASK_DELAY_MS,
+  0, // 0 = no delay
+);
+
 // Branch naming
 export const BRANCH_PREFIX: string = process.env.BRANCH_PREFIX || "clickup";
 

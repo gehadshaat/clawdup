@@ -2,7 +2,7 @@
 
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import { resolve } from "path";
-import { POLL_INTERVAL_MS, RELAUNCH_INTERVAL_MS, STATUS, BASE_BRANCH, PROJECT_ROOT, CLICKUP_LIST_ID, CLICKUP_PARENT_TASK_ID, AUTO_APPROVE, DRY_RUN, BRANCH_PREFIX } from "./config.js";
+import { POLL_INTERVAL_MS, RELAUNCH_INTERVAL_MS, STATUS, BASE_BRANCH, PROJECT_ROOT, CLICKUP_LIST_ID, CLICKUP_PARENT_TASK_ID, AUTO_APPROVE, DRY_RUN, BRANCH_PREFIX, MAX_OPEN_PRS, MAX_TASKS_PER_RUN, MIN_TASK_DELAY_MS } from "./config.js";
 import { log, startTimer } from "./logger.js";
 import {
   getTasksByStatus,
@@ -55,6 +55,7 @@ import {
   getPRReviewComments,
   getPRInlineComments,
   getPRCheckStatus,
+  countOpenClawupPRs,
 } from "./git-ops.js";
 import {
   runClaudeOnTask,
@@ -81,6 +82,9 @@ const LOCK_FILE_PATH = resolve(PROJECT_ROOT, ".clawdup.lock");
 // Prevents the same task from being picked up again if a status update
 // fails and the task remains in TODO after processing.
 const processedTaskIds = new Set<string>();
+
+// Counts tasks processed in this runner session for MAX_TASKS_PER_RUN enforcement.
+let tasksProcessedCount = 0;
 
 interface LockFileData {
   pid: number;
@@ -1585,6 +1589,22 @@ async function pollForTasks(): Promise<void> {
       return;
     }
 
+    // Check concurrency limits before picking up new work
+    if (MAX_TASKS_PER_RUN > 0 && tasksProcessedCount >= MAX_TASKS_PER_RUN) {
+      log("info", `Task-per-run limit reached (${tasksProcessedCount}/${MAX_TASKS_PER_RUN}). ` +
+        `Not picking up new work. Adjust CLAWUP_MAX_TASKS_PER_RUN to increase.`);
+      return;
+    }
+
+    if (MAX_OPEN_PRS > 0) {
+      const openPRCount = await countOpenClawupPRs();
+      if (openPRCount >= MAX_OPEN_PRS) {
+        log("info", `Open PR limit reached (${openPRCount}/${MAX_OPEN_PRS}). ` +
+          `Not picking up new work. Adjust CLAWUP_MAX_OPEN_PRS to increase.`);
+        return;
+      }
+    }
+
     // Then, check for TODO tasks to implement
     const tasks = await getTasksByStatus(STATUS.TODO);
 
@@ -1644,6 +1664,13 @@ async function pollForTasks(): Promise<void> {
     }
 
     processedTaskIds.add(task.id);
+    tasksProcessedCount++;
+
+    // Apply minimum delay between tasks (throttle)
+    if (MIN_TASK_DELAY_MS > 0 && tasksProcessedCount > 1) {
+      log("info", `Throttling: waiting ${MIN_TASK_DELAY_MS / 1000}s before starting next task (CLAWUP_MIN_TASK_DELAY_MS)`);
+      await new Promise((r) => setTimeout(r, MIN_TASK_DELAY_MS));
+    }
 
     // Check if this is a returning task (already has a PR in its comments)
     const existingPrUrl = await findPRUrlInComments(task.id);
@@ -1712,6 +1739,7 @@ export async function startRunner(options?: { interactive?: boolean }): Promise<
   isProcessing = false;
   shouldRelaunchAfterMerge = false;
   processedTaskIds.clear();
+  tasksProcessedCount = 0;
   interactiveMode = options?.interactive ?? false;
 
   if (DRY_RUN) {
@@ -1727,6 +1755,15 @@ export async function startRunner(options?: { interactive?: boolean }): Promise<
   log("info", `Base branch: ${BASE_BRANCH}`);
   if (AUTO_APPROVE) {
     log("info", "Auto-approve mode: ENABLED — PRs will be merged immediately after completion");
+  }
+  if (MAX_OPEN_PRS > 0) {
+    log("info", `Max open PRs: ${MAX_OPEN_PRS}`);
+  }
+  if (MAX_TASKS_PER_RUN > 0) {
+    log("info", `Max tasks per run: ${MAX_TASKS_PER_RUN}`);
+  }
+  if (MIN_TASK_DELAY_MS > 0) {
+    log("info", `Min delay between tasks: ${MIN_TASK_DELAY_MS / 1000}s`);
   }
 
   const relaunchEnabled = RELAUNCH_INTERVAL_MS > 0;

@@ -794,6 +794,29 @@ export async function getPRReviewComments(
 }
 
 /**
+ * Count open PRs created by Clawup (identified by branch naming convention).
+ * Returns the number of open PRs whose head branch matches the BRANCH_PREFIX pattern.
+ */
+export async function countOpenClawupPRs(): Promise<number> {
+  try {
+    const result = await gh(
+      "pr",
+      "list",
+      "--state",
+      "open",
+      "--json",
+      "headRefName",
+      "--jq",
+      `[.[] | select(.headRefName | startswith("${BRANCH_PREFIX}/CU-"))] | length`,
+    );
+    return parseInt(result, 10) || 0;
+  } catch {
+    log("warn", "Failed to count open Clawup PRs — skipping PR limit check");
+    return 0;
+  }
+}
+
+/**
  * Get inline review comments (code-level comments) from a pull request.
  * Uses the GitHub API via gh to fetch review comments on the diff.
  */
