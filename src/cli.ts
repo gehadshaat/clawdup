@@ -250,6 +250,10 @@ CLICKUP_LIST_ID=
 # Max agentic turns for Claude Code per task
 # CLAUDE_MAX_TURNS=50
 
+# Tool profile: minimal | standard | full | custom
+# Controls which Claude Code tools are available. If not set, auto-detects.
+# CLAUDE_TOOL_PROFILE=
+
 # Git branch prefix
 # BRANCH_PREFIX=clickup
 
@@ -283,8 +287,19 @@ export default {
 Run the formatter/linter after making changes to ensure code style is correct.
 \`.trim(),
 
+  // Tool profile: controls which Claude Code tools are available.
+  // "minimal" (default): Edit, Write, Read, Glob, Grep, Bash
+  // "standard": + Task (sub-agents), WebSearch, WebFetch
+  // "full": + NotebookEdit (all tools)
+  // "custom": use allowedTools array below
+  // If not set, clawdup auto-detects needed capabilities from the project and task.
+  // toolProfile: "standard",
+
+  // Explicit tool list (only used with toolProfile: "custom")
+  // allowedTools: ["Edit", "Write", "Read", "Glob", "Grep", "Bash", "Task"],
+
   // Extra CLI args to pass to the 'claude' command.
-  // claudeArgs: ["--allowedTools", "Bash,Read,Write,Edit,Glob,Grep"],
+  // claudeArgs: ["--verbose"],
 };
 `,
     );
