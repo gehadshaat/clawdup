@@ -66,6 +66,35 @@ export interface ClaudeResult {
 export interface UserConfig {
   prompt?: string;
   claudeArgs?: string[];
+  toolProfile?: ToolProfileName;
+  allowedTools?: string[];
+}
+
+/**
+ * Named tool profiles that control which Claude Code tools are available.
+ * - minimal: Basic file editing and shell (current default, safest)
+ * - standard: Adds sub-agents (Task) and web access for research-heavy tasks
+ * - full: All Claude Code tools enabled
+ * - custom: User-defined tool set via allowedTools in config
+ */
+export type ToolProfileName = "minimal" | "standard" | "full" | "custom";
+
+/**
+ * Describes a detected capability hint from project or task analysis.
+ * Used to recommend tools or agents that would be useful.
+ */
+export interface CapabilityHint {
+  tool: string;
+  reason: string;
+}
+
+/**
+ * Result of analyzing a project and task for needed capabilities.
+ */
+export interface CapabilityAnalysis {
+  detectedHints: CapabilityHint[];
+  recommendedTools: string[];
+  recommendedProfile: ToolProfileName;
 }
 
 export interface ClickUpDependency {

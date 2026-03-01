@@ -2,7 +2,7 @@
 
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import { resolve } from "path";
-import { POLL_INTERVAL_MS, RELAUNCH_INTERVAL_MS, STATUS, BASE_BRANCH, PROJECT_ROOT, CLICKUP_LIST_ID, CLICKUP_PARENT_TASK_ID, AUTO_APPROVE, DRY_RUN, BRANCH_PREFIX } from "./config.js";
+import { POLL_INTERVAL_MS, RELAUNCH_INTERVAL_MS, STATUS, BASE_BRANCH, PROJECT_ROOT, CLICKUP_LIST_ID, CLICKUP_PARENT_TASK_ID, AUTO_APPROVE, DRY_RUN, BRANCH_PREFIX, CLAUDE_TOOL_PROFILE, CLAUDE_ALLOWED_TOOLS } from "./config.js";
 import { log, startTimer } from "./logger.js";
 import {
   getTasksByStatus,
@@ -66,6 +66,11 @@ import {
   generateWorkSummary,
 } from "./claude-worker.js";
 import { runPreflightOrAbort } from "./preflight.js";
+import {
+  analyzeCapabilities,
+  resolveAllowedTools,
+  buildCapabilityGuidance,
+} from "./capability-detection.js";
 import type { ClickUpTask, ClaudeResult } from "./types.js";
 
 let isShuttingDown = false;
@@ -467,12 +472,19 @@ async function processTask(task: ClickUpTask): Promise<void> {
       `🤖 Automation picked up this task and is now working on it.\n\nPR: ${prUrl}`,
     );
 
-    // Step 4: Fetch comments, format the task for Claude, and run it
+    // Step 4: Analyze capabilities, fetch comments, format the task, and run Claude
     // Save HEAD hash before Claude runs so we can detect if Claude commits via Bash
     const headBefore = await getHeadHash();
+    const analysis = analyzeCapabilities(task);
+    const allowedTools = resolveAllowedTools(CLAUDE_TOOL_PROFILE, CLAUDE_ALLOWED_TOOLS, analysis);
+    const capabilityGuidance = buildCapabilityGuidance(allowedTools, analysis.detectedHints);
     const comments = await getTaskComments(taskId);
     const taskPrompt = formatTaskForClaude(task, comments);
-    const result = await runClaudeOnTask(taskPrompt, taskId, { interactive: interactiveMode });
+    const result = await runClaudeOnTask(taskPrompt, taskId, {
+      interactive: interactiveMode,
+      allowedTools,
+      capabilityGuidance: capabilityGuidance || undefined,
+    });
     const headAfter = await getHeadHash();
     const claudeCommitted = headBefore !== headAfter;
 
@@ -1269,6 +1281,9 @@ async function processReturningTask(task: ClickUpTask, prUrl: string): Promise<v
     // Gather new comments as context for why the task was moved back
     const feedback = await collectReviewFeedback(task, prUrl);
     const headBefore = await getHeadHash();
+    const returnAnalysis = analyzeCapabilities(task);
+    const returnTools = resolveAllowedTools(CLAUDE_TOOL_PROFILE, CLAUDE_ALLOWED_TOOLS, returnAnalysis);
+    const returnGuidance = buildCapabilityGuidance(returnTools, returnAnalysis.detectedHints);
     const comments = await getTaskComments(taskId);
     const taskPrompt = formatTaskForClaude(task, comments);
 
@@ -1280,12 +1295,16 @@ async function processReturningTask(task: ClickUpTask, prUrl: string): Promise<v
         taskPrompt,
         taskId,
         feedback,
-        { interactive: interactiveMode },
+        { interactive: interactiveMode, allowedTools: returnTools },
       );
     } else {
       // No specific feedback — re-run Claude on the task with existing code context
       log("info", `No specific feedback found for returning task ${taskId}. Re-running Claude on the task.`);
-      result = await runClaudeOnTask(taskPrompt, taskId, { interactive: interactiveMode });
+      result = await runClaudeOnTask(taskPrompt, taskId, {
+        interactive: interactiveMode,
+        allowedTools: returnTools,
+        capabilityGuidance: returnGuidance || undefined,
+      });
     }
 
     const headAfter = await getHeadHash();

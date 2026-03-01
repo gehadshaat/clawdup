@@ -39,8 +39,9 @@ export {
   getPRCheckStatus,
 } from "./git-ops.js";
 export { runClaudeOnTask, runClaudeOnReviewFeedback, generateWorkSummary, scanOutputForSafetyIssues } from "./claude-worker.js";
+export { analyzeCapabilities, resolveAllowedTools, buildCapabilityGuidance, TOOL_PROFILES } from "./capability-detection.js";
 export { runPreflightChecks, runPreflightOrAbort, printPreflightResults } from "./preflight.js";
-export { STATUS, PROJECT_ROOT, GIT_ROOT, DRY_RUN } from "./config.js";
+export { STATUS, PROJECT_ROOT, GIT_ROOT, DRY_RUN, CLAUDE_TOOL_PROFILE, CLAUDE_ALLOWED_TOOLS } from "./config.js";
 export { log, setLogLevel, setJsonOutput, isDebug, startTimer } from "./logger.js";
 export type { LogLevel, LogContext } from "./logger.js";
 export type {
@@ -53,6 +54,9 @@ export type {
   ClaudeResult,
   UserConfig,
   PullRequestOptions,
+  ToolProfileName,
+  CapabilityHint,
+  CapabilityAnalysis,
 } from "./types.js";
 export type { PreflightCheckResult, PreflightResult } from "./preflight.js";
 export { detectPackageManager, globalInstallCommand, installCommand, runScriptCommand, initCommand } from "./package-manager.js";

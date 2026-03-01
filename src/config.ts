@@ -11,7 +11,7 @@
 import { existsSync, readFileSync } from "fs";
 import { resolve } from "path";
 import { execFileSync } from "child_process";
-import type { UserConfig } from "./types.js";
+import type { UserConfig, ToolProfileName } from "./types.js";
 
 // PROJECT_ROOT is the directory where clawdup was invoked (the package directory).
 // Config files (.clawdup.env, clawdup.config.mjs, CLAUDE.md) are resolved from here.
@@ -222,3 +222,22 @@ if (!/^[a-zA-Z0-9_-]+$/.test(BRANCH_PREFIX)) {
   );
   process.exit(1);
 }
+
+// Tool profile selection (optional — controls which Claude Code tools are available)
+// Values: "minimal" (default), "standard" (+ agents & web), "full" (all tools), "custom" (explicit list)
+const VALID_TOOL_PROFILES: ToolProfileName[] = ["minimal", "standard", "full", "custom"];
+const rawToolProfile = process.env.CLAUDE_TOOL_PROFILE || userConfig.toolProfile || "";
+export const CLAUDE_TOOL_PROFILE: ToolProfileName | undefined = rawToolProfile
+  ? (VALID_TOOL_PROFILES.includes(rawToolProfile as ToolProfileName)
+    ? rawToolProfile as ToolProfileName
+    : (() => {
+        console.error(
+          `ERROR: CLAUDE_TOOL_PROFILE "${rawToolProfile}" is not valid. ` +
+          `Must be one of: ${VALID_TOOL_PROFILES.join(", ")}`,
+        );
+        process.exit(1);
+      })())
+  : undefined;
+
+// Explicit allowed tools list (only used when toolProfile is "custom" or when set directly)
+export const CLAUDE_ALLOWED_TOOLS: string[] | undefined = userConfig.allowedTools;
