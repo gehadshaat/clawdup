@@ -393,7 +393,7 @@ async function dryRunProcessReturningTask(task: ClickUpTask, prUrl: string): Pro
  * Always starts from the latest base branch and creates a PR immediately
  * so that work is visible from the start.
  */
-async function processTask(task: ClickUpTask): Promise<void> {
+async function processTask(task: ClickUpTask, options?: { skipDependencyCheck?: boolean }): Promise<void> {
   if (DRY_RUN) {
     await dryRunProcessTask(task);
     return;
@@ -415,6 +415,29 @@ async function processTask(task: ClickUpTask): Promise<void> {
   if (!isValidTaskId(taskId)) {
     log("error", `Invalid task ID format: ${taskId}. Skipping.`);
     return;
+  }
+
+  // Validate that all dependencies are resolved before starting work
+  if (!options?.skipDependencyCheck) {
+    try {
+      const unresolved = await getUnresolvedDependencies(taskId);
+      if (unresolved.length > 0) {
+        const depList = unresolved
+          .map((d) => `"${d.name}" (${d.id}, status: ${d.status})`)
+          .join(", ");
+        log(
+          "warn",
+          `Task "${taskName}" (${taskId}) has ${unresolved.length} unresolved dependency/ies: ${depList}. Skipping — dependencies must be completed first.`,
+        );
+        return;
+      }
+    } catch (err) {
+      log(
+        "warn",
+        `Failed to validate dependencies for task ${taskId}: ${(err as Error).message}. Skipping to be safe.`,
+      );
+      return;
+    }
   }
 
   try {
@@ -1159,7 +1182,7 @@ async function collectReviewFeedback(
  * Instead of starting from scratch, checks out the existing branch,
  * gathers new comments for context, and runs Claude to continue/fix the work.
  */
-async function processReturningTask(task: ClickUpTask, prUrl: string): Promise<void> {
+async function processReturningTask(task: ClickUpTask, prUrl: string, options?: { skipDependencyCheck?: boolean }): Promise<void> {
   if (DRY_RUN) {
     await dryRunProcessReturningTask(task, prUrl);
     return;
@@ -1177,6 +1200,29 @@ async function processReturningTask(task: ClickUpTask, prUrl: string): Promise<v
   if (!isValidTaskId(taskId)) {
     log("error", `Invalid task ID format: ${taskId}. Skipping.`);
     return;
+  }
+
+  // Validate that all dependencies are resolved before continuing work
+  if (!options?.skipDependencyCheck) {
+    try {
+      const unresolved = await getUnresolvedDependencies(taskId);
+      if (unresolved.length > 0) {
+        const depList = unresolved
+          .map((d) => `"${d.name}" (${d.id}, status: ${d.status})`)
+          .join(", ");
+        log(
+          "warn",
+          `Returning task "${taskName}" (${taskId}) has ${unresolved.length} unresolved dependency/ies: ${depList}. Skipping — dependencies must be completed first.`,
+        );
+        return;
+      }
+    } catch (err) {
+      log(
+        "warn",
+        `Failed to validate dependencies for returning task ${taskId}: ${(err as Error).message}. Skipping to be safe.`,
+      );
+      return;
+    }
   }
 
   // Check the state of the existing PR
@@ -1696,7 +1742,7 @@ export async function runSingleTask(taskId: string, options?: { interactive?: bo
       log("warn", `Could not check dependencies: ${(err as Error).message}`);
     }
 
-    await processTask(task);
+    await processTask(task, { skipDependencyCheck: true });
   } finally {
     if (!DRY_RUN) releaseLock();
   }
