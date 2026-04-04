@@ -1,8 +1,8 @@
 # Bumps the package version, creates a git tag, publishes a GitHub release,
-# and publishes the package to NPM via OIDC trusted publishing (no token needed).
+# and publishes the package to NPM.
 #
 # Prerequisites:
-#   Configure trusted publishing on npmjs.com for this repo and workflow.
+#   Add NPM_TOKEN as a repository secret (Settings → Secrets → Actions).
 #
 # Usage:
 #   Go to Actions → "Release" → "Run workflow" and select the version bump type.
@@ -83,3 +83,5 @@ jobs:
 
       - name: Publish to NPM
         run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
