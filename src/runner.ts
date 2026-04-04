@@ -2,7 +2,7 @@
 
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import { resolve } from "path";
-import { POLL_INTERVAL_MS, RELAUNCH_INTERVAL_MS, STATUS, BASE_BRANCH, PROJECT_ROOT, CLICKUP_LIST_ID, CLICKUP_PARENT_TASK_ID, AUTO_APPROVE, DRY_RUN, BRANCH_PREFIX } from "./config.js";
+import { POLL_INTERVAL_MS, RELAUNCH_INTERVAL_MS, STATUS, BASE_BRANCH, PROJECT_ROOT, CLICKUP_LIST_ID, CLICKUP_PARENT_TASK_ID, AUTO_APPROVE, DRY_RUN, BRANCH_PREFIX, EXTERNAL_TOOL_PROVIDERS } from "./config.js";
 import { log, startTimer } from "./logger.js";
 import {
   getTasksByStatus,
@@ -68,6 +68,14 @@ import {
   generateWorkSummary,
 } from "./claude-worker.js";
 import { runPreflightOrAbort } from "./preflight.js";
+import {
+  hasExternalTools,
+  processToolRequests,
+  readToolRequests,
+  writeToolResults,
+  cleanupToolFiles,
+  detectExternalToolNeeds,
+} from "./external-tools.js";
 import type { ClickUpTask, ClaudeResult } from "./types.js";
 
 let isShuttingDown = false;
@@ -503,7 +511,37 @@ async function processTask(task: ClickUpTask): Promise<void> {
       buildProjectContext(task),
     ]);
     const taskPrompt = formatTaskForClaude(task, comments);
-    const result = await runClaudeOnTask(taskPrompt, taskId, { interactive: interactiveMode, projectContext });
+    let result = await runClaudeOnTask(taskPrompt, taskId, { interactive: interactiveMode, projectContext });
+
+    // Step 4a: Process any external tool requests Claude created.
+    // If Claude wrote a .clawdup.tool-requests.json file, execute the requests,
+    // then resume Claude with the results so it can continue.
+    if (hasExternalTools() && result.success) {
+      const toolRequests = readToolRequests();
+      if (toolRequests.length > 0) {
+        log("info", `Claude requested ${toolRequests.length} external tool(s) — executing...`, { taskId });
+        const toolResults = await processToolRequests();
+        const successCount = toolResults.filter((r) => r.success).length;
+        log("info", `External tools: ${successCount}/${toolResults.length} succeeded`, { taskId });
+
+        // Resume Claude with the external tool results
+        const toolResultsSummary = toolResults
+          .map((r, i) => {
+            const status = r.success ? "✅ Success" : `❌ Failed: ${r.error}`;
+            return `### Tool Request #${i + 1} (${r.provider})\n**Status:** ${status}\n**Output:**\n${r.output}`;
+          })
+          .join("\n\n");
+
+        const resumePrompt = `External tool results are now available. Here are the results:\n\n${toolResultsSummary}\n\nPlease continue with the task using these results. Remember to commit your changes when done.`;
+        result = await runClaudeOnTask(
+          `${taskPrompt}\n\n## External Tool Results\n\n${resumePrompt}`,
+          taskId,
+          { interactive: interactiveMode, projectContext },
+        );
+        cleanupToolFiles();
+      }
+    }
+
     const headAfter = await getHeadHash();
     const claudeCommitted = headBefore !== headAfter;
 
@@ -1322,6 +1360,29 @@ async function processReturningTask(task: ClickUpTask, prUrl: string): Promise<v
       result = await runClaudeOnTask(taskPrompt, taskId, { interactive: interactiveMode, projectContext });
     }
 
+    // Process any external tool requests from this run
+    if (hasExternalTools() && result.success) {
+      const toolRequests = readToolRequests();
+      if (toolRequests.length > 0) {
+        log("info", `Claude requested ${toolRequests.length} external tool(s) — executing...`, { taskId });
+        const toolResults = await processToolRequests();
+        const toolResultsSummary = toolResults
+          .map((r, i) => {
+            const status = r.success ? "✅ Success" : `❌ Failed: ${r.error}`;
+            return `### Tool Request #${i + 1} (${r.provider})\n**Status:** ${status}\n**Output:**\n${r.output}`;
+          })
+          .join("\n\n");
+
+        const resumePrompt = `External tool results are now available. Here are the results:\n\n${toolResultsSummary}\n\nPlease continue with the task using these results. Remember to commit your changes when done.`;
+        result = await runClaudeOnTask(
+          `${taskPrompt}\n\n## External Tool Results\n\n${resumePrompt}`,
+          taskId,
+          { interactive: interactiveMode, projectContext },
+        );
+        cleanupToolFiles();
+      }
+    }
+
     const headAfter = await getHeadHash();
     const claudeCommitted = headBefore !== headAfter;
 
@@ -1761,6 +1822,10 @@ export async function startRunner(options?: { interactive?: boolean }): Promise<
   log("info", `Base branch: ${BASE_BRANCH}`);
   if (AUTO_APPROVE) {
     log("info", "Auto-approve mode: ENABLED — PRs will be merged immediately after completion");
+  }
+  if (hasExternalTools()) {
+    const providerNames = EXTERNAL_TOOL_PROVIDERS.filter((p) => p.enabled).map((p) => p.name);
+    log("info", `External tools: ENABLED — providers: ${providerNames.join(", ")}`);
   }
 
   const relaunchEnabled = RELAUNCH_INTERVAL_MS > 0;
