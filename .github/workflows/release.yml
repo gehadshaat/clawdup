@@ -1,5 +1,9 @@
-# Bumps the package version, creates a git tag, and publishes a GitHub release.
-# This triggers the publish.yml workflow which handles NPM publishing.
+# Bumps the package version, creates a git tag, publishes a GitHub release,
+# and publishes the package to NPM.
+#
+# Prerequisites:
+#   1. Create an NPM access token (Automation type recommended)
+#   2. Add it as a repository secret named NPM_TOKEN
 #
 # Usage:
 #   Go to Actions → "Release" → "Run workflow" and select the version bump type.
@@ -23,18 +27,19 @@ permissions:
 
 jobs:
   release:
-    name: Bump version and create release
+    name: Release and publish to NPM
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "18"
+          registry-url: "https://registry.npmjs.org"
 
       - name: Configure git
         run: |
@@ -66,3 +71,17 @@ jobs:
           gh release create "${{ steps.bump.outputs.version }}" \
             --title "${{ steps.bump.outputs.version }}" \
             --generate-notes
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: CLI smoke test
+        run: node dist/cli.js --help
+
+      - name: Publish to NPM
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
