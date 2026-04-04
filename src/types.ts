@@ -61,6 +61,7 @@ export interface ClaudeResult {
   needsInput: boolean;
   error?: string;
   rateLimited?: boolean;
+  sessionId?: string;
 }
 
 export interface UserConfig {

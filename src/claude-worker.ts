@@ -6,8 +6,8 @@
 //   4. Custom prompt from clawdup.config.mjs (if provided)
 
 import { spawn } from "child_process";
-import { existsSync, readFileSync } from "fs";
-import { resolve } from "path";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { resolve, dirname } from "path";
 import {
   CLAUDE_COMMAND,
   CLAUDE_TIMEOUT_MS,
@@ -20,6 +20,46 @@ import {
 } from "./config.js";
 import { log, startTimer } from "./logger.js";
 import type { ClickUpTask, ClaudeResult } from "./types.js";
+
+/**
+ * Path to the file that stores Claude session IDs per task.
+ * This allows resuming previous sessions when re-running Claude on the same task.
+ */
+const SESSION_FILE_PATH = resolve(PROJECT_ROOT, ".clawdup.sessions.json");
+
+/**
+ * Load the session ID for a given task from the sessions file.
+ * Returns undefined if no previous session exists.
+ */
+function loadSessionId(taskId: string): string | undefined {
+  try {
+    if (!existsSync(SESSION_FILE_PATH)) return undefined;
+    const data = JSON.parse(readFileSync(SESSION_FILE_PATH, "utf-8")) as Record<string, string>;
+    return data[taskId];
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Save a session ID for a given task to the sessions file.
+ * Merges with any existing sessions.
+ */
+function saveSessionId(taskId: string, sessionId: string): void {
+  try {
+    let data: Record<string, string> = {};
+    if (existsSync(SESSION_FILE_PATH)) {
+      data = JSON.parse(readFileSync(SESSION_FILE_PATH, "utf-8")) as Record<string, string>;
+    }
+    data[taskId] = sessionId;
+    const dir = dirname(SESSION_FILE_PATH);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    writeFileSync(SESSION_FILE_PATH, JSON.stringify(data, null, 2) + "\n");
+    log("debug", `Saved session ${sessionId} for task ${taskId}`);
+  } catch (err) {
+    log("warn", `Failed to save session ID for task ${taskId}: ${err}`);
+  }
+}
 
 /**
  * Patterns that may indicate the model output was influenced by prompt injection.
@@ -209,8 +249,22 @@ async function runClaudeInteractive(
     "Interactive mode: communicate with Claude directly. Exit Claude when done.\n",
   );
 
-  const args = [
-    systemPrompt,
+  // Check for a previous session to resume
+  const previousSessionId = loadSessionId(taskId);
+  if (previousSessionId) {
+    log("info", `Resuming previous session ${previousSessionId} for task ${taskId}`);
+  }
+
+  const args: string[] = [];
+
+  if (previousSessionId) {
+    // Resume the previous session with the new prompt as initial message
+    args.push("--resume", previousSessionId, systemPrompt);
+  } else {
+    args.push(systemPrompt);
+  }
+
+  args.push(
     "--verbose",
     "--max-turns",
     String(CLAUDE_MAX_TURNS),
@@ -221,7 +275,7 @@ async function runClaudeInteractive(
     "Glob",
     "Grep",
     "Bash",
-  ];
+  );
 
   // Add model flag if specified
   const effectiveModel = model || CLAUDE_MODEL;
@@ -362,10 +416,17 @@ async function spawnClaudeForTask(
   log("info", `Running Claude Code on task ${taskId}...`, { taskId });
   const timer = startTimer();
 
+  // Check for a previous session to resume
+  const previousSessionId = loadSessionId(taskId);
+  if (previousSessionId) {
+    log("info", `Found previous session ${previousSessionId} for task ${taskId} — will resume`, { taskId });
+  }
+
   return new Promise((resolve) => {
     let output = "";
     let stderrOutput = "";
     let timedOut = false;
+    let resolvedSessionId: string | undefined;
 
     // Stream-json parsing state
     let jsonBuffer = "";
@@ -373,9 +434,17 @@ async function spawnClaudeForTask(
     let lastTextLength = 0;
     const displayedToolUseIds = new Set<string>();
 
-    const args = [
-      "-p", // print mode (non-interactive)
-      systemPrompt,
+    const args: string[] = [];
+
+    if (previousSessionId) {
+      // Resume mode: pass --resume with the session ID, then -p with the new prompt
+      args.push("--resume", previousSessionId, "-p", systemPrompt);
+    } else {
+      // Fresh session: pass -p with the prompt
+      args.push("-p", systemPrompt);
+    }
+
+    args.push(
       "--verbose",
       "--output-format",
       "stream-json",
@@ -389,7 +458,7 @@ async function spawnClaudeForTask(
       "Glob",
       "Grep",
       "Bash",
-    ];
+    );
 
     // Add model flag if specified
     const effectiveModel = model || CLAUDE_MODEL;
@@ -492,6 +561,11 @@ async function spawnClaudeForTask(
           const turns = event.num_turns ?? "?";
           process.stdout.write(`\n[Cost: $${cost} | Turns: ${turns}]\n`);
         }
+
+        // Capture session ID for resume support
+        if (event.session_id && typeof event.session_id === "string") {
+          resolvedSessionId = event.session_id;
+        }
       }
     }
 
@@ -549,12 +623,18 @@ async function spawnClaudeForTask(
         }
       }
 
+      // Persist session ID for future resume regardless of outcome
+      if (resolvedSessionId) {
+        saveSessionId(taskId, resolvedSessionId);
+      }
+
       if (timedOut) {
         resolve({
           success: false,
           output,
           needsInput: false,
           error: `Claude Code timed out after ${CLAUDE_TIMEOUT_MS / 1000}s`,
+          sessionId: resolvedSessionId,
         });
         return;
       }
@@ -569,6 +649,7 @@ async function spawnClaudeForTask(
           needsInput: false,
           rateLimited: true,
           error: `Claude Code hit usage/rate limit`,
+          sessionId: resolvedSessionId,
         });
         return;
       }
@@ -595,6 +676,7 @@ async function spawnClaudeForTask(
           success: false,
           output,
           needsInput: true,
+          sessionId: resolvedSessionId,
         });
         return;
       }
@@ -604,6 +686,7 @@ async function spawnClaudeForTask(
         output,
         needsInput: false,
         error: code !== 0 ? `Exited with code ${code}` : undefined,
+        sessionId: resolvedSessionId,
       });
     });
 
@@ -615,6 +698,7 @@ async function spawnClaudeForTask(
         output,
         needsInput: false,
         error: `Failed to run Claude Code: ${err.message}`,
+        sessionId: resolvedSessionId,
       });
     });
   });
@@ -763,19 +847,32 @@ async function spawnClaudeForReview(
 
   log("info", `Running Claude Code on review feedback for task ${taskId}...`, { taskId });
 
+  // Check for a previous session to resume
+  const previousSessionId = loadSessionId(taskId);
+  if (previousSessionId) {
+    log("info", `Found previous session ${previousSessionId} for review on task ${taskId} — will resume`, { taskId });
+  }
+
   const reviewTimer = startTimer();
   return new Promise((resolve) => {
     let output = "";
     let stderrOutput = "";
     let timedOut = false;
+    let resolvedSessionId: string | undefined;
     let jsonBuffer = "";
     let lastMessageId = "";
     let lastTextLength = 0;
     const displayedToolUseIds = new Set<string>();
 
-    const args = [
-      "-p",
-      systemPrompt,
+    const args: string[] = [];
+
+    if (previousSessionId) {
+      args.push("--resume", previousSessionId, "-p", systemPrompt);
+    } else {
+      args.push("-p", systemPrompt);
+    }
+
+    args.push(
       "--verbose",
       "--output-format",
       "stream-json",
@@ -789,7 +886,7 @@ async function spawnClaudeForReview(
       "Glob",
       "Grep",
       "Bash",
-    ];
+    );
 
     // Add model flag if specified
     const effectiveModel = model || CLAUDE_MODEL;
@@ -872,6 +969,11 @@ async function spawnClaudeForReview(
           const turns = event.num_turns ?? "?";
           process.stdout.write(`\n[Cost: $${cost} | Turns: ${turns}]\n`);
         }
+
+        // Capture session ID for resume support
+        if (event.session_id && typeof event.session_id === "string") {
+          resolvedSessionId = event.session_id;
+        }
       }
     }
 
@@ -925,12 +1027,18 @@ async function spawnClaudeForReview(
         }
       }
 
+      // Persist session ID for future resume regardless of outcome
+      if (resolvedSessionId) {
+        saveSessionId(taskId, resolvedSessionId);
+      }
+
       if (timedOut) {
         resolve({
           success: false,
           output,
           needsInput: false,
           error: `Claude Code timed out after ${CLAUDE_TIMEOUT_MS / 1000}s`,
+          sessionId: resolvedSessionId,
         });
         return;
       }
@@ -945,6 +1053,7 @@ async function spawnClaudeForReview(
           needsInput: false,
           rateLimited: true,
           error: `Claude Code hit usage/rate limit`,
+          sessionId: resolvedSessionId,
         });
         return;
       }
@@ -967,7 +1076,7 @@ async function spawnClaudeForReview(
 
       if (needsInput) {
         log("info", `Claude indicated it needs more input for review on task ${taskId}`);
-        resolve({ success: false, output, needsInput: true });
+        resolve({ success: false, output, needsInput: true, sessionId: resolvedSessionId });
         return;
       }
 
@@ -976,6 +1085,7 @@ async function spawnClaudeForReview(
         output,
         needsInput: false,
         error: code !== 0 ? `Exited with code ${code}` : undefined,
+        sessionId: resolvedSessionId,
       });
     });
 
@@ -987,6 +1097,7 @@ async function spawnClaudeForReview(
         output,
         needsInput: false,
         error: `Failed to run Claude Code: ${err.message}`,
+        sessionId: resolvedSessionId,
       });
     });
   });
