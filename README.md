@@ -383,7 +383,7 @@ The repo includes a GitHub Actions workflow (`.github/workflows/dry-run.yml`) th
 ### How it works
 
 1. Checks out the PR branch and builds the project
-2. Runs `clawup --dry-run` with debug logging enabled
+2. Runs `clawdup --dry-run` with debug logging enabled
 3. Scans logs for fatal errors or configuration problems
 4. Uploads the full log as an artifact for debugging
 5. Fails the job on non-zero exit codes or error markers
@@ -399,7 +399,7 @@ The repo includes a GitHub Actions workflow (`.github/workflows/dry-run.yml`) th
 3. **Copy the workflow** from `.github/workflows/dry-run.yml` into your project, or adapt it:
 
 ```yaml
-- name: Run Clawup dry-run
+- name: Run Clawdup dry-run
   env:
     CLICKUP_API_TOKEN: ${{ secrets.CLICKUP_API_TOKEN }}
     CLICKUP_LIST_ID: ${{ secrets.CLICKUP_LIST_ID }}

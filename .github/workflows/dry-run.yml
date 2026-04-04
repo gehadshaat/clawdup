@@ -1,4 +1,4 @@
-# CI workflow that builds Clawup and optionally exercises it in dry-run mode.
+# CI workflow that builds Clawdup and optionally exercises it in dry-run mode.
 # Always validates that the project compiles and the CLI is loadable.
 # If ClickUp secrets are configured, also runs a full dry-run.
 #
@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   dry-run:
-    name: Clawup Dry Run
+    name: Clawdup Dry Run
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -54,7 +54,7 @@ jobs:
         env:
           CLICKUP_API_TOKEN: ${{ secrets.CLICKUP_API_TOKEN }}
 
-      - name: Run Clawup dry-run
+      - name: Run Clawdup dry-run
         if: steps.secrets-check.outputs.has_secrets == 'true'
         env:
           CLICKUP_API_TOKEN: ${{ secrets.CLICKUP_API_TOKEN }}
