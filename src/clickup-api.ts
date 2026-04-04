@@ -396,6 +396,148 @@ export async function createTask(
   return request<ClickUpTask>("POST", `/list/${listId}/task`, body);
 }
 
+// ─── Tier 1 & Tier 2 context for the 3-tiered task context system ───
+
+/**
+ * Tier 1: Get a compact summary of ALL tasks in the project.
+ * Groups tasks by status and lists only names — no descriptions.
+ * Gives Claude awareness of the full project landscape.
+ */
+export async function getAllTasksSummary(): Promise<string> {
+  let tasks: ClickUpTask[];
+
+  if (CLICKUP_PARENT_TASK_ID) {
+    const parent = await request<ClickUpTask>(
+      "GET",
+      `/task/${CLICKUP_PARENT_TASK_ID}?include_subtasks=true`,
+    );
+    tasks = parent.subtasks || [];
+  } else {
+    const listId = await getEffectiveListId();
+    const params = new URLSearchParams({
+      include_closed: "true",
+      subtasks: "true",
+    });
+    const data = await request<{ tasks: ClickUpTask[] }>(
+      "GET",
+      `/list/${listId}/task?${params.toString()}`,
+    );
+    tasks = data.tasks || [];
+  }
+
+  if (tasks.length === 0) return "(no tasks found)";
+
+  // Group by status
+  const grouped = new Map<string, ClickUpTask[]>();
+  for (const task of tasks) {
+    const status = task.status?.status || "unknown";
+    if (!grouped.has(status)) grouped.set(status, []);
+    grouped.get(status)!.push(task);
+  }
+
+  const lines: string[] = [];
+  for (const [status, statusTasks] of grouped) {
+    lines.push(`### ${status} (${statusTasks.length})`);
+    for (const t of statusTasks) {
+      const priority = t.priority ? ` [${t.priority.priority}]` : "";
+      lines.push(`- ${t.name} (CU-${t.id})${priority}`);
+    }
+    lines.push("");
+  }
+
+  log("debug", `Tier 1 project overview: ${tasks.length} tasks across ${grouped.size} statuses`);
+  return lines.join("\n");
+}
+
+/**
+ * Tier 2: Get context about tasks related to the current task.
+ * Includes: dependencies (what this task waits on / blocks),
+ * tasks currently in progress, and recently completed tasks.
+ * Each includes a brief description (first ~200 chars).
+ */
+export async function getRelatedTasksContext(task: ClickUpTask): Promise<string> {
+  const parts: string[] = [];
+
+  // Dependencies
+  try {
+    const { dependencies, waitingOn } = await getTaskDependencies(task.id);
+
+    if (waitingOn.length > 0) {
+      parts.push("### This task depends on:");
+      for (const dep of waitingOn) {
+        try {
+          const depTask = await getTask(dep.depends_on);
+          const desc = (depTask.text_content || depTask.description || "").slice(0, 200);
+          const status = depTask.status?.status || "unknown";
+          parts.push(`- **${depTask.name}** (CU-${depTask.id}) [${status}]`);
+          if (desc) parts.push(`  ${desc}${desc.length >= 200 ? "..." : ""}`);
+        } catch {
+          parts.push(`- (CU-${dep.depends_on}) — could not fetch details`);
+        }
+      }
+      parts.push("");
+    }
+
+    if (dependencies.length > 0) {
+      parts.push("### Tasks blocked by this task:");
+      for (const dep of dependencies) {
+        try {
+          const depTask = await getTask(dep.task_id);
+          const desc = (depTask.text_content || depTask.description || "").slice(0, 200);
+          const status = depTask.status?.status || "unknown";
+          parts.push(`- **${depTask.name}** (CU-${depTask.id}) [${status}]`);
+          if (desc) parts.push(`  ${desc}${desc.length >= 200 ? "..." : ""}`);
+        } catch {
+          parts.push(`- (CU-${dep.task_id}) — could not fetch details`);
+        }
+      }
+      parts.push("");
+    }
+  } catch (err) {
+    log("debug", `Could not fetch dependencies for task ${task.id}: ${(err as Error).message}`);
+  }
+
+  // In-progress tasks (siblings working alongside this one)
+  try {
+    const inProgress = await getTasksByStatus(STATUS.IN_PROGRESS);
+    const siblings = inProgress.filter((t) => t.id !== task.id);
+    if (siblings.length > 0) {
+      parts.push("### Currently in progress:");
+      for (const t of siblings) {
+        const desc = (t.text_content || t.description || "").slice(0, 200);
+        parts.push(`- **${t.name}** (CU-${t.id})`);
+        if (desc) parts.push(`  ${desc}${desc.length >= 200 ? "..." : ""}`);
+      }
+      parts.push("");
+    }
+  } catch (err) {
+    log("debug", `Could not fetch in-progress tasks: ${(err as Error).message}`);
+  }
+
+  // Recently completed tasks
+  try {
+    const completed = await getTasksByStatus(STATUS.COMPLETED);
+    if (completed.length > 0) {
+      // Show up to 10 most recently completed
+      const recent = completed.slice(0, 10);
+      parts.push(`### Recently completed (${recent.length} of ${completed.length}):`);
+      for (const t of recent) {
+        const desc = (t.text_content || t.description || "").slice(0, 200);
+        parts.push(`- **${t.name}** (CU-${t.id})`);
+        if (desc) parts.push(`  ${desc}${desc.length >= 200 ? "..." : ""}`);
+      }
+      parts.push("");
+    }
+  } catch (err) {
+    log("debug", `Could not fetch completed tasks: ${(err as Error).message}`);
+  }
+
+  if (parts.length === 0) return "(no related tasks found)";
+
+  log("debug", `Tier 2 related context built for task ${task.id}`);
+  return parts.join("\n");
+}
+
 /**
  * Known prompt injection patterns.
  * These are logged as warnings when detected in task content.
@@ -429,10 +571,8 @@ export function detectInjectionPatterns(text: string): string[] {
 }
 
 // Maximum lengths for task content sent to Claude
-const MAX_DESCRIPTION_LENGTH = 5000;
-const MAX_COMMENT_LENGTH = 2000;
-const MAX_COMMENTS_COUNT = 10;
 const MAX_CHECKLIST_ITEM_LENGTH = 500;
+const MAX_TASK_CONTEXT_BYTES = 50_000; // 50KB total budget for tier 3 (current task)
 
 /**
  * Truncate a string to a maximum length, appending "... (truncated)" if needed.
@@ -484,11 +624,11 @@ export function formatTaskForClaude(
 
   if (task.text_content) {
     parts.push("## Description");
-    parts.push(truncate(task.text_content, MAX_DESCRIPTION_LENGTH));
+    parts.push(task.text_content);
     parts.push("");
   } else if (task.description) {
     parts.push("## Description");
-    parts.push(truncate(task.description, MAX_DESCRIPTION_LENGTH));
+    parts.push(task.description);
     parts.push("");
   }
 
@@ -515,14 +655,21 @@ export function formatTaskForClaude(
     parts.push("");
   }
 
-  // Include comments if any (limited to most recent N)
+  // Include ALL comments, sorted newest-first.
+  // If the total output exceeds the context budget, drop oldest comments first.
   if (comments && comments.length > 0) {
-    const recentComments = comments.slice(-MAX_COMMENTS_COUNT);
-    parts.push("## Comments");
-    if (comments.length > MAX_COMMENTS_COUNT) {
-      parts.push(`(showing ${MAX_COMMENTS_COUNT} most recent of ${comments.length} comments)`);
-    }
-    for (const comment of recentComments) {
+    // Sort newest-first (ClickUp returns oldest-first by default)
+    const sorted = [...comments].sort((a, b) => {
+      const da = a.date ? parseInt(a.date) : 0;
+      const db = b.date ? parseInt(b.date) : 0;
+      return db - da;
+    });
+
+    const commentLines: string[] = [];
+    commentLines.push("## Comments");
+    commentLines.push(`(${sorted.length} comment${sorted.length === 1 ? "" : "s"}, newest first)`);
+
+    for (const comment of sorted) {
       const text = getCommentText(comment);
       if (!text.trim()) continue;
       const user = comment.user?.username || "Unknown";
@@ -530,7 +677,35 @@ export function formatTaskForClaude(
         ? new Date(parseInt(comment.date)).toISOString().split("T")[0]
         : "";
       const header = date ? `**${user}** (${date}):` : `**${user}**:`;
-      parts.push(`${header}\n${truncate(text, MAX_COMMENT_LENGTH)}\n`);
+      commentLines.push(`${header}\n${text}\n`);
+    }
+
+    // Apply context budget: if adding all comments exceeds the limit,
+    // trim from the end (oldest comments, since we sorted newest-first)
+    const baseParts = parts.join("\n");
+    const baseSize = Buffer.byteLength(baseParts, "utf-8");
+    const allComments = commentLines.join("\n");
+    const totalSize = baseSize + Buffer.byteLength(allComments, "utf-8");
+
+    if (totalSize <= MAX_TASK_CONTEXT_BYTES) {
+      parts.push(...commentLines);
+    } else {
+      // Add comments one by one until we hit the budget
+      const budgetRemaining = MAX_TASK_CONTEXT_BYTES - baseSize;
+      const kept: string[] = [commentLines[0]!, commentLines[1]!]; // header lines
+      let keptSize = Buffer.byteLength(kept.join("\n"), "utf-8");
+
+      for (let i = 2; i < commentLines.length; i++) {
+        const line = commentLines[i]!;
+        const lineSize = Buffer.byteLength(line, "utf-8") + 1; // +1 for newline
+        if (keptSize + lineSize > budgetRemaining) {
+          kept.push(`\n... (${commentLines.length - i} older comments omitted to fit context budget)`);
+          break;
+        }
+        kept.push(line);
+        keptSize += lineSize;
+      }
+      parts.push(...kept);
     }
   }
 

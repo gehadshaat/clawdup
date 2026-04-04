@@ -20,6 +20,8 @@ import {
   getNewReviewFeedback,
   getCommentText,
   getUnresolvedDependencies,
+  getAllTasksSummary,
+  getRelatedTasksContext,
 } from "./clickup-api.js";
 import {
   detectGitHubRepo,
@@ -81,6 +83,32 @@ const LOCK_FILE_PATH = resolve(PROJECT_ROOT, ".clawdup.lock");
 // Prevents the same task from being picked up again if a status update
 // fails and the task remains in TODO after processing.
 const processedTaskIds = new Set<string>();
+
+/**
+ * Build the 3-tiered project context for Claude.
+ * Tier 1: compact overview of all tasks grouped by status.
+ * Tier 2: related tasks (dependencies, in-progress, recently completed).
+ * Tier 3 is the current task itself, handled separately.
+ */
+async function buildProjectContext(task: ClickUpTask): Promise<string> {
+  const parts: string[] = [];
+
+  try {
+    const overview = await getAllTasksSummary();
+    parts.push(`## Project Overview (all tasks in the backlog)\n\n${overview}`);
+  } catch (err) {
+    log("warn", `Could not fetch project overview for context: ${(err as Error).message}`);
+  }
+
+  try {
+    const related = await getRelatedTasksContext(task);
+    parts.push(`## Related Tasks (dependencies, in-progress, recently completed)\n\n${related}`);
+  } catch (err) {
+    log("warn", `Could not fetch related tasks context: ${(err as Error).message}`);
+  }
+
+  return parts.join("\n\n");
+}
 
 interface LockFileData {
   pid: number;
@@ -467,12 +495,15 @@ async function processTask(task: ClickUpTask): Promise<void> {
       `🤖 Automation picked up this task and is now working on it.\n\nPR: ${prUrl}`,
     );
 
-    // Step 4: Fetch comments, format the task for Claude, and run it
+    // Step 4: Build 3-tiered context, format the task for Claude, and run it
     // Save HEAD hash before Claude runs so we can detect if Claude commits via Bash
     const headBefore = await getHeadHash();
-    const comments = await getTaskComments(taskId);
+    const [comments, projectContext] = await Promise.all([
+      getTaskComments(taskId),
+      buildProjectContext(task),
+    ]);
     const taskPrompt = formatTaskForClaude(task, comments);
-    const result = await runClaudeOnTask(taskPrompt, taskId, { interactive: interactiveMode });
+    const result = await runClaudeOnTask(taskPrompt, taskId, { interactive: interactiveMode, projectContext });
     const headAfter = await getHeadHash();
     const claudeCommitted = headBefore !== headAfter;
 
@@ -1269,7 +1300,10 @@ async function processReturningTask(task: ClickUpTask, prUrl: string): Promise<v
     // Gather new comments as context for why the task was moved back
     const feedback = await collectReviewFeedback(task, prUrl);
     const headBefore = await getHeadHash();
-    const comments = await getTaskComments(taskId);
+    const [comments, projectContext] = await Promise.all([
+      getTaskComments(taskId),
+      buildProjectContext(task),
+    ]);
     const taskPrompt = formatTaskForClaude(task, comments);
 
     let result: ClaudeResult;
@@ -1280,12 +1314,12 @@ async function processReturningTask(task: ClickUpTask, prUrl: string): Promise<v
         taskPrompt,
         taskId,
         feedback,
-        { interactive: interactiveMode },
+        { interactive: interactiveMode, projectContext },
       );
     } else {
       // No specific feedback — re-run Claude on the task with existing code context
       log("info", `No specific feedback found for returning task ${taskId}. Re-running Claude on the task.`);
-      result = await runClaudeOnTask(taskPrompt, taskId, { interactive: interactiveMode });
+      result = await runClaudeOnTask(taskPrompt, taskId, { interactive: interactiveMode, projectContext });
     }
 
     const headAfter = await getHeadHash();
