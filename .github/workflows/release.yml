@@ -14,7 +14,7 @@
 #      Package Settings → Trusted Publisher → GitHub Actions
 #      Set org/user, repo name, and workflow filename (release.yml).
 #   2. The id-token: write permission is required for OIDC token exchange.
-#   3. Node 22+ is required (ships with npm 10+ which supports trusted publishing).
+#   3. Node 22+ is required. npm 11+ is needed for OIDC trusted publishing auth.
 #
 # Usage:
 #   Go to Actions → "Release" → "Run workflow" and select the version bump type.
@@ -77,7 +77,7 @@ jobs:
         run: node dist/cli.js --help
 
       - name: Publish to NPM
-        run: npm publish --provenance --access public --registry https://registry.npmjs.org/
+        run: npx npm@11 publish --provenance --access public --registry https://registry.npmjs.org/
 
       - name: Commit and tag
         run: |
