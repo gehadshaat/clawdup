@@ -51,7 +51,9 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: "22"
-          registry-url: "https://registry.npmjs.org/"
+          # Do NOT set registry-url here. setup-node writes token-based auth
+          # to .npmrc which overrides npm's OIDC trusted publishing with an
+          # empty NODE_AUTH_TOKEN, causing a 404 error on publish.
 
       - name: Configure git
         run: |
@@ -75,7 +77,7 @@ jobs:
         run: node dist/cli.js --help
 
       - name: Publish to NPM
-        run: npm publish --provenance --access public
+        run: npm publish --provenance --access public --registry https://registry.npmjs.org/
 
       - name: Commit and tag
         run: |
