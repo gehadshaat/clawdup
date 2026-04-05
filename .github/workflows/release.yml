@@ -75,7 +75,7 @@ jobs:
         run: node dist/cli.js --help
 
       - name: Publish to NPM
-        run: npm publish --access public
+        run: npm publish --provenance --access public
 
       - name: Commit and tag
         run: |
