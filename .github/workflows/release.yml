@@ -1,12 +1,20 @@
 # Bumps the package version, creates a git tag, publishes a GitHub release,
-# and publishes the package to NPM via OIDC trusted publishing (no token needed).
+# and publishes the package to NPM using trusted publishing (OIDC).
+#
+# Authentication uses npm's trusted publishers feature — no NPM_TOKEN needed.
+# The GitHub Actions OIDC token is exchanged for a short-lived npm publish
+# token automatically. Provenance attestation is also generated automatically.
 #
 # The workflow publishes to NPM *before* pushing the version bump commit and
 # tag to the repo. This way, if the publish step fails, the repo is not left
 # in a state where the version was bumped but never actually released.
 #
 # Prerequisites:
-#   Configure trusted publishing on npmjs.com for this repo and workflow.
+#   1. Configure trusted publishing on npmjs.com:
+#      Package Settings → Trusted Publisher → GitHub Actions
+#      Set org/user, repo name, and workflow filename (release.yml).
+#   2. The id-token: write permission is required for OIDC token exchange.
+#   3. Node 22.14.0+ and npm 11.5.1+ are required for trusted publishing.
 #
 # Usage:
 #   Go to Actions → "Release" → "Run workflow" and select the version bump type.
@@ -42,10 +50,8 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: "18"
-          # Do NOT set registry-url here. setup-node writes token-based auth
-          # to .npmrc which overrides npm's OIDC trusted publishing with an
-          # empty token, causing a 404 error on publish.
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org/"
 
       - name: Configure git
         run: |
@@ -69,7 +75,7 @@ jobs:
         run: node dist/cli.js --help
 
       - name: Publish to NPM
-        run: npm publish --provenance --access public --registry https://registry.npmjs.org/
+        run: npm publish --access public
 
       - name: Commit and tag
         run: |
