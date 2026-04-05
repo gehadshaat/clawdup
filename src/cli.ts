@@ -57,6 +57,11 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
+  if (args.includes("--upgrade")) {
+    await upgradeClawdup();
+    process.exit(0);
+  }
+
   if (args.includes("--doctor")) {
     const { runPreflightChecks, printPreflightResults } = await import("./preflight.js");
     const result = await runPreflightChecks();
@@ -116,6 +121,7 @@ Usage:
   clawdup --dry-run           Simulate the full flow without making any changes
   clawdup --debug             Enable debug-level logging with timing
   clawdup --json-log          Output logs in JSON format
+  clawdup --upgrade            Upgrade clawdup to the latest version
   clawdup --check             Validate configuration
   clawdup --doctor            Run preflight environment health checks
   clawdup --statuses          Show recommended ClickUp statuses
@@ -464,6 +470,136 @@ async function runChecks({
   } else {
     console.log("Some checks failed. Please fix the issues above.");
     process.exit(1);
+  }
+}
+
+/**
+ * Upgrade clawdup to the latest published version.
+ * Detects whether clawdup is installed globally or as a local dependency,
+ * checks if an update is available, and runs the appropriate upgrade command.
+ */
+async function upgradeClawdup(): Promise<void> {
+  const { execFile: execFileCb } = await import("child_process");
+  const { promisify } = await import("util");
+  const { dirname: dirnameFn, resolve: resolveFn } = await import("path");
+  const { fileURLToPath } = await import("url");
+  const { readFileSync: readFileSyncFn } = await import("fs");
+
+  const execFileAsync = promisify(execFileCb);
+  const PACKAGE_NAME = "clawdup";
+
+  // Read current version from our own package.json
+  const clawdupRoot = resolveFn(dirnameFn(fileURLToPath(import.meta.url)), "..");
+  let currentVersion = "unknown";
+  try {
+    const pkg = JSON.parse(readFileSyncFn(resolveFn(clawdupRoot, "package.json"), "utf-8")) as { version?: string };
+    currentVersion = pkg.version ?? "unknown";
+  } catch {
+    // ignore
+  }
+  console.log(`Current version: ${currentVersion}`);
+
+  // Fetch latest version from npm registry
+  let latestVersion: string;
+  try {
+    const response = await fetch(`https://registry.npmjs.org/${PACKAGE_NAME}/latest`);
+    if (!response.ok) {
+      console.error(`Failed to check latest version: HTTP ${response.status}`);
+      console.log("You can upgrade manually:");
+      printManualUpgradeInstructions();
+      return;
+    }
+    const data = (await response.json()) as { version: string };
+    latestVersion = data.version;
+  } catch (err) {
+    console.error(`Failed to check latest version: ${(err as Error).message}`);
+    console.log("\nYou can upgrade manually:");
+    printManualUpgradeInstructions();
+    return;
+  }
+
+  console.log(`Latest version:  ${latestVersion}`);
+
+  if (currentVersion === latestVersion) {
+    console.log("\nYou are already on the latest version!");
+    return;
+  }
+
+  console.log(`\nUpgrading ${currentVersion} → ${latestVersion}...\n`);
+
+  // Determine how clawdup was installed
+  const pm = detectPackageManager(process.cwd());
+  const isGlobal = isGlobalInstall(clawdupRoot);
+
+  let cmd: string;
+  let cmdArgs: string[];
+
+  if (isGlobal) {
+    // Global install: npm install -g clawdup@latest / pnpm add -g clawdup@latest
+    if (pm === "pnpm") {
+      cmd = "pnpm";
+      cmdArgs = ["add", "-g", `${PACKAGE_NAME}@latest`];
+    } else {
+      cmd = "npm";
+      cmdArgs = ["install", "-g", `${PACKAGE_NAME}@latest`];
+    }
+  } else {
+    // Local install: upgrade in the project that has clawdup as a dependency
+    const projectRoot = process.cwd();
+    if (pm === "pnpm") {
+      cmd = "pnpm";
+      cmdArgs = ["add", `${PACKAGE_NAME}@latest`, "-D"];
+    } else {
+      cmd = "npm";
+      cmdArgs = ["install", `${PACKAGE_NAME}@latest`, "--save-dev"];
+    }
+    console.log(`Upgrading in: ${projectRoot}`);
+  }
+
+  console.log(`Running: ${cmd} ${cmdArgs.join(" ")}\n`);
+
+  try {
+    const { stdout, stderr } = await execFileAsync(cmd, cmdArgs, {
+      cwd: isGlobal ? undefined : process.cwd(),
+      timeout: 120000,
+      env: { ...process.env },
+    });
+    if (stdout) console.log(stdout);
+    if (stderr) console.error(stderr);
+    console.log(`Successfully upgraded clawdup to ${latestVersion}!`);
+  } catch (err) {
+    console.error(`Upgrade failed: ${(err as Error).message}`);
+    console.log("\nYou can upgrade manually:");
+    printManualUpgradeInstructions();
+  }
+}
+
+/**
+ * Check if clawdup appears to be installed globally by seeing if our
+ * package root lives inside a global node_modules path rather than a
+ * project-local node_modules.
+ */
+function isGlobalInstall(clawdupRoot: string): boolean {
+  // Local installs live under <project>/node_modules/clawdup
+  // Global installs live under <prefix>/lib/node_modules/clawdup or <prefix>/node_modules/clawdup
+  const normalized = clawdupRoot.replace(/\\/g, "/");
+  const nmIndex = normalized.lastIndexOf("/node_modules/");
+  if (nmIndex === -1) {
+    // Not inside node_modules at all (e.g., running from source) — treat as local
+    return false;
+  }
+  const parentDir = normalized.substring(0, nmIndex);
+  // Global prefixes typically have no package.json in the parent directory
+  return !existsSync(resolve(parentDir, "package.json"));
+}
+
+function printManualUpgradeInstructions(): void {
+  const pm = detectPackageManager(process.cwd());
+  console.log(`  Global:  ${globalInstallCommand(pm, "clawdup@latest")}`);
+  if (pm === "pnpm") {
+    console.log(`  Local:   pnpm add clawdup@latest -D`);
+  } else {
+    console.log(`  Local:   npm install clawdup@latest --save-dev`);
   }
 }
 
