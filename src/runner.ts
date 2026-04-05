@@ -35,7 +35,6 @@ import {
   commitChanges,
   pushBranch,
   createPullRequest,
-  createEmptyCommit,
   markPRReady,
   closePullRequest,
   updatePullRequest,
@@ -453,28 +452,10 @@ async function processTask(task: ClickUpTask): Promise<void> {
     branchName = await createTaskBranch(taskId, slug);
     log("info", `Working on branch: ${branchName}`);
 
-    // Step 3: Create a PR immediately so work is visible from the start.
-    // Check if a PR already exists for this branch (e.g. from a previous run).
+    // Step 3: Check if a PR already exists for this branch (e.g. from a previous run).
     prUrl = await findExistingPR(branchName);
 
-    if (!prUrl) {
-      // Create an empty commit so we can push and open a draft PR
-      await createEmptyCommit(
-        `[CU-${taskId}] Starting work on: ${taskName}`,
-      );
-      await pushBranch(branchName);
-      prUrl = await createPullRequest({
-        title: `[CU-${taskId}] ${taskName}`,
-        body:
-          `🤖 Automation is working on this task.\n\n` +
-          `**Task:** ${task.url}\n\n` +
-          `This PR will be updated with changes once implementation is complete.`,
-        branchName,
-        baseBranch: BASE_BRANCH,
-        draft: true,
-      });
-      log("info", `Draft PR created: ${prUrl}`);
-    } else {
+    if (prUrl) {
       log("info", `Existing PR found: ${prUrl}`);
 
       // Check if the existing PR is already merged
@@ -492,7 +473,7 @@ async function processTask(task: ClickUpTask): Promise<void> {
 
     await addTaskComment(
       taskId,
-      `🤖 Automation picked up this task and is now working on it.\n\nPR: ${prUrl}`,
+      `🤖 Automation picked up this task and is now working on it.`,
     );
 
     // Step 4: Build 3-tiered context, format the task for Claude, and run it
@@ -542,11 +523,13 @@ async function processTask(task: ClickUpTask): Promise<void> {
           `Please review and provide more specific instructions if needed.`,
       );
       await updateTaskStatus(taskId, STATUS.REQUIRE_INPUT);
-      await closePRAndCleanup(prUrl, branchName);
+      if (prUrl) {
+        await closePRAndCleanup(prUrl, branchName);
+      }
       return;
     }
 
-    // Step 7: Commit (fallback if Claude didn't), push, and update the PR
+    // Step 7: Commit (fallback if Claude didn't), push, and create/update the PR
     if (uncommittedChanges) {
       log("warn", "Claude left uncommitted changes — committing as fallback");
       const commitMsg = generateCommitMessage(task, result.output);
@@ -554,11 +537,24 @@ async function processTask(task: ClickUpTask): Promise<void> {
     }
     await pushBranch(branchName);
 
-    // Update the PR body with full details and mark it as ready for review
+    // Build PR body with full details
     const { stat, files } = await getChangesSummary();
     const prBody = generatePRBody(task, result.output, files);
-    await updatePullRequest(prUrl, { body: prBody });
-    await markPRReady(prUrl);
+
+    if (!prUrl) {
+      // Create the PR now that we have actual changes pushed
+      prUrl = await createPullRequest({
+        title: `[CU-${taskId}] ${taskName}`,
+        body: prBody,
+        branchName,
+        baseBranch: BASE_BRANCH,
+      });
+      log("info", `PR created: ${prUrl}`);
+    } else {
+      // Update existing PR with full details and mark it as ready for review
+      await updatePullRequest(prUrl, { body: prBody });
+      await markPRReady(prUrl);
+    }
 
     // Step 8: Update ClickUp task with a summary of the work done
     const workSummary = generateWorkSummary(result.output, stat, files);
