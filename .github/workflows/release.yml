@@ -67,6 +67,11 @@ jobs:
           echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
           echo "Bumped to $NEW_VERSION"
 
+      - name: Upgrade npm for trusted publishing
+        run: |
+          npm install -g npm@latest
+          echo "npm version: $(npm -v)"
+
       - name: Install dependencies
         run: npm ci
 
