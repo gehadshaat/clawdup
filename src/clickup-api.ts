@@ -181,14 +181,25 @@ export async function getTask(taskId: string): Promise<ClickUpTask> {
 export async function getTaskDependencies(
   taskId: string,
 ): Promise<{ dependencies: ClickUpDependency[]; waitingOn: ClickUpDependency[] }> {
-  const data = await request<{
-    dependencies: ClickUpDependency[];
-    waiting_on: ClickUpDependency[];
-  }>("GET", `/task/${taskId}/dependency`);
-  return {
-    dependencies: data.dependencies || [],
-    waitingOn: data.waiting_on || [],
-  };
+  try {
+    const data = await request<{
+      dependencies: ClickUpDependency[];
+      waiting_on: ClickUpDependency[];
+    }>("GET", `/task/${taskId}/dependency`);
+    return {
+      dependencies: data.dependencies || [],
+      waitingOn: data.waiting_on || [],
+    };
+  } catch (err) {
+    const message = (err as Error).message || "";
+    // The dependency endpoint may not exist for all ClickUp plans or task types.
+    // Treat 404 as "no dependencies" rather than a failure.
+    if (message.includes("404")) {
+      log("debug", `Dependency endpoint not available for task ${taskId}, treating as no dependencies`);
+      return { dependencies: [], waitingOn: [] };
+    }
+    throw err;
+  }
 }
 
 /**
