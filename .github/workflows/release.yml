@@ -1,6 +1,10 @@
 # Bumps the package version, creates a git tag, publishes a GitHub release,
 # and publishes the package to NPM.
 #
+# The workflow publishes to NPM *before* pushing the version bump commit and
+# tag to the repo. This way, if the publish step fails, the repo is not left
+# in a state where the version was bumped but never actually released.
+#
 # Prerequisites:
 #   Create an npm access token (Granular Access Token recommended) and add it
 #   as a GitHub repository secret named NPM_TOKEN.
@@ -54,6 +58,20 @@ jobs:
           echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
           echo "Bumped to $NEW_VERSION"
 
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: CLI smoke test
+        run: node dist/cli.js --help
+
+      - name: Publish to NPM
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - name: Commit and tag
         run: |
           git add package.json package-lock.json 2>/dev/null || git add package.json
@@ -72,17 +90,3 @@ jobs:
           gh release create "${{ steps.bump.outputs.version }}" \
             --title "${{ steps.bump.outputs.version }}" \
             --generate-notes
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build
-        run: npm run build
-
-      - name: CLI smoke test
-        run: node dist/cli.js --help
-
-      - name: Publish to NPM
-        run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
