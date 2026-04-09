@@ -11,7 +11,7 @@
 import { existsSync, readFileSync } from "fs";
 import { resolve } from "path";
 import { execFileSync } from "child_process";
-import type { UserConfig } from "./types.js";
+import type { UserConfig, ExternalToolProviderConfig } from "./types.js";
 
 // PROJECT_ROOT is the directory where clawdup was invoked (the package directory).
 // Config files (.clawdup.env, clawdup.config.mjs, CLAUDE.md) are resolved from here.
@@ -222,3 +222,41 @@ if (!/^[a-zA-Z0-9_-]+$/.test(BRANCH_PREFIX)) {
   );
   process.exit(1);
 }
+
+// --- External Tool Providers ---
+// Enable/disable external tools globally
+export const EXTERNAL_TOOLS_ENABLED: boolean =
+  (process.env.EXTERNAL_TOOLS_ENABLED || "").toLowerCase() === "true";
+
+/**
+ * Build the list of configured external tool providers from environment variables.
+ * Each provider uses a naming convention:
+ *   EXTERNAL_TOOL_{NAME}_API_KEY   — API key (required to enable)
+ *   EXTERNAL_TOOL_{NAME}_MODEL     — Model override (optional)
+ *   EXTERNAL_TOOL_{NAME}_ENABLED   — Explicit enable/disable (default: true if key set)
+ */
+function loadExternalToolProviders(): ExternalToolProviderConfig[] {
+  const providers: ExternalToolProviderConfig[] = [];
+  const KNOWN_PROVIDERS = ["GEMINI", "OPENAI"];
+
+  for (const name of KNOWN_PROVIDERS) {
+    const apiKey = process.env[`EXTERNAL_TOOL_${name}_API_KEY`] || "";
+    if (!apiKey) continue;
+
+    const enabledRaw = process.env[`EXTERNAL_TOOL_${name}_ENABLED`];
+    const enabled = enabledRaw ? enabledRaw.toLowerCase() === "true" : true;
+    const model = process.env[`EXTERNAL_TOOL_${name}_MODEL`] || "";
+
+    providers.push({
+      name: name.toLowerCase(),
+      apiKey,
+      model: model || undefined,
+      enabled,
+    });
+  }
+
+  return providers;
+}
+
+export const EXTERNAL_TOOL_PROVIDERS: ExternalToolProviderConfig[] =
+  EXTERNAL_TOOLS_ENABLED ? loadExternalToolProviders() : [];

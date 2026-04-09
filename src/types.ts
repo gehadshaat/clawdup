@@ -84,3 +84,48 @@ export interface PullRequestOptions {
   baseBranch?: string;
   draft?: boolean;
 }
+
+// --- External Tool Provider Types ---
+
+/** Result from an external tool execution. */
+export interface ExternalToolResult {
+  success: boolean;
+  output: string;
+  error?: string;
+  /** Provider name that produced this result (e.g., "gemini"). */
+  provider: string;
+  /** Optional metadata (model used, cost, etc.). */
+  metadata?: Record<string, unknown>;
+}
+
+/** Configuration for an external tool provider. */
+export interface ExternalToolProviderConfig {
+  /** Provider name (e.g., "gemini", "openai"). */
+  name: string;
+  /** API key for the provider. */
+  apiKey: string;
+  /** Model to use (provider-specific). */
+  model?: string;
+  /** Whether this provider is enabled. */
+  enabled: boolean;
+}
+
+/** A request from Claude to invoke an external tool. */
+export interface ExternalToolRequest {
+  /** Which provider to use (e.g., "gemini"). */
+  provider: string;
+  /** The capability needed (e.g., "image_generation", "vision", "web_search"). */
+  capability: string;
+  /** The prompt/instruction for the external tool. */
+  prompt: string;
+  /** Optional parameters specific to the capability. */
+  params?: Record<string, unknown>;
+}
+
+/** Capabilities that external tools can provide. */
+export type ExternalToolCapability =
+  | "image_generation"
+  | "vision"
+  | "web_search"
+  | "code_execution"
+  | "general";

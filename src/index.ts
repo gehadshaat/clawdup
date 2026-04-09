@@ -40,7 +40,13 @@ export {
 } from "./git-ops.js";
 export { runClaudeOnTask, runClaudeOnReviewFeedback, generateWorkSummary, scanOutputForSafetyIssues } from "./claude-worker.js";
 export { runPreflightChecks, runPreflightOrAbort, printPreflightResults } from "./preflight.js";
-export { STATUS, PROJECT_ROOT, GIT_ROOT, DRY_RUN } from "./config.js";
+export { STATUS, PROJECT_ROOT, GIT_ROOT, DRY_RUN, EXTERNAL_TOOLS_ENABLED, EXTERNAL_TOOL_PROVIDERS } from "./config.js";
+export {
+  hasExternalTools,
+  getAvailableToolsSummary,
+  processToolRequests,
+  detectExternalToolNeeds,
+} from "./external-tools.js";
 export { log, setLogLevel, setJsonOutput, isDebug, startTimer } from "./logger.js";
 export type { LogLevel, LogContext } from "./logger.js";
 export type {
@@ -53,6 +59,10 @@ export type {
   ClaudeResult,
   UserConfig,
   PullRequestOptions,
+  ExternalToolResult,
+  ExternalToolRequest,
+  ExternalToolProviderConfig,
+  ExternalToolCapability,
 } from "./types.js";
 export type { PreflightCheckResult, PreflightResult } from "./preflight.js";
 export { detectPackageManager, globalInstallCommand, installCommand, runScriptCommand, initCommand } from "./package-manager.js";
