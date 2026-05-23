@@ -113,6 +113,70 @@ function isRateLimited(output: string, stderr: string): boolean {
 }
 
 /**
+ * Tail the last N non-empty lines of a string, trimmed and joined with " | ".
+ * Used to surface the most recent stderr/stdout content in error messages
+ * without dumping huge blobs into logs.
+ */
+function tailLines(text: string, maxLines: number, maxChars: number): string {
+  const lines = text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+  const tail = lines.slice(-maxLines).join(" | ");
+  if (tail.length <= maxChars) return tail;
+  return "…" + tail.slice(tail.length - maxChars);
+}
+
+/**
+ * Info extracted from the stream-json `result` event that helps explain
+ * why Claude exited. Populated as events arrive; consumed when the process closes.
+ */
+interface ResultEventInfo {
+  subtype?: string;
+  isError?: boolean;
+  errorText?: string;
+}
+
+/**
+ * Build a descriptive error message for a non-zero Claude exit.
+ * Combines the exit code with the result-event subtype (e.g. error_max_turns),
+ * any error text Claude emitted, and a tail of stderr/stdout for context.
+ */
+function buildExitError(
+  code: number | null,
+  resultInfo: ResultEventInfo,
+  stderr: string,
+  stdout: string,
+): string {
+  const parts: string[] = [`Claude exited with code ${code}`];
+
+  if (resultInfo.subtype && resultInfo.subtype !== "success") {
+    parts.push(`reason: ${resultInfo.subtype}`);
+  }
+
+  if (resultInfo.errorText) {
+    const text = resultInfo.errorText.length > 300
+      ? resultInfo.errorText.slice(0, 300) + "…"
+      : resultInfo.errorText;
+    parts.push(`message: ${text}`);
+  }
+
+  const stderrTail = tailLines(stderr, 5, 400);
+  if (stderrTail) {
+    parts.push(`stderr: ${stderrTail}`);
+  } else {
+    // Fall back to stdout tail when stderr is empty — the CLI may have
+    // emitted the failure reason on stdout instead.
+    const stdoutTail = tailLines(stdout, 3, 300);
+    if (stdoutTail) {
+      parts.push(`last output: ${stdoutTail}`);
+    }
+  }
+
+  return parts.join(" — ");
+}
+
+/**
  * Built-in fallback models to try when the current model hits a usage limit.
  * These use short names accepted by the Claude CLI.
  * Order: general-purpose first, then cheaper/faster, then most capable.
@@ -427,6 +491,7 @@ async function spawnClaudeForTask(
     let stderrOutput = "";
     let timedOut = false;
     let resolvedSessionId: string | undefined;
+    const resultInfo: ResultEventInfo = {};
 
     // Stream-json parsing state
     let jsonBuffer = "";
@@ -536,23 +601,36 @@ async function spawnClaudeForTask(
           }
         }
       } else if (type === "result") {
-        const result = event.result as
-          | Record<string, unknown>
-          | undefined;
-        if (!result?.content || !Array.isArray(result.content)) return;
+        // Capture result-event metadata for richer exit diagnostics.
+        if (typeof event.subtype === "string") resultInfo.subtype = event.subtype;
+        if (typeof event.is_error === "boolean") resultInfo.isError = event.is_error;
+        if (typeof event.error === "string") resultInfo.errorText = event.error;
 
-        // Extract any final text not yet displayed
-        let fullText = "";
-        for (const block of result.content) {
-          if (block.type === "text") {
-            fullText += block.text;
+        const result = event.result;
+
+        // The `result` field may be a plain string (error case) or an
+        // object with content blocks (normal case).
+        if (typeof result === "string") {
+          if (resultInfo.isError && !resultInfo.errorText) {
+            resultInfo.errorText = result;
           }
-        }
+        } else if (result && typeof result === "object") {
+          const resultObj = result as Record<string, unknown>;
+          if (Array.isArray(resultObj.content)) {
+            // Extract any final text not yet displayed
+            let fullText = "";
+            for (const block of resultObj.content) {
+              if (block.type === "text") {
+                fullText += block.text;
+              }
+            }
 
-        if (fullText.length > lastTextLength) {
-          const delta = fullText.slice(lastTextLength);
-          process.stdout.write(delta);
-          output += delta;
+            if (fullText.length > lastTextLength) {
+              const delta = fullText.slice(lastTextLength);
+              process.stdout.write(delta);
+              output += delta;
+            }
+          }
         }
 
         // Show cost summary
@@ -654,8 +732,13 @@ async function spawnClaudeForTask(
         return;
       }
 
-      if (code !== 0 && code !== null) {
-        log("warn", `Claude Code exited with code ${code}`, { taskId, elapsed });
+      const failed = code !== 0 && code !== null;
+      const exitError = failed
+        ? buildExitError(code, resultInfo, stderrOutput, output)
+        : undefined;
+
+      if (failed) {
+        log("warn", exitError!, { taskId, elapsed });
       }
 
       log("debug", `Claude Code execution completed`, { taskId, elapsed });
@@ -682,10 +765,10 @@ async function spawnClaudeForTask(
       }
 
       resolve({
-        success: code === 0 || code === null,
+        success: !failed,
         output,
         needsInput: false,
-        error: code !== 0 ? `Exited with code ${code}` : undefined,
+        error: exitError,
         sessionId: resolvedSessionId,
       });
     });
@@ -859,6 +942,7 @@ async function spawnClaudeForReview(
     let stderrOutput = "";
     let timedOut = false;
     let resolvedSessionId: string | undefined;
+    const resultInfo: ResultEventInfo = {};
     let jsonBuffer = "";
     let lastMessageId = "";
     let lastTextLength = 0;
@@ -948,20 +1032,33 @@ async function spawnClaudeForReview(
           }
         }
       } else if (type === "result") {
-        const result = event.result as Record<string, unknown> | undefined;
-        if (!result?.content || !Array.isArray(result.content)) return;
+        // Capture result-event metadata for richer exit diagnostics.
+        if (typeof event.subtype === "string") resultInfo.subtype = event.subtype;
+        if (typeof event.is_error === "boolean") resultInfo.isError = event.is_error;
+        if (typeof event.error === "string") resultInfo.errorText = event.error;
 
-        let fullText = "";
-        for (const block of result.content) {
-          if (block.type === "text") {
-            fullText += block.text;
+        const result = event.result;
+
+        if (typeof result === "string") {
+          if (resultInfo.isError && !resultInfo.errorText) {
+            resultInfo.errorText = result;
           }
-        }
+        } else if (result && typeof result === "object") {
+          const resultObj = result as Record<string, unknown>;
+          if (Array.isArray(resultObj.content)) {
+            let fullText = "";
+            for (const block of resultObj.content) {
+              if (block.type === "text") {
+                fullText += block.text;
+              }
+            }
 
-        if (fullText.length > lastTextLength) {
-          const delta = fullText.slice(lastTextLength);
-          process.stdout.write(delta);
-          output += delta;
+            if (fullText.length > lastTextLength) {
+              const delta = fullText.slice(lastTextLength);
+              process.stdout.write(delta);
+              output += delta;
+            }
+          }
         }
 
         if (event.cost_usd) {
@@ -1058,8 +1155,13 @@ async function spawnClaudeForReview(
         return;
       }
 
-      if (code !== 0 && code !== null) {
-        log("warn", `Claude Code exited with code ${code}`, { taskId, elapsed });
+      const failed = code !== 0 && code !== null;
+      const exitError = failed
+        ? buildExitError(code, resultInfo, stderrOutput, output)
+        : undefined;
+
+      if (failed) {
+        log("warn", exitError!, { taskId, elapsed });
       }
 
       log("debug", `Claude Code review execution completed`, { taskId, elapsed });
@@ -1081,10 +1183,10 @@ async function spawnClaudeForReview(
       }
 
       resolve({
-        success: code === 0 || code === null,
+        success: !failed,
         output,
         needsInput: false,
-        error: code !== 0 ? `Exited with code ${code}` : undefined,
+        error: exitError,
         sessionId: resolvedSessionId,
       });
     });
