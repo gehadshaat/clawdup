@@ -176,30 +176,21 @@ export async function getTask(taskId: string): Promise<ClickUpTask> {
 
 /**
  * Get dependencies for a task.
- * Returns both `dependencies` (tasks this task blocks) and `waiting_on` (tasks this task waits on).
+ * Returns both `dependencies` (tasks blocked by this one) and `waitingOn` (tasks this one waits on).
+ *
+ * ClickUp returns dependencies inline on the task object — there is no GET endpoint
+ * at `/task/{id}/dependency` (that path only accepts POST/DELETE). Each dependency row
+ * has `task_id` (the blocked task) and `depends_on` (the blocker), so we split the
+ * inline `dependencies` array based on which side of the relation `taskId` is on.
  */
 export async function getTaskDependencies(
   taskId: string,
 ): Promise<{ dependencies: ClickUpDependency[]; waitingOn: ClickUpDependency[] }> {
-  try {
-    const data = await request<{
-      dependencies: ClickUpDependency[];
-      waiting_on: ClickUpDependency[];
-    }>("GET", `/task/${taskId}/dependency`);
-    return {
-      dependencies: data.dependencies || [],
-      waitingOn: data.waiting_on || [],
-    };
-  } catch (err) {
-    const message = (err as Error).message || "";
-    // The dependency endpoint may not exist for all ClickUp plans or task types.
-    // Treat 404 as "no dependencies" rather than a failure.
-    if (message.includes("404")) {
-      log("debug", `Dependency endpoint not available for task ${taskId}, treating as no dependencies`);
-      return { dependencies: [], waitingOn: [] };
-    }
-    throw err;
-  }
+  const task = await getTask(taskId);
+  const all = task.dependencies || [];
+  const waitingOn = all.filter((d) => d.task_id === taskId);
+  const dependencies = all.filter((d) => d.depends_on === taskId);
+  return { dependencies, waitingOn };
 }
 
 /**
