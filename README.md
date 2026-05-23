@@ -303,8 +303,8 @@ If your project has a `CLAUDE.md` file (used by Claude Code for project context)
 | `POLL_INTERVAL_MS`     | No       | `30000`         | Polling interval (ms)               |
 | `RELAUNCH_INTERVAL_MS` | No       | `600000`        | Runner restart interval (ms, 0=off) |
 | `CLAUDE_COMMAND`       | No       | `claude`        | Claude Code CLI command             |
-| `CLAUDE_TIMEOUT_MS`    | No       | `600000`        | Timeout per task (ms)               |
-| `CLAUDE_MAX_TURNS`     | No       | `50`            | Max agentic turns per task          |
+| `CLAUDE_TIMEOUT_MS`    | No       | `1800000`       | Timeout per task (ms)               |
+| `CLAUDE_MAX_TURNS`     | No       | `100`           | Max agentic turns per task          |
 | `LOG_LEVEL`            | No       | `info`          | `debug` / `info` / `warn` / `error` |
 | `STATUS_TODO`          | No       | `to do`         | ClickUp status: to do               |
 | `STATUS_IN_PROGRESS`   | No       | `in progress`   | ClickUp status: in progress         |

@@ -582,8 +582,8 @@ export async function runSetup(): Promise<void> {
   const baseBranch = await ask("Base git branch", "main");
   const branchPrefix = await ask("Branch prefix for task branches", "clickup");
   const pollInterval = await ask("Poll interval in seconds", "30");
-  const claudeTimeout = await ask("Claude timeout per task in seconds", "600");
-  const maxTurns = await ask("Max Claude turns per task", "50");
+  const claudeTimeout = await ask("Claude timeout per task in seconds", "1800");
+  const maxTurns = await ask("Max Claude turns per task", "100");
 
   const clickupSourceLines = useParentTask
     ? `CLICKUP_PARENT_TASK_ID=${parentTaskId}`

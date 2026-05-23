@@ -169,8 +169,8 @@ Project context file used by Claude Code. Automatically included in every task p
 | Variable | Default | Description |
 | --- | --- | --- |
 | `CLAUDE_COMMAND` | `claude` | CLI command to invoke Claude Code. |
-| `CLAUDE_TIMEOUT_MS` | `600000` (10min) | Maximum time Claude Code can run per task. Minimum: 30000ms (30s). |
-| `CLAUDE_MAX_TURNS` | `50` | Maximum agentic turns (tool calls) per task. Range: 1–500. |
+| `CLAUDE_TIMEOUT_MS` | `1800000` (30min) | Maximum time Claude Code can run per task. Minimum: 30000ms (30s). |
+| `CLAUDE_MAX_TURNS` | `100` | Maximum agentic turns (tool calls) per task. Range: 1–500. |
 
 ### ClickUp Statuses
 

@@ -251,10 +251,10 @@ CLICKUP_LIST_ID=
 # CLAUDE_COMMAND=claude
 
 # Timeout for Claude Code per task (milliseconds)
-# CLAUDE_TIMEOUT_MS=600000
+# CLAUDE_TIMEOUT_MS=1800000
 
 # Max agentic turns for Claude Code per task
-# CLAUDE_MAX_TURNS=50
+# CLAUDE_MAX_TURNS=100
 
 # Git branch prefix
 # BRANCH_PREFIX=clickup

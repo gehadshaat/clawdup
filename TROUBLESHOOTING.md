@@ -192,7 +192,7 @@ When Clawdup starts, it checks for tasks in "in progress" status. These indicate
 - Task moved to **"blocked"**
 
 **What happens:**
-Claude Code took longer than the configured timeout (default: 10 minutes / 600,000ms).
+Claude Code took longer than the configured timeout (default: 30 minutes / 1,800,000ms).
 
 **Recovery:**
 1. If partial changes were pushed, review them in the PR

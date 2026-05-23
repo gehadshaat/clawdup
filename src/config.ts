@@ -174,7 +174,7 @@ export const CLAUDE_COMMAND: string = process.env.CLAUDE_COMMAND || "claude";
 export const CLAUDE_TIMEOUT_MS: number = parsePositiveInt(
   "CLAUDE_TIMEOUT_MS",
   process.env.CLAUDE_TIMEOUT_MS,
-  600000,
+  1800000,
 );
 
 if (CLAUDE_TIMEOUT_MS < 30000) {
@@ -188,7 +188,7 @@ if (CLAUDE_TIMEOUT_MS < 30000) {
 export const CLAUDE_MAX_TURNS: number = parsePositiveInt(
   "CLAUDE_MAX_TURNS",
   process.env.CLAUDE_MAX_TURNS,
-  50,
+  100,
 );
 
 if (CLAUDE_MAX_TURNS < 1) {

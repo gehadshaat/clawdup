@@ -397,8 +397,8 @@ CLICKUP_LIST_ID=901234567890
 # BASE_BRANCH=main
 # BRANCH_PREFIX=clickup
 # POLL_INTERVAL_MS=30000
-# CLAUDE_TIMEOUT_MS=600000
-# CLAUDE_MAX_TURNS=50
+# CLAUDE_TIMEOUT_MS=1800000
+# CLAUDE_MAX_TURNS=100
 # LOG_LEVEL=info
 ```
 
@@ -687,8 +687,8 @@ These can be set in `.clawdup.env` or as system environment variables:
 | `BRANCH_PREFIX` | No | `clickup` | Prefix for task branch names |
 | `POLL_INTERVAL_MS` | No | `30000` | How often to poll ClickUp (milliseconds) |
 | `CLAUDE_COMMAND` | No | `claude` | The Claude Code CLI command name |
-| `CLAUDE_TIMEOUT_MS` | No | `600000` | Max time per task for Claude (milliseconds, default 10 min) |
-| `CLAUDE_MAX_TURNS` | No | `50` | Max agentic turns Claude can take per task |
+| `CLAUDE_TIMEOUT_MS` | No | `1800000` | Max time per task for Claude (milliseconds, default 30 min) |
+| `CLAUDE_MAX_TURNS` | No | `100` | Max agentic turns Claude can take per task |
 | `LOG_LEVEL` | No | `info` | Log verbosity: `debug`, `info`, `warn`, `error` |
 | `STATUS_TODO` | No | `to do` | ClickUp status name for "to do" |
 | `STATUS_IN_PROGRESS` | No | `in progress` | ClickUp status name for "in progress" |
@@ -715,11 +715,11 @@ The status names are case-insensitive.
 Adjust how Claude Code works on tasks:
 
 ```env
-# Give Claude more time for complex tasks (15 minutes)
-CLAUDE_TIMEOUT_MS=900000
+# Give Claude more time for complex tasks (1 hour)
+CLAUDE_TIMEOUT_MS=3600000
 
 # Allow more agentic turns for bigger tasks
-CLAUDE_MAX_TURNS=100
+CLAUDE_MAX_TURNS=200
 
 # Increase logging for debugging
 LOG_LEVEL=debug
@@ -876,13 +876,13 @@ git add -A && git commit -m "WIP"
 Increase the timeout for complex tasks:
 
 ```env
-CLAUDE_TIMEOUT_MS=900000
+CLAUDE_TIMEOUT_MS=3600000
 ```
 
 Or increase the max turns:
 
 ```env
-CLAUDE_MAX_TURNS=100
+CLAUDE_MAX_TURNS=200
 ```
 
 ### Task stuck in "in progress"
