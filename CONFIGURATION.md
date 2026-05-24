@@ -171,6 +171,7 @@ Project context file used by Claude Code. Automatically included in every task p
 | `CLAUDE_COMMAND` | `claude` | CLI command to invoke Claude Code. |
 | `CLAUDE_TIMEOUT_MS` | `1800000` (30min) | Maximum time Claude Code can run per task. Minimum: 30000ms (30s). |
 | `CLAUDE_MAX_TURNS` | `100` | Maximum agentic turns (tool calls) per task. Range: 1–500. |
+| `MAX_CONCURRENT_TASKS` | `2` | Number of ClickUp tasks processed in parallel. Each concurrent task runs in its own git worktree under `.clawdup-worktrees/slot-{n}`. Set to `1` to disable parallelism (no worktrees created). Range: 1–10. Note: each slot is a full checkout of the repo, so disk usage scales with this value. Worktrees do not auto-initialize git submodules or LFS — repos relying on those need additional setup per slot. |
 
 ### ClickUp Statuses
 

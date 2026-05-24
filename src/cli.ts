@@ -256,6 +256,11 @@ CLICKUP_LIST_ID=
 # Max agentic turns for Claude Code per task
 # CLAUDE_MAX_TURNS=100
 
+# How many ClickUp tasks the runner works on in parallel.
+# Each concurrent task gets its own git worktree under .clawdup-worktrees/.
+# Set to 1 to disable parallelism. Range: 1-10.
+# MAX_CONCURRENT_TASKS=2
+
 # Git branch prefix
 # BRANCH_PREFIX=clickup
 

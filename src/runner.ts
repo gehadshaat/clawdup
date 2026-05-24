@@ -2,7 +2,7 @@
 
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import { resolve } from "path";
-import { POLL_INTERVAL_MS, RELAUNCH_INTERVAL_MS, STATUS, BASE_BRANCH, PROJECT_ROOT, CLICKUP_LIST_ID, CLICKUP_PARENT_TASK_ID, AUTO_APPROVE, DRY_RUN, BRANCH_PREFIX } from "./config.js";
+import { POLL_INTERVAL_MS, RELAUNCH_INTERVAL_MS, STATUS, BASE_BRANCH, PROJECT_ROOT, GIT_ROOT, CLICKUP_LIST_ID, CLICKUP_PARENT_TASK_ID, AUTO_APPROVE, DRY_RUN, BRANCH_PREFIX, MAX_CONCURRENT_TASKS } from "./config.js";
 import { log, startTimer } from "./logger.js";
 import {
   getTasksByStatus,
@@ -56,6 +56,10 @@ import {
   getPRReviewComments,
   getPRInlineComments,
   getPRCheckStatus,
+  createWorktree,
+  removeWorktree,
+  pruneWorktrees,
+  resetSlotToBase,
 } from "./git-ops.js";
 import {
   runClaudeOnTask,
@@ -70,7 +74,11 @@ import { runPreflightOrAbort } from "./preflight.js";
 import type { ClickUpTask, ClaudeResult } from "./types.js";
 
 let isShuttingDown = false;
-let isProcessing = false;
+// True while pollForTasks is mid-cycle. Guards against re-entrant polling,
+// NOT against concurrent task processing — tasks themselves run in parallel
+// slots (see slotPool below) and `pollForTasks` returns as soon as it has
+// dispatched the new batch.
+let isPolling = false;
 let signalHandlersRegistered = false;
 let interactiveMode = false;
 let shouldRelaunchAfterMerge = false;
@@ -82,6 +90,82 @@ const LOCK_FILE_PATH = resolve(PROJECT_ROOT, ".clawdup.lock");
 // Prevents the same task from being picked up again if a status update
 // fails and the task remains in TODO after processing.
 const processedTaskIds = new Set<string>();
+
+// Tasks currently being worked on by some slot. Added synchronously at pick
+// time (before any await) so the same poll cycle can't double-pick a task.
+const inFlightTaskIds = new Set<string>();
+const inFlightPromises = new Map<string, Promise<void>>();
+
+// --- Slot pool (parallel mode) ---
+
+interface Slot {
+  index: number;
+  path: string;
+  initialized: boolean;
+}
+
+const freeSlots: Slot[] = [];
+let slotPoolInitialized = false;
+
+/**
+ * Set up the slot pool. In single-task mode (MAX_CONCURRENT_TASKS === 1) we
+ * use the main GIT_ROOT checkout directly and skip all worktree machinery.
+ */
+function initSlotPool(): void {
+  if (slotPoolInitialized) return;
+  slotPoolInitialized = true;
+  if (MAX_CONCURRENT_TASKS <= 1) return;
+  for (let i = 0; i < MAX_CONCURRENT_TASKS; i++) {
+    freeSlots.push({
+      index: i,
+      path: resolve(GIT_ROOT, ".clawdup-worktrees", `slot-${i}`),
+      initialized: false,
+    });
+  }
+}
+
+/**
+ * Take a free slot from the pool, lazily creating its worktree on first use.
+ * Returns null if no slot is currently free.
+ */
+async function acquireSlot(): Promise<Slot | null> {
+  if (MAX_CONCURRENT_TASKS <= 1) return null;
+  const slot = freeSlots.shift();
+  if (!slot) return null;
+  if (!slot.initialized) {
+    try {
+      await createWorktree(slot.path, `origin/${BASE_BRANCH}`);
+      slot.initialized = true;
+    } catch (err) {
+      log("error", `Failed to create worktree for slot ${slot.index}: ${(err as Error).message}`);
+      freeSlots.push(slot);
+      return null;
+    }
+  } else {
+    try {
+      await resetSlotToBase(slot.path);
+    } catch (err) {
+      log("warn", `Failed to reset slot ${slot.index} to base; recreating. ${(err as Error).message}`);
+      try { await removeWorktree(slot.path); } catch { /* ignore */ }
+      try {
+        await createWorktree(slot.path, `origin/${BASE_BRANCH}`);
+      } catch (err2) {
+        log("error", `Failed to recreate worktree for slot ${slot.index}: ${(err2 as Error).message}`);
+        freeSlots.push(slot);
+        return null;
+      }
+    }
+  }
+  return slot;
+}
+
+/**
+ * Return a slot to the pool. The worktree is left on disk for reuse —
+ * the next acquireSlot will reset it to base.
+ */
+function releaseSlot(slot: Slot): void {
+  freeSlots.push(slot);
+}
 
 /**
  * Build the 3-tiered project context for Claude.
@@ -198,22 +282,25 @@ function releaseLock(): void {
  * The file is deleted immediately after reading to prevent double-processing
  * if this function is called multiple times (e.g. in both success and finally paths).
  */
-async function processTodoFile(): Promise<void> {
-  if (!existsSync(TODO_FILE_PATH)) return;
+async function processTodoFile(cwd?: string): Promise<void> {
+  // Claude writes the todo file in its working directory. In parallel mode
+  // that's the slot worktree, not PROJECT_ROOT — read from the same place.
+  const todoPath = cwd ? resolve(cwd, ".clawdup.todo.json") : TODO_FILE_PATH;
+  if (!existsSync(todoPath)) return;
 
   // Step 1: Read and delete the file atomically to prevent double-processing.
   // If the process crashes after deletion but before creating tasks,
   // the items are lost — but this is safer than creating duplicates.
   let items: Array<{ title?: string; description?: string }>;
   try {
-    const raw = readFileSync(TODO_FILE_PATH, "utf-8");
+    const raw = readFileSync(todoPath, "utf-8");
     items = JSON.parse(raw) as Array<{ title?: string; description?: string }>;
   } catch (err) {
     log("error", `Failed to read .clawdup.todo.json: ${(err as Error).message}`);
     return;
   } finally {
     try {
-      unlinkSync(TODO_FILE_PATH);
+      unlinkSync(todoPath);
       log("debug", "Deleted .clawdup.todo.json");
     } catch {
       // ignore if already gone
@@ -420,7 +507,7 @@ async function dryRunProcessReturningTask(task: ClickUpTask, prUrl: string): Pro
  * Always starts from the latest base branch and creates a PR immediately
  * so that work is visible from the start.
  */
-async function processTask(task: ClickUpTask): Promise<void> {
+async function processTask(task: ClickUpTask, cwd?: string): Promise<void> {
   if (DRY_RUN) {
     await dryRunProcessTask(task);
     return;
@@ -449,7 +536,7 @@ async function processTask(task: ClickUpTask): Promise<void> {
     await updateTaskStatus(taskId, STATUS.IN_PROGRESS);
 
     // Step 2: Create a feature branch from the latest base branch
-    branchName = await createTaskBranch(taskId, slug);
+    branchName = await createTaskBranch(taskId, slug, cwd);
     log("info", `Working on branch: ${branchName}`);
 
     // Step 3: Check if a PR already exists for this branch (e.g. from a previous run).
@@ -478,36 +565,36 @@ async function processTask(task: ClickUpTask): Promise<void> {
 
     // Step 4: Build 3-tiered context, format the task for Claude, and run it
     // Save HEAD hash before Claude runs so we can detect if Claude commits via Bash
-    const headBefore = await getHeadHash();
+    const headBefore = await getHeadHash(cwd);
     const [comments, projectContext] = await Promise.all([
       getTaskComments(taskId),
       buildProjectContext(task),
     ]);
     const taskPrompt = formatTaskForClaude(task, comments);
-    const result = await runClaudeOnTask(taskPrompt, taskId, { interactive: interactiveMode, projectContext });
-    const headAfter = await getHeadHash();
+    const result = await runClaudeOnTask(taskPrompt, taskId, { interactive: interactiveMode, projectContext, cwd });
+    const headAfter = await getHeadHash(cwd);
     const claudeCommitted = headBefore !== headAfter;
 
     // Step 4b: Process any follow-up tasks Claude created BEFORE committing.
     // This must happen before commitChanges() because git add -A would
     // include the file, and switching branches later would remove it.
-    await processTodoFile();
+    await processTodoFile(cwd);
 
     // Step 5: Handle the result
     if (result.needsInput) {
       // Claude needs more information
-      await handleNeedsInput(task, result, branchName, prUrl);
+      await handleNeedsInput(task, result, branchName, prUrl, cwd);
       return;
     }
 
     if (!result.success) {
       // Claude encountered an error
-      await handleError(task, result, branchName, prUrl, claudeCommitted);
+      await handleError(task, result, branchName, prUrl, claudeCommitted, cwd);
       return;
     }
 
     // Step 6: Check if Claude actually made changes
-    const uncommittedChanges = await hasChanges();
+    const uncommittedChanges = await hasChanges(cwd);
     if (!uncommittedChanges && !claudeCommitted) {
       log(
         "warn",
@@ -524,7 +611,7 @@ async function processTask(task: ClickUpTask): Promise<void> {
       );
       await updateTaskStatus(taskId, STATUS.REQUIRE_INPUT);
       if (prUrl) {
-        await closePRAndCleanup(prUrl, branchName);
+        await closePRAndCleanup(prUrl, branchName, cwd);
       }
       return;
     }
@@ -533,12 +620,12 @@ async function processTask(task: ClickUpTask): Promise<void> {
     if (uncommittedChanges) {
       log("warn", "Claude left uncommitted changes — committing as fallback");
       const commitMsg = generateCommitMessage(task, result.output);
-      await commitChanges(commitMsg);
+      await commitChanges(commitMsg, cwd);
     }
-    await pushBranch(branchName);
+    await pushBranch(branchName, cwd);
 
     // Build PR body with full details
-    const { stat, files } = await getChangesSummary();
+    const { stat, files } = await getChangesSummary(cwd);
     const prBody = generatePRBody(task, result.output, files);
 
     if (!prUrl) {
@@ -561,7 +648,7 @@ async function processTask(task: ClickUpTask): Promise<void> {
 
     if (AUTO_APPROVE) {
       // Auto-approve mode: merge immediately without waiting for manual review
-      await autoApproveAndMerge(task, prUrl, branchName, workSummary);
+      await autoApproveAndMerge(task, prUrl, branchName, workSummary, cwd);
     } else {
       await updateTaskStatus(taskId, STATUS.IN_REVIEW);
       await addTaskComment(
@@ -604,17 +691,17 @@ async function processTask(task: ClickUpTask): Promise<void> {
           log("debug", "Could not close PR during error cleanup");
         }
       }
-      await cleanupBranch(branchName);
+      await cleanupBranch(branchName, cwd);
     }
   } finally {
     // Always return to base branch
     try {
-      await returnToBaseBranch();
+      await returnToBaseBranch(cwd);
     } catch {
       log("warn", "Could not return to base branch");
     }
     // Pick up any follow-up tasks Claude created
-    await processTodoFile();
+    await processTodoFile(cwd);
   }
 }
 
@@ -626,6 +713,7 @@ async function handleNeedsInput(
   result: ClaudeResult,
   branchName: string,
   prUrl: string | null,
+  cwd?: string,
 ): Promise<void> {
   const reason = extractNeedsInputReason(result.output);
 
@@ -641,7 +729,7 @@ async function handleNeedsInput(
   await updateTaskStatus(task.id, STATUS.REQUIRE_INPUT);
 
   // Close the draft PR and clean up the branch since no work was done
-  await closePRAndCleanup(prUrl, branchName);
+  await closePRAndCleanup(prUrl, branchName, cwd);
 }
 
 /**
@@ -653,21 +741,23 @@ async function handleError(
   branchName: string,
   prUrl: string | null,
   claudeCommitted: boolean = false,
+  cwd?: string,
 ): Promise<void> {
   const errorMsg = result.error || "Unknown error";
 
   log("error", `Task ${task.id} failed: ${errorMsg}`);
 
   // Check if there were partial changes
-  const uncommittedChanges = await hasChanges();
+  const uncommittedChanges = await hasChanges(cwd);
 
   if (uncommittedChanges) {
     // There are uncommitted partial changes - commit them and push
     try {
       await commitChanges(
         `[CU-${task.id}] WIP: ${task.name} (partial - automation error)`,
+        cwd,
       );
-      await pushBranch(branchName);
+      await pushBranch(branchName, cwd);
       await notifyTaskCreator(
         task.id,
         task.creator,
@@ -682,12 +772,12 @@ async function handleError(
         "error",
         `Failed to push partial changes: ${(pushErr as Error).message}`,
       );
-      await closePRAndCleanup(prUrl, branchName);
+      await closePRAndCleanup(prUrl, branchName, cwd);
     }
   } else if (claudeCommitted) {
     // Claude committed before erroring — push what's there
     try {
-      await pushBranch(branchName);
+      await pushBranch(branchName, cwd);
       await notifyTaskCreator(
         task.id,
         task.creator,
@@ -702,11 +792,11 @@ async function handleError(
         "error",
         `Failed to push partial commits: ${(pushErr as Error).message}`,
       );
-      await closePRAndCleanup(prUrl, branchName);
+      await closePRAndCleanup(prUrl, branchName, cwd);
     }
   } else {
     // No partial changes - close the draft PR and clean up
-    await closePRAndCleanup(prUrl, branchName);
+    await closePRAndCleanup(prUrl, branchName, cwd);
   }
 
   await updateTaskStatus(task.id, STATUS.BLOCKED);
@@ -715,10 +805,15 @@ async function handleError(
 /**
  * Clean up a branch that won't be used.
  */
-async function cleanupBranch(branchName: string): Promise<void> {
+async function cleanupBranch(branchName: string, cwd?: string): Promise<void> {
   try {
-    await returnToBaseBranch();
-    await deleteLocalBranch(branchName);
+    await returnToBaseBranch(cwd);
+    // The local branch ref is shared across all worktrees — deleting it
+    // from any cwd removes it for everyone. Skip when in a worktree slot
+    // since the branch may still be needed by a parallel re-run.
+    if (!cwd || cwd === GIT_ROOT) {
+      await deleteLocalBranch(branchName);
+    }
   } catch {
     log("debug", `Cleanup of branch ${branchName} failed (non-critical)`);
   }
@@ -730,6 +825,7 @@ async function cleanupBranch(branchName: string): Promise<void> {
 async function closePRAndCleanup(
   prUrl: string | null,
   branchName: string,
+  cwd?: string,
 ): Promise<void> {
   if (prUrl) {
     try {
@@ -738,7 +834,7 @@ async function closePRAndCleanup(
       log("debug", "Could not close PR during cleanup (non-critical)");
     }
   }
-  await cleanupBranch(branchName);
+  await cleanupBranch(branchName, cwd);
 }
 
 /**
@@ -750,9 +846,11 @@ async function closePRAndCleanup(
 async function resolveConflictsWithMerge(
   task: ClickUpTask,
   prUrl: string,
+  cwd?: string,
 ): Promise<boolean> {
   const taskId = task.id;
   const branchName = await findBranchForTask(taskId);
+  const isWorktree = cwd !== undefined && cwd !== GIT_ROOT;
 
   if (!branchName) {
     log("error", `No branch found for task ${taskId} — cannot resolve conflicts`);
@@ -766,22 +864,25 @@ async function resolveConflictsWithMerge(
   }
 
   try {
-    // Checkout the feature branch
-    await syncBaseBranch();
-    await checkoutExistingBranch(branchName);
+    // Checkout the feature branch. In worktree mode the slot has already been
+    // reset to base by the dispatcher, so the syncBaseBranch step is skipped.
+    if (!isWorktree) {
+      await syncBaseBranch(cwd);
+    }
+    await checkoutExistingBranch(branchName, cwd);
 
     // Try merging the base branch into the feature branch
-    const mergedCleanly = await mergeBaseBranch();
+    const mergedCleanly = await mergeBaseBranch(cwd);
 
     if (mergedCleanly) {
       // No conflicts after all — just push the updated branch
       log("info", `Base branch merged cleanly into ${branchName}`);
-      await pushBranch(branchName);
+      await pushBranch(branchName, cwd);
       return true;
     }
 
     // There are conflicts — get the list of conflicted files
-    const conflictedFiles = await getConflictedFiles();
+    const conflictedFiles = await getConflictedFiles(cwd);
     log("info", `Conflicted files: ${conflictedFiles.join(", ")}`);
 
     await addTaskComment(
@@ -791,15 +892,15 @@ async function resolveConflictsWithMerge(
     );
 
     // Use Claude to resolve the conflicts
-    const headBeforeMerge = await getHeadHash();
-    const result = await runClaudeOnConflictResolution(conflictedFiles, branchName);
-    const headAfterMerge = await getHeadHash();
+    const headBeforeMerge = await getHeadHash(cwd);
+    const result = await runClaudeOnConflictResolution(conflictedFiles, branchName, cwd);
+    const headAfterMerge = await getHeadHash(cwd);
     const claudeCommittedMerge = headBeforeMerge !== headAfterMerge;
 
     if (!result.success) {
       log("error", `Claude failed to resolve conflicts for task ${taskId}`);
       if (!claudeCommittedMerge) {
-        await abortMerge();
+        await abortMerge(cwd);
       }
       await notifyTaskCreator(
         taskId,
@@ -811,16 +912,16 @@ async function resolveConflictsWithMerge(
           `See the [Troubleshooting Guide](https://github.com/gehadshaat/clawdup/blob/main/TROUBLESHOOTING.md#merge-conflicts) for recovery steps.`,
       );
       await updateTaskStatus(taskId, STATUS.BLOCKED);
-      await returnToBaseBranch();
+      await returnToBaseBranch(cwd);
       return false;
     }
 
     // Check if there are still conflict markers in the files
-    const remainingConflicts = await getConflictedFiles();
+    const remainingConflicts = await getConflictedFiles(cwd);
     if (remainingConflicts.length > 0) {
       log("warn", `Still ${remainingConflicts.length} conflicted file(s) after Claude resolution`);
       if (!claudeCommittedMerge) {
-        await abortMerge();
+        await abortMerge(cwd);
       }
       await notifyTaskCreator(
         taskId,
@@ -830,7 +931,7 @@ async function resolveConflictsWithMerge(
           `Please resolve the remaining conflicts manually.\nPR: ${prUrl}`,
       );
       await updateTaskStatus(taskId, STATUS.BLOCKED);
-      await returnToBaseBranch();
+      await returnToBaseBranch(cwd);
       return false;
     }
 
@@ -839,9 +940,9 @@ async function resolveConflictsWithMerge(
       log("info", "Claude already committed the merge resolution");
     } else {
       log("warn", "Claude did not commit the merge resolution — committing as fallback");
-      await commitMergeResolution();
+      await commitMergeResolution(cwd);
     }
-    await pushBranch(branchName);
+    await pushBranch(branchName, cwd);
 
     log("info", `Conflicts resolved and pushed for task ${taskId}`);
     await addTaskComment(
@@ -849,19 +950,19 @@ async function resolveConflictsWithMerge(
       `✅ Merge conflicts resolved automatically. The PR is now ready to merge.`,
     );
 
-    await returnToBaseBranch();
+    await returnToBaseBranch(cwd);
     return true;
   } catch (err) {
     log("error", `Error resolving conflicts for task ${taskId}: ${(err as Error).message}`);
 
     // Best-effort abort merge and return to base
     try {
-      await abortMerge();
+      await abortMerge(cwd);
     } catch {
       log("debug", "Could not abort merge (may not be in merge state)");
     }
     try {
-      await returnToBaseBranch();
+      await returnToBaseBranch(cwd);
     } catch {
       log("debug", "Could not return to base branch after conflict resolution failure");
     }
@@ -888,6 +989,7 @@ async function autoApproveAndMerge(
   prUrl: string,
   branchName: string,
   workSummary: string,
+  cwd?: string,
 ): Promise<boolean> {
   const taskId = task.id;
 
@@ -900,7 +1002,7 @@ async function autoApproveAndMerge(
 
     if (mergeability === "CONFLICTING") {
       log("info", `PR has conflicts. Attempting to resolve before auto-merge.`, { taskId });
-      const resolved = await resolveConflictsWithMerge(task, prUrl);
+      const resolved = await resolveConflictsWithMerge(task, prUrl, cwd);
       if (!resolved) {
         return false; // resolveConflictsWithMerge handles status updates
       }
@@ -1186,7 +1288,7 @@ async function collectReviewFeedback(
  * Instead of starting from scratch, checks out the existing branch,
  * gathers new comments for context, and runs Claude to continue/fix the work.
  */
-async function processReturningTask(task: ClickUpTask, prUrl: string): Promise<void> {
+async function processReturningTask(task: ClickUpTask, prUrl: string, cwd?: string): Promise<void> {
   if (DRY_RUN) {
     await dryRunProcessReturningTask(task, prUrl);
     return;
@@ -1195,6 +1297,7 @@ async function processReturningTask(task: ClickUpTask, prUrl: string): Promise<v
   const taskId = task.id;
   const taskName = task.name;
   const timer = startTimer();
+  const isWorktree = cwd !== undefined && cwd !== GIT_ROOT;
 
   log("info", `\n${"=".repeat(60)}`);
   log("info", `Processing returning task: ${taskName} (${taskId})`, { taskId });
@@ -1222,7 +1325,7 @@ async function processReturningTask(task: ClickUpTask, prUrl: string): Promise<v
   if (prState === "closed") {
     // PR was closed without merging — treat as a fresh task
     log("info", `PR was closed for task ${taskId}. Processing as new task.`);
-    await processTask(task);
+    await processTask(task, cwd);
     return;
   }
 
@@ -1250,19 +1353,22 @@ async function processReturningTask(task: ClickUpTask, prUrl: string): Promise<v
       `🤖 Automation detected this task was moved back to TODO with an existing PR. Continuing work on it.\n\nPR: ${prUrl}`,
     );
 
-    // Checkout the existing branch
-    await syncBaseBranch();
-    await checkoutExistingBranch(branchName);
+    // Checkout the existing branch. In worktree mode the slot has already been
+    // reset to base by the dispatcher, so we skip syncBaseBranch here.
+    if (!isWorktree) {
+      await syncBaseBranch(cwd);
+    }
+    await checkoutExistingBranch(branchName, cwd);
 
     // Merge base branch to get latest changes
-    const mergedCleanly = await mergeBaseBranch();
+    const mergedCleanly = await mergeBaseBranch(cwd);
     if (!mergedCleanly) {
-      const conflictedFiles = await getConflictedFiles();
+      const conflictedFiles = await getConflictedFiles(cwd);
       log("info", `Branch has conflicts with base: ${conflictedFiles.join(", ")}`);
 
-      const conflictResult = await runClaudeOnConflictResolution(conflictedFiles, branchName);
+      const conflictResult = await runClaudeOnConflictResolution(conflictedFiles, branchName, cwd);
       if (!conflictResult.success) {
-        await abortMerge();
+        await abortMerge(cwd);
         await notifyTaskCreator(
           taskId,
           task.creator,
@@ -1271,31 +1377,31 @@ async function processReturningTask(task: ClickUpTask, prUrl: string): Promise<v
             `Please resolve conflicts manually.\nPR: ${prUrl}`,
         );
         await updateTaskStatus(taskId, STATUS.BLOCKED);
-        await returnToBaseBranch();
+        await returnToBaseBranch(cwd);
         return;
       }
 
-      const remaining = await getConflictedFiles();
+      const remaining = await getConflictedFiles(cwd);
       if (remaining.length > 0) {
-        await abortMerge();
+        await abortMerge(cwd);
         await notifyTaskCreator(
           taskId,
           task.creator,
           `⚠️ Some merge conflicts remain after automatic resolution:\n${remaining.map((f) => `- \`${f}\``).join("\n")}\n\nPlease resolve manually.\nPR: ${prUrl}`,
         );
         await updateTaskStatus(taskId, STATUS.BLOCKED);
-        await returnToBaseBranch();
+        await returnToBaseBranch(cwd);
         return;
       }
 
-      if (await hasChanges()) {
-        await commitMergeResolution();
+      if (await hasChanges(cwd)) {
+        await commitMergeResolution(cwd);
       }
     }
 
     // Gather new comments as context for why the task was moved back
     const feedback = await collectReviewFeedback(task, prUrl);
-    const headBefore = await getHeadHash();
+    const headBefore = await getHeadHash(cwd);
     const [comments, projectContext] = await Promise.all([
       getTaskComments(taskId),
       buildProjectContext(task),
@@ -1310,19 +1416,19 @@ async function processReturningTask(task: ClickUpTask, prUrl: string): Promise<v
         taskPrompt,
         taskId,
         feedback,
-        { interactive: interactiveMode, projectContext },
+        { interactive: interactiveMode, projectContext, cwd },
       );
     } else {
       // No specific feedback — re-run Claude on the task with existing code context
       log("info", `No specific feedback found for returning task ${taskId}. Re-running Claude on the task.`);
-      result = await runClaudeOnTask(taskPrompt, taskId, { interactive: interactiveMode, projectContext });
+      result = await runClaudeOnTask(taskPrompt, taskId, { interactive: interactiveMode, projectContext, cwd });
     }
 
-    const headAfter = await getHeadHash();
+    const headAfter = await getHeadHash(cwd);
     const claudeCommitted = headBefore !== headAfter;
 
     // Process any follow-up tasks
-    await processTodoFile();
+    await processTodoFile(cwd);
 
     // Handle needs-input case
     if (result.needsInput) {
@@ -1335,18 +1441,18 @@ async function processReturningTask(task: ClickUpTask, prUrl: string): Promise<v
           `Please provide the requested details.\nPR: ${prUrl}`,
       );
       await updateTaskStatus(taskId, STATUS.REQUIRE_INPUT);
-      await returnToBaseBranch();
+      await returnToBaseBranch(cwd);
       return;
     }
 
     if (!result.success) {
       log("error", `Returning task ${taskId} failed: ${result.error}`);
-      const uncommittedChanges = await hasChanges();
+      const uncommittedChanges = await hasChanges(cwd);
       if (uncommittedChanges || claudeCommitted) {
         if (uncommittedChanges) {
-          await commitChanges(`[CU-${taskId}] WIP: ${taskName} (partial - automation error)`);
+          await commitChanges(`[CU-${taskId}] WIP: ${taskName} (partial - automation error)`, cwd);
         }
-        await pushBranch(branchName);
+        await pushBranch(branchName, cwd);
         await notifyTaskCreator(
           taskId,
           task.creator,
@@ -1363,12 +1469,12 @@ async function processReturningTask(task: ClickUpTask, prUrl: string): Promise<v
         );
       }
       await updateTaskStatus(taskId, STATUS.BLOCKED);
-      await returnToBaseBranch();
+      await returnToBaseBranch(cwd);
       return;
     }
 
     // Check if Claude actually made changes
-    const uncommittedChanges = await hasChanges();
+    const uncommittedChanges = await hasChanges(cwd);
     if (!uncommittedChanges && !claudeCommitted) {
       log("warn", `Claude completed but made no changes for returning task ${taskId}`);
       await notifyTaskCreator(
@@ -1379,7 +1485,7 @@ async function processReturningTask(task: ClickUpTask, prUrl: string): Promise<v
           `PR: ${prUrl}\n\nPlease review the PR.`,
       );
       await updateTaskStatus(taskId, STATUS.IN_REVIEW);
-      await returnToBaseBranch();
+      await returnToBaseBranch(cwd);
       return;
     }
 
@@ -1387,12 +1493,12 @@ async function processReturningTask(task: ClickUpTask, prUrl: string): Promise<v
     if (uncommittedChanges) {
       log("warn", "Claude left uncommitted changes — committing as fallback");
       const commitMsg = generateCommitMessage(task, result.output);
-      await commitChanges(commitMsg);
+      await commitChanges(commitMsg, cwd);
     }
-    await pushBranch(branchName);
+    await pushBranch(branchName, cwd);
 
     // Update the PR body and mark it as ready for review
-    const { stat, files } = await getChangesSummary();
+    const { stat, files } = await getChangesSummary(cwd);
     const prBody = generatePRBody(task, result.output, files);
     await updatePullRequest(prUrl, { body: prBody });
     await markPRReady(prUrl);
@@ -1402,7 +1508,7 @@ async function processReturningTask(task: ClickUpTask, prUrl: string): Promise<v
 
     if (AUTO_APPROVE) {
       // Auto-approve mode: merge immediately without waiting for manual review
-      await autoApproveAndMerge(task, prUrl, branchName, workSummary);
+      await autoApproveAndMerge(task, prUrl, branchName, workSummary, cwd);
     } else {
       await updateTaskStatus(taskId, STATUS.IN_REVIEW);
       await addTaskComment(
@@ -1433,11 +1539,11 @@ async function processReturningTask(task: ClickUpTask, prUrl: string): Promise<v
     }
   } finally {
     try {
-      await returnToBaseBranch();
+      await returnToBaseBranch(cwd);
     } catch {
       log("warn", "Could not return to base branch");
     }
-    await processTodoFile();
+    await processTodoFile(cwd);
   }
 }
 
@@ -1590,16 +1696,64 @@ async function recoverOrphanedTasks(): Promise<void> {
 }
 
 /**
- * Main polling loop.
+ * Dispatch a single task into a worktree slot (or the main checkout in
+ * single-task mode). Returns the promise tracking the task; the caller is
+ * responsible for registering it in `inFlightPromises` and the in-flight set.
+ *
+ * IMPORTANT: callers must add the task ID to `inFlightTaskIds` BEFORE
+ * awaiting this function so that the same poll cycle can't double-pick it.
+ */
+async function dispatchTask(task: ClickUpTask, existingPrUrl: string | null): Promise<void> {
+  let slot: Slot | null = null;
+  let cwd: string | undefined = undefined;
+
+  if (MAX_CONCURRENT_TASKS > 1) {
+    slot = await acquireSlot();
+    if (!slot) {
+      // No slot available — should never hit this since pollForTasks checks
+      // capacity first, but be defensive.
+      log("warn", `No worktree slot available for task ${task.id}; processing in main tree`);
+    } else {
+      cwd = slot.path;
+      log("info", `Task ${task.id} dispatched to slot ${slot.index} (${slot.path})`);
+    }
+  }
+
+  try {
+    if (existingPrUrl) {
+      await processReturningTask(task, existingPrUrl, cwd);
+    } else {
+      await processTask(task, cwd);
+    }
+  } finally {
+    if (slot) releaseSlot(slot);
+  }
+}
+
+/**
+ * Main polling loop. In parallel mode, dispatches up to (MAX_CONCURRENT_TASKS
+ * - inFlight) tasks per cycle without waiting for them to finish — the loop
+ * keeps polling at POLL_INTERVAL_MS so tasks run truly in parallel.
  */
 async function pollForTasks(): Promise<void> {
-  if (isShuttingDown || isProcessing) return;
+  if (isShuttingDown || isPolling) return;
+
+  // In MAX=1 (single-tree) mode, the in-flight task is using the main
+  // checkout that approved-task processing also touches. Skip the whole
+  // cycle to preserve the previous serial behavior. In parallel mode
+  // tasks live in worktree slots so approved-task processing is safe to
+  // run alongside them.
+  if (MAX_CONCURRENT_TASKS === 1 && inFlightTaskIds.size > 0) {
+    return;
+  }
 
   const pollTimer = startTimer();
   try {
-    isProcessing = true;
+    isPolling = true;
 
-    // First, check for approved tasks that need their PRs merged
+    // First, check for approved tasks that need their PRs merged.
+    // Approved merges run sequentially in the main checkout — they're fast
+    // and we'd rather not consume a slot for a `gh pr merge` call.
     const approvedTasks = await getTasksByStatus(STATUS.APPROVED);
     for (const task of approvedTasks) {
       if (isShuttingDown) break;
@@ -1615,27 +1769,38 @@ async function pollForTasks(): Promise<void> {
       return;
     }
 
+    // Compute remaining capacity: how many more tasks we can start this cycle.
+    const capacity = Math.max(0, MAX_CONCURRENT_TASKS - inFlightTaskIds.size);
+    if (capacity === 0) {
+      log("debug", `All ${MAX_CONCURRENT_TASKS} slot(s) busy. Waiting for in-flight tasks.`);
+      return;
+    }
+
     // Then, check for TODO tasks to implement
     const tasks = await getTasksByStatus(STATUS.TODO);
 
-    // Filter out tasks already processed in this session to prevent
-    // double-processing if a status update failed after successful work.
-    const eligibleTasks = tasks.filter((t) => !processedTaskIds.has(t.id));
+    // Filter out tasks already processed this session AND tasks already
+    // being worked on by some slot right now.
+    const eligibleTasks = tasks.filter(
+      (t) => !processedTaskIds.has(t.id) && !inFlightTaskIds.has(t.id),
+    );
 
     if (eligibleTasks.length === 0) {
       if (tasks.length > 0) {
-        log("debug", `${tasks.length} TODO task(s) found but all already processed in this session. Waiting...`);
+        log("debug", `${tasks.length} TODO task(s) found but all already processed or in flight. Waiting...`);
       } else {
         log("debug", "No tasks found. Waiting...");
       }
       return;
     }
 
-    // Find the first eligible task whose dependencies are all resolved
-    let task: ClickUpTask | null = null;
+    // Walk the eligible list and pick up to `capacity` tasks whose
+    // dependencies are all resolved.
+    const picked: ClickUpTask[] = [];
     let blockedCount = 0;
     for (const candidate of eligibleTasks) {
       if (isShuttingDown) return;
+      if (picked.length >= capacity) break;
 
       try {
         const unresolved = await getUnresolvedDependencies(candidate.id);
@@ -1657,35 +1822,58 @@ async function pollForTasks(): Promise<void> {
         );
       }
 
-      task = candidate;
-      break;
+      picked.push(candidate);
     }
 
-    if (!task) {
-      log(
-        "info",
-        `${eligibleTasks.length} TODO task(s) found but all ${blockedCount} are blocked by unresolved dependencies — none will be worked on until their dependencies are completed. Waiting for next poll cycle...`,
-      );
+    if (picked.length === 0) {
+      if (blockedCount > 0) {
+        log(
+          "info",
+          `${eligibleTasks.length} TODO task(s) found but all ${blockedCount} are blocked by unresolved dependencies — none will be worked on until their dependencies are completed. Waiting for next poll cycle...`,
+        );
+      }
       return;
     }
 
     if (blockedCount > 0) {
-      log("info", `Skipped ${blockedCount} task(s) due to unresolved dependencies. Picking next eligible task.`);
+      log("info", `Skipped ${blockedCount} task(s) due to unresolved dependencies.`);
     }
 
-    processedTaskIds.add(task.id);
+    log(
+      "info",
+      `Dispatching ${picked.length} task(s) to ${picked.length === 1 ? "slot" : "slots"} (in-flight: ${inFlightTaskIds.size}/${MAX_CONCURRENT_TASKS})`,
+    );
 
-    // Check if this is a returning task (already has a PR in its comments)
-    const existingPrUrl = await findPRUrlInComments(task.id);
-    if (existingPrUrl) {
-      await processReturningTask(task, existingPrUrl);
-    } else {
-      await processTask(task);
+    // Look up existing PR URLs in parallel so dispatch isn't bottlenecked
+    // on serial API calls.
+    const dispatchEntries = await Promise.all(
+      picked.map(async (task) => {
+        const existingPrUrl = await findPRUrlInComments(task.id);
+        return { task, existingPrUrl };
+      }),
+    );
+
+    for (const { task, existingPrUrl } of dispatchEntries) {
+      // CRITICAL: mark in-flight synchronously before the await chain in
+      // dispatchTask, otherwise the next poll could double-pick this task.
+      processedTaskIds.add(task.id);
+      inFlightTaskIds.add(task.id);
+
+      const promise = dispatchTask(task, existingPrUrl)
+        .catch((err) => {
+          log("error", `Unhandled error in dispatched task ${task.id}: ${(err as Error).message}`);
+        })
+        .finally(() => {
+          inFlightTaskIds.delete(task.id);
+          inFlightPromises.delete(task.id);
+        });
+
+      inFlightPromises.set(task.id, promise);
     }
   } catch (err) {
     log("error", `Polling error: ${(err as Error).message}`);
   } finally {
-    isProcessing = false;
+    isPolling = false;
     log("debug", "Poll cycle completed", { elapsed: pollTimer() });
   }
 }
@@ -1739,9 +1927,11 @@ export async function runSingleTask(taskId: string, options?: { interactive?: bo
 export async function startRunner(options?: { interactive?: boolean }): Promise<boolean> {
   // Reset state for fresh run (supports relaunch loop)
   isShuttingDown = false;
-  isProcessing = false;
+  isPolling = false;
   shouldRelaunchAfterMerge = false;
   processedTaskIds.clear();
+  inFlightTaskIds.clear();
+  inFlightPromises.clear();
   interactiveMode = options?.interactive ?? false;
 
   if (DRY_RUN) {
@@ -1755,6 +1945,7 @@ export async function startRunner(options?: { interactive?: boolean }): Promise<
   log("info", `Task source: ${CLICKUP_PARENT_TASK_ID ? `parent task ${CLICKUP_PARENT_TASK_ID} (subtasks)` : `list ${CLICKUP_LIST_ID}`}`);
   log("info", `Polling interval: ${POLL_INTERVAL_MS / 1000}s`);
   log("info", `Base branch: ${BASE_BRANCH}`);
+  log("info", `Max concurrent tasks: ${MAX_CONCURRENT_TASKS}${MAX_CONCURRENT_TASKS > 1 ? " (parallel mode — worktrees under .clawdup-worktrees/)" : ""}`);
   if (AUTO_APPROVE) {
     log("info", "Auto-approve mode: ENABLED — PRs will be merged immediately after completion");
   }
@@ -1799,24 +1990,33 @@ export async function startRunner(options?: { interactive?: boolean }): Promise<
   // interfere with fresh branch creation or cause checkout issues.
   await pruneLocalBranches();
 
+  // Set up the worktree slot pool (parallel mode) and clear out any
+  // stale worktree registrations left over from a crashed prior run.
+  await pruneWorktrees();
+  initSlotPool();
+
   // Recover any tasks left "in progress" from a previous crash
   await recoverOrphanedTasks();
 
   // Set up graceful shutdown (only register once to avoid duplicate listeners)
   if (!signalHandlersRegistered) {
-    process.on("SIGINT", () => {
-      log("info", "\nReceived SIGINT. Shutting down gracefully...");
+    const shutdown = (signalName: string) => {
+      log("info", `\nReceived ${signalName}. Shutting down gracefully...`);
       isShuttingDown = true;
-      releaseLock();
-      if (!isProcessing) process.exit(0);
-    });
-
-    process.on("SIGTERM", () => {
-      log("info", "\nReceived SIGTERM. Shutting down gracefully...");
-      isShuttingDown = true;
-      releaseLock();
-      if (!isProcessing) process.exit(0);
-    });
+      // If nothing is in flight and we're not mid-poll, exit immediately.
+      // Otherwise allow the polling-interval / in-flight-task code paths
+      // to finish — they observe isShuttingDown.
+      if (!isPolling && inFlightTaskIds.size === 0) {
+        releaseLock();
+        process.exit(0);
+      }
+      log(
+        "info",
+        `Waiting for ${inFlightTaskIds.size} in-flight task(s) to finish...`,
+      );
+    };
+    process.on("SIGINT", () => shutdown("SIGINT"));
+    process.on("SIGTERM", () => shutdown("SIGTERM"));
 
     process.on("exit", () => {
       releaseLock();
@@ -1832,10 +2032,19 @@ export async function startRunner(options?: { interactive?: boolean }): Promise<
   // Initial poll
   await pollForTasks();
 
+  // Wait for any in-flight tasks before relaunching or shutting down,
+  // so the next runner instance doesn't race with this one's slots.
+  const drainInFlight = async (): Promise<void> => {
+    if (inFlightTaskIds.size === 0) return;
+    log("info", `Waiting for ${inFlightTaskIds.size} in-flight task(s) before relaunch/shutdown...`);
+    await Promise.all(Array.from(inFlightPromises.values()));
+  };
+
   // Check if relaunch is needed — either after a merge or when the timer expires
   const shouldRelaunchNow = shouldRelaunchAfterMerge
     || (relaunchEnabled && Date.now() - runnerStartTime >= RELAUNCH_INTERVAL_MS);
-  if (shouldRelaunchNow && !isProcessing && !isShuttingDown) {
+  if (shouldRelaunchNow && !isPolling && !isShuttingDown) {
+    await drainInFlight();
     log("info", shouldRelaunchAfterMerge
       ? "Merge completed — rebuilding and relaunching to pick up latest code..."
       : "Relaunch interval reached. Pulling base branch before relaunch...");
@@ -1854,6 +2063,8 @@ export async function startRunner(options?: { interactive?: boolean }): Promise<
     const interval = setInterval(async () => {
       if (isShuttingDown) {
         clearInterval(interval);
+        await drainInFlight();
+        releaseLock();
         resolve(false);
         return;
       }
@@ -1863,8 +2074,9 @@ export async function startRunner(options?: { interactive?: boolean }): Promise<
       // Check if relaunch is needed — either after a merge or when the timer expires
       const shouldRelaunch = shouldRelaunchAfterMerge
         || (relaunchEnabled && Date.now() - runnerStartTime >= RELAUNCH_INTERVAL_MS);
-      if (shouldRelaunch && !isProcessing && !isShuttingDown) {
+      if (shouldRelaunch && !isPolling && !isShuttingDown) {
         clearInterval(interval);
+        await drainInFlight();
         log("info", shouldRelaunchAfterMerge
           ? "Merge completed — rebuilding and relaunching to pick up latest code..."
           : "Relaunch interval reached. Pulling base branch before relaunch...");

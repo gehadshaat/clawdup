@@ -9,14 +9,14 @@ import type { PullRequestOptions } from "./types.js";
 const execFileAsync = promisify(execFile);
 
 /**
- * Run a git command from the repository root.
- * Uses GIT_ROOT (repo root) so git operations work correctly in monorepos.
+ * Run a git command in a specific working directory.
+ * Used to target worktree slots when MAX_CONCURRENT_TASKS > 1.
  */
-async function git(...args: string[]): Promise<string> {
-  log("debug", `$ git ${args.join(" ")}`);
+async function gitAt(cwd: string, ...args: string[]): Promise<string> {
+  log("debug", `$ git ${args.join(" ")} (cwd: ${cwd})`);
   try {
     const { stdout, stderr } = await execFileAsync("git", args, {
-      cwd: GIT_ROOT,
+      cwd,
       timeout: 30000,
     });
     if (
@@ -30,6 +30,14 @@ async function git(...args: string[]): Promise<string> {
   } catch (err) {
     throw new Error(`git ${args.join(" ")} failed: ${(err as Error).message}`);
   }
+}
+
+/**
+ * Run a git command from the repository root.
+ * Uses GIT_ROOT (repo root) so git operations work correctly in monorepos.
+ */
+async function git(...args: string[]): Promise<string> {
+  return gitAt(GIT_ROOT, ...args);
 }
 
 /**
@@ -75,16 +83,17 @@ export async function getCurrentBranch(): Promise<string> {
  * that allows subsequent git operations (checkout, branch) to succeed
  * even after a crash or interrupted operation.
  */
-export async function ensureCleanState(): Promise<void> {
+export async function ensureCleanState(cwd?: string): Promise<void> {
   if (DRY_RUN) {
     log("info", "[DRY RUN] Would ensure git state is clean");
     return;
   }
+  const dir = cwd ?? GIT_ROOT;
   log("info", "Ensuring git state is clean before proceeding");
 
   // Abort any in-progress merge
   try {
-    await git("merge", "--abort");
+    await gitAt(dir, "merge", "--abort");
     log("info", "Aborted in-progress merge");
   } catch {
     // No merge in progress — ignore
@@ -92,7 +101,7 @@ export async function ensureCleanState(): Promise<void> {
 
   // Abort any in-progress rebase
   try {
-    await git("rebase", "--abort");
+    await gitAt(dir, "rebase", "--abort");
     log("info", "Aborted in-progress rebase");
   } catch {
     // No rebase in progress — ignore
@@ -100,7 +109,7 @@ export async function ensureCleanState(): Promise<void> {
 
   // Abort any in-progress cherry-pick
   try {
-    await git("cherry-pick", "--abort");
+    await gitAt(dir, "cherry-pick", "--abort");
     log("info", "Aborted in-progress cherry-pick");
   } catch {
     // No cherry-pick in progress — ignore
@@ -108,11 +117,11 @@ export async function ensureCleanState(): Promise<void> {
 
   // Reset index and working tree to HEAD
   try {
-    await git("reset", "--hard", "HEAD");
+    await gitAt(dir, "reset", "--hard", "HEAD");
   } catch {
     // If reset --hard HEAD fails (e.g. invalid HEAD), try without ref
     try {
-      await git("reset", "--hard");
+      await gitAt(dir, "reset", "--hard");
     } catch (err) {
       log("warn", `Failed to reset: ${(err as Error).message}`);
     }
@@ -120,7 +129,7 @@ export async function ensureCleanState(): Promise<void> {
 
   // Clean untracked files and directories
   try {
-    await git("clean", "-fd");
+    await gitAt(dir, "clean", "-fd");
   } catch (err) {
     log("warn", `Failed to clean untracked files: ${(err as Error).message}`);
   }
@@ -132,38 +141,39 @@ export async function ensureCleanState(): Promise<void> {
  * Uses force checkout (-f) to bypass broken index states (e.g. unresolved merges).
  * Falls back to creating the local branch from remote if it doesn't exist locally.
  */
-export async function syncBaseBranch(): Promise<void> {
+export async function syncBaseBranch(cwd?: string): Promise<void> {
   if (DRY_RUN) {
     log("info", `[DRY RUN] Would sync base branch: ${BASE_BRANCH}`);
     return;
   }
+  const dir = cwd ?? GIT_ROOT;
   log("info", `Syncing base branch: ${BASE_BRANCH}`);
-  await ensureCleanState();
+  await ensureCleanState(dir);
 
   // Fetch all refs from origin (not just base branch) so that remote branch
   // lookups (e.g. findBranchForTask) have up-to-date information.
   // Use --prune to clean up stale remote tracking refs for deleted branches.
   try {
-    await git("fetch", "origin", "--prune");
+    await gitAt(dir, "fetch", "origin", "--prune");
   } catch {
     // Fall back to fetching just the base branch if full fetch fails
-    await git("fetch", "origin", BASE_BRANCH);
+    await gitAt(dir, "fetch", "origin", BASE_BRANCH);
   }
 
   // Force checkout to bypass broken index (unresolved merges, etc.)
   try {
-    await git("checkout", "-f", BASE_BRANCH);
+    await gitAt(dir, "checkout", "-f", BASE_BRANCH);
   } catch {
     // Local branch may not exist (e.g. all branches were deleted).
     // Create it from remote.
     try {
-      await git("checkout", "-f", "-B", BASE_BRANCH, `origin/${BASE_BRANCH}`);
+      await gitAt(dir, "checkout", "-f", "-B", BASE_BRANCH, `origin/${BASE_BRANCH}`);
     } catch (err) {
       throw new Error(`Cannot checkout ${BASE_BRANCH}: ${(err as Error).message}`);
     }
   }
 
-  await git("reset", "--hard", `origin/${BASE_BRANCH}`);
+  await gitAt(dir, "reset", "--hard", `origin/${BASE_BRANCH}`);
 }
 
 /**
@@ -175,27 +185,35 @@ export async function syncBaseBranch(): Promise<void> {
 export async function createTaskBranch(
   taskId: string,
   slug: string,
+  cwd?: string,
 ): Promise<string> {
   const branchName = `${BRANCH_PREFIX}/CU-${taskId}-${slug}`;
   if (DRY_RUN) {
     log("info", `[DRY RUN] Would create branch: ${branchName}`);
     return branchName;
   }
+  const dir = cwd ?? GIT_ROOT;
+  const isWorktree = dir !== GIT_ROOT;
   log("info", `Creating branch: ${branchName}`);
 
-  // Make sure base is up to date
-  await syncBaseBranch();
+  // For the main checkout, sync base before branching. For a slot worktree,
+  // the runner has already done `resetSlotToBase(dir)` before calling us —
+  // syncing again would attempt `checkout BASE_BRANCH`, which git refuses
+  // when the branch is checked out elsewhere.
+  if (!isWorktree) {
+    await syncBaseBranch(dir);
+  }
 
   // Check if a branch for this task already exists (local or remote)
   const existingBranch = await findBranchForTask(taskId);
   if (existingBranch) {
     log("info", `Branch already exists for task ${taskId}: ${existingBranch}. Checking it out.`);
-    await checkoutExistingBranch(existingBranch);
+    await checkoutExistingBranch(existingBranch, dir);
     return existingBranch;
   }
 
-  // Create new branch from base
-  await git("checkout", "-b", branchName);
+  // Create new branch from current HEAD (which is at base ref).
+  await gitAt(dir, "checkout", "-b", branchName);
 
   return branchName;
 }
@@ -203,8 +221,8 @@ export async function createTaskBranch(
 /**
  * Check if the working directory has changes.
  */
-export async function hasChanges(): Promise<boolean> {
-  const status = await git("status", "--porcelain");
+export async function hasChanges(cwd?: string): Promise<boolean> {
+  const status = await gitAt(cwd ?? GIT_ROOT, "status", "--porcelain");
   return status.length > 0;
 }
 
@@ -212,20 +230,21 @@ export async function hasChanges(): Promise<boolean> {
  * Get the current HEAD commit hash (full SHA).
  * Used to detect if Claude committed changes via Bash.
  */
-export async function getHeadHash(): Promise<string> {
-  return git("rev-parse", "HEAD");
+export async function getHeadHash(cwd?: string): Promise<string> {
+  return gitAt(cwd ?? GIT_ROOT, "rev-parse", "HEAD");
 }
 
 /**
  * Get a summary of changes between the base branch and HEAD (for PR description).
  * Diffs BASE_BRANCH...HEAD so it works correctly after commits have been made.
  */
-export async function getChangesSummary(): Promise<{
+export async function getChangesSummary(cwd?: string): Promise<{
   stat: string;
   files: string[];
 }> {
-  const diffStat = await git("diff", "--stat", `${BASE_BRANCH}...HEAD`);
-  const filesChanged = await git("diff", "--name-only", `${BASE_BRANCH}...HEAD`);
+  const dir = cwd ?? GIT_ROOT;
+  const diffStat = await gitAt(dir, "diff", "--stat", `${BASE_BRANCH}...HEAD`);
+  const filesChanged = await gitAt(dir, "diff", "--name-only", `${BASE_BRANCH}...HEAD`);
   return {
     stat: diffStat,
     files: filesChanged.split("\n").filter(Boolean),
@@ -235,15 +254,16 @@ export async function getChangesSummary(): Promise<{
 /**
  * Stage all changes and commit.
  */
-export async function commitChanges(message: string): Promise<string> {
+export async function commitChanges(message: string, cwd?: string): Promise<string> {
   if (DRY_RUN) {
     log("info", `[DRY RUN] Would commit: ${message}`);
     return "dry-run";
   }
+  const dir = cwd ?? GIT_ROOT;
   log("info", "Staging and committing changes");
-  await git("add", "-A");
-  await git("commit", "-m", message);
-  const hash = await git("rev-parse", "--short", "HEAD");
+  await gitAt(dir, "add", "-A");
+  await gitAt(dir, "commit", "-m", message);
+  const hash = await gitAt(dir, "rev-parse", "--short", "HEAD");
   log("info", `Committed: ${hash}`);
   return hash;
 }
@@ -251,17 +271,18 @@ export async function commitChanges(message: string): Promise<string> {
 /**
  * Push the current branch to origin with retry logic.
  */
-export async function pushBranch(branchName: string): Promise<void> {
+export async function pushBranch(branchName: string, cwd?: string): Promise<void> {
   if (DRY_RUN) {
     log("info", `[DRY RUN] Would push branch: ${branchName}`);
     return;
   }
+  const dir = cwd ?? GIT_ROOT;
   const delays = [2000, 4000, 8000, 16000];
 
   for (let attempt = 0; attempt <= delays.length; attempt++) {
     try {
       log("info", `Pushing ${branchName} (attempt ${attempt + 1})`);
-      await git("push", "-u", "origin", branchName);
+      await gitAt(dir, "push", "-u", "origin", branchName);
       log("info", `Push successful`);
       return;
     } catch (err) {
@@ -318,13 +339,13 @@ export async function createPullRequest({
 /**
  * Create an empty commit (used to enable early PR creation).
  */
-export async function createEmptyCommit(message: string): Promise<void> {
+export async function createEmptyCommit(message: string, cwd?: string): Promise<void> {
   if (DRY_RUN) {
     log("info", `[DRY RUN] Would create empty commit: ${message}`);
     return;
   }
   log("info", "Creating empty initial commit for early PR");
-  await git("commit", "--allow-empty", "-m", message);
+  await gitAt(cwd ?? GIT_ROOT, "commit", "--allow-empty", "-m", message);
 }
 
 /**
@@ -399,8 +420,8 @@ export async function findExistingPR(
 /**
  * Check if the working tree is clean (no uncommitted changes).
  */
-export async function isWorkingTreeClean(): Promise<boolean> {
-  const status = await git("status", "--porcelain", "-uno");
+export async function isWorkingTreeClean(cwd?: string): Promise<boolean> {
+  const status = await gitAt(cwd ?? GIT_ROOT, "status", "--porcelain", "-uno");
   return status.length === 0;
 }
 
@@ -448,31 +469,33 @@ export async function findBranchForTask(
  */
 export async function checkoutExistingBranch(
   branchName: string,
+  cwd?: string,
 ): Promise<void> {
   if (DRY_RUN) {
     log("info", `[DRY RUN] Would checkout branch: ${branchName}`);
     return;
   }
+  const dir = cwd ?? GIT_ROOT;
   log("info", `Checking out existing branch: ${branchName}`);
 
   // Fetch latest for this branch from origin
   try {
-    await git("fetch", "origin", branchName);
+    await gitAt(dir, "fetch", "origin", branchName);
   } catch {
     log("debug", `Could not fetch ${branchName} from origin (may be local-only)`);
   }
 
   // Force checkout to bypass dirty index state
   try {
-    await git("checkout", "-f", branchName);
+    await gitAt(dir, "checkout", "-f", branchName);
   } catch {
     // If local checkout fails, create a tracking branch from remote
-    await git("checkout", "-f", "-b", branchName, `origin/${branchName}`);
+    await gitAt(dir, "checkout", "-f", "-b", branchName, `origin/${branchName}`);
   }
 
   // Reset to the latest remote version if it exists
   try {
-    await git("reset", "--hard", `origin/${branchName}`);
+    await gitAt(dir, "reset", "--hard", `origin/${branchName}`);
     log("info", `Reset ${branchName} to latest from origin`);
   } catch {
     // Branch may not exist on remote — local-only branch is fine
@@ -483,8 +506,8 @@ export async function checkoutExistingBranch(
 /**
  * Check if the current branch has commits ahead of the base branch.
  */
-export async function branchHasCommitsAheadOfBase(): Promise<boolean> {
-  const output = await git("log", `${BASE_BRANCH}..HEAD`, "--oneline");
+export async function branchHasCommitsAheadOfBase(cwd?: string): Promise<boolean> {
+  const output = await gitAt(cwd ?? GIT_ROOT, "log", `${BASE_BRANCH}..HEAD`, "--oneline");
   return output.length > 0;
 }
 
@@ -507,18 +530,33 @@ export async function branchHasBeenPushed(
  * Forcefully cleans any dirty state first so checkout always succeeds.
  * Uses force checkout (-f) to bypass broken index states.
  */
-export async function returnToBaseBranch(): Promise<void> {
+export async function returnToBaseBranch(cwd?: string): Promise<void> {
   if (DRY_RUN) {
     log("info", `[DRY RUN] Would return to ${BASE_BRANCH}`);
     return;
   }
+  const dir = cwd ?? GIT_ROOT;
+  const isWorktree = dir !== GIT_ROOT;
   log("info", `Returning to ${BASE_BRANCH}`);
-  await ensureCleanState();
+  await ensureCleanState(dir);
+
+  // Worktrees can't share a branch checkout with the main tree, so use a
+  // detached HEAD at the remote base ref instead of checking out the branch.
+  if (isWorktree) {
+    try {
+      await gitAt(dir, "fetch", "origin", BASE_BRANCH);
+    } catch {
+      // If fetch fails, fall through and try to use whatever we have locally.
+    }
+    await gitAt(dir, "checkout", "-f", "--detach", `origin/${BASE_BRANCH}`);
+    return;
+  }
+
   try {
-    await git("checkout", "-f", BASE_BRANCH);
+    await gitAt(dir, "checkout", "-f", BASE_BRANCH);
   } catch {
     // Local branch may not exist — create from remote
-    await git("checkout", "-f", "-B", BASE_BRANCH, `origin/${BASE_BRANCH}`);
+    await gitAt(dir, "checkout", "-f", "-B", BASE_BRANCH, `origin/${BASE_BRANCH}`);
   }
 }
 
@@ -670,15 +708,16 @@ export async function getPRCheckStatus(prUrl: string): Promise<{
  * Attempt to merge the base branch into the current branch.
  * Returns true if merge completed cleanly, false if there are conflicts.
  */
-export async function mergeBaseBranch(): Promise<boolean> {
+export async function mergeBaseBranch(cwd?: string): Promise<boolean> {
   if (DRY_RUN) {
     log("info", `[DRY RUN] Would merge ${BASE_BRANCH} into current branch`);
     return true;
   }
+  const dir = cwd ?? GIT_ROOT;
   log("info", `Merging ${BASE_BRANCH} into current branch`);
-  await git("fetch", "origin", BASE_BRANCH);
+  await gitAt(dir, "fetch", "origin", BASE_BRANCH);
   try {
-    await git("merge", `origin/${BASE_BRANCH}`, "--no-edit");
+    await gitAt(dir, "merge", `origin/${BASE_BRANCH}`, "--no-edit");
     log("info", "Merge completed cleanly — no conflicts");
     return true;
   } catch (err) {
@@ -686,7 +725,7 @@ export async function mergeBaseBranch(): Promise<boolean> {
     // error messages, because the git() wrapper loses stdout/stderr details
     // where conflict info appears.
     try {
-      const conflicted = await getConflictedFiles();
+      const conflicted = await getConflictedFiles(dir);
       if (conflicted.length > 0) {
         log("warn", "Merge resulted in conflicts");
         return false;
@@ -701,34 +740,35 @@ export async function mergeBaseBranch(): Promise<boolean> {
 /**
  * Get the list of files with merge conflicts.
  */
-export async function getConflictedFiles(): Promise<string[]> {
-  const output = await git("diff", "--name-only", "--diff-filter=U");
+export async function getConflictedFiles(cwd?: string): Promise<string[]> {
+  const output = await gitAt(cwd ?? GIT_ROOT, "diff", "--name-only", "--diff-filter=U");
   return output.split("\n").filter(Boolean);
 }
 
 /**
  * Abort an in-progress merge.
  */
-export async function abortMerge(): Promise<void> {
+export async function abortMerge(cwd?: string): Promise<void> {
   if (DRY_RUN) {
     log("info", "[DRY RUN] Would abort merge");
     return;
   }
   log("info", "Aborting merge");
-  await git("merge", "--abort");
+  await gitAt(cwd ?? GIT_ROOT, "merge", "--abort");
 }
 
 /**
  * Stage resolved files and commit the merge.
  */
-export async function commitMergeResolution(): Promise<void> {
+export async function commitMergeResolution(cwd?: string): Promise<void> {
   if (DRY_RUN) {
     log("info", "[DRY RUN] Would commit merge resolution");
     return;
   }
+  const dir = cwd ?? GIT_ROOT;
   log("info", "Committing merge resolution");
-  await git("add", "-A");
-  await git("commit", "--no-edit");
+  await gitAt(dir, "add", "-A");
+  await gitAt(dir, "commit", "--no-edit");
 }
 
 /**
@@ -817,4 +857,72 @@ export async function getPRInlineComments(
   } catch {
     return [];
   }
+}
+
+// --- Worktree helpers (parallel task processing) ---
+
+/**
+ * Create a new git worktree at `slotPath` checked out at `ref` (detached).
+ * Used to give each concurrent task its own isolated working tree.
+ * Detached HEAD avoids collisions when multiple slots share the base ref.
+ */
+export async function createWorktree(slotPath: string, ref: string): Promise<void> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would create worktree at ${slotPath} from ${ref}`);
+    return;
+  }
+  log("info", `Creating worktree: ${slotPath} → ${ref}`);
+  await git("worktree", "add", "--detach", slotPath, ref);
+}
+
+/**
+ * Remove a worktree (forcefully — discards any local changes).
+ */
+export async function removeWorktree(slotPath: string): Promise<void> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would remove worktree at ${slotPath}`);
+    return;
+  }
+  try {
+    await git("worktree", "remove", "--force", slotPath);
+    log("info", `Removed worktree: ${slotPath}`);
+  } catch (err) {
+    log("debug", `Could not remove worktree ${slotPath}: ${(err as Error).message}`);
+  }
+}
+
+/**
+ * Prune stale worktree registrations whose directories no longer exist.
+ * Called at startup to clean up after crashes.
+ */
+export async function pruneWorktrees(): Promise<void> {
+  if (DRY_RUN) {
+    log("info", "[DRY RUN] Would prune worktrees");
+    return;
+  }
+  try {
+    await git("worktree", "prune");
+  } catch (err) {
+    log("warn", `Failed to prune worktrees: ${(err as Error).message}`);
+  }
+}
+
+/**
+ * Reset a slot worktree to the latest base ref, detached.
+ * Called before reusing a slot for a new task — leaves the slot at a clean
+ * `origin/<base>` so the subsequent `createTaskBranch` can branch off cleanly.
+ */
+export async function resetSlotToBase(slotPath: string): Promise<void> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would reset slot ${slotPath} to base`);
+    return;
+  }
+  log("info", `Resetting slot to base: ${slotPath}`);
+  await ensureCleanState(slotPath);
+  try {
+    await gitAt(slotPath, "fetch", "origin", BASE_BRANCH);
+  } catch {
+    // Network hiccup — use whatever local ref we have.
+  }
+  await gitAt(slotPath, "checkout", "-f", "--detach", `origin/${BASE_BRANCH}`);
 }

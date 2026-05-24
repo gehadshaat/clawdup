@@ -203,6 +203,27 @@ if (CLAUDE_MAX_TURNS > 500) {
   process.exit(1);
 }
 
+// Maximum number of ClickUp tasks the runner will process in parallel.
+// Each concurrent task gets its own git worktree under .clawdup-worktrees/.
+// Set to 1 to disable parallelism (no worktrees created — legacy single-tree path).
+export const MAX_CONCURRENT_TASKS: number = parsePositiveInt(
+  "MAX_CONCURRENT_TASKS",
+  process.env.MAX_CONCURRENT_TASKS,
+  2,
+);
+
+if (MAX_CONCURRENT_TASKS < 1) {
+  console.error("ERROR: MAX_CONCURRENT_TASKS must be at least 1.");
+  process.exit(1);
+}
+
+if (MAX_CONCURRENT_TASKS > 10) {
+  console.error(
+    `ERROR: MAX_CONCURRENT_TASKS is ${MAX_CONCURRENT_TASKS}. Maximum is 10 to avoid overwhelming Claude/ClickUp/GitHub APIs.`,
+  );
+  process.exit(1);
+}
+
 // Claude model selection (optional — if not set, uses CLI default)
 export const CLAUDE_MODEL: string = process.env.CLAUDE_MODEL || "";
 

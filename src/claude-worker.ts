@@ -6,8 +6,8 @@
 //   4. Custom prompt from clawdup.config.mjs (if provided)
 
 import { spawn } from "child_process";
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
-import { resolve, dirname } from "path";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from "fs";
+import { resolve } from "path";
 import {
   CLAUDE_COMMAND,
   CLAUDE_TIMEOUT_MS,
@@ -22,39 +22,79 @@ import { log, startTimer } from "./logger.js";
 import type { ClickUpTask, ClaudeResult } from "./types.js";
 
 /**
- * Path to the file that stores Claude session IDs per task.
- * This allows resuming previous sessions when re-running Claude on the same task.
+ * Directory holding one session-id file per task: .clawdup-sessions/<taskId>.json
+ * Split per-task to avoid write races when MAX_CONCURRENT_TASKS > 1.
  */
-const SESSION_FILE_PATH = resolve(PROJECT_ROOT, ".clawdup.sessions.json");
+const SESSIONS_DIR = resolve(PROJECT_ROOT, ".clawdup-sessions");
 
 /**
- * Load the session ID for a given task from the sessions file.
+ * Legacy single-file location used before per-task split.
+ * Read on startup for migration, then deleted.
+ */
+const LEGACY_SESSION_FILE = resolve(PROJECT_ROOT, ".clawdup.sessions.json");
+
+let migratedLegacySessions = false;
+
+function sessionFileFor(taskId: string): string {
+  // taskId is alphanumeric in ClickUp; still encode defensively to keep the
+  // path scoped to the sessions directory.
+  const safe = taskId.replace(/[^A-Za-z0-9_-]/g, "_");
+  return resolve(SESSIONS_DIR, `${safe}.json`);
+}
+
+/**
+ * If a legacy single-file sessions store exists, split it into per-task files
+ * once, then delete it. Idempotent and safe to call repeatedly.
+ */
+function migrateLegacySessionsOnce(): void {
+  if (migratedLegacySessions) return;
+  migratedLegacySessions = true;
+  if (!existsSync(LEGACY_SESSION_FILE)) return;
+  try {
+    const data = JSON.parse(readFileSync(LEGACY_SESSION_FILE, "utf-8")) as Record<string, string>;
+    if (!existsSync(SESSIONS_DIR)) mkdirSync(SESSIONS_DIR, { recursive: true });
+    for (const [taskId, sessionId] of Object.entries(data)) {
+      if (typeof sessionId !== "string" || !sessionId) continue;
+      const path = sessionFileFor(taskId);
+      if (existsSync(path)) continue; // don't clobber newer per-task files
+      writeFileSync(path, JSON.stringify({ sessionId }, null, 2) + "\n");
+    }
+    log("info", `Migrated ${Object.keys(data).length} legacy session entries to ${SESSIONS_DIR}`);
+    try {
+      unlinkSync(LEGACY_SESSION_FILE);
+    } catch {
+      // best-effort cleanup
+    }
+  } catch (err) {
+    log("warn", `Failed to migrate legacy sessions file: ${err}`);
+  }
+}
+
+/**
+ * Load the session ID for a given task from its per-task sessions file.
  * Returns undefined if no previous session exists.
  */
 function loadSessionId(taskId: string): string | undefined {
+  migrateLegacySessionsOnce();
   try {
-    if (!existsSync(SESSION_FILE_PATH)) return undefined;
-    const data = JSON.parse(readFileSync(SESSION_FILE_PATH, "utf-8")) as Record<string, string>;
-    return data[taskId];
+    const path = sessionFileFor(taskId);
+    if (!existsSync(path)) return undefined;
+    const data = JSON.parse(readFileSync(path, "utf-8")) as { sessionId?: string };
+    return data.sessionId;
   } catch {
     return undefined;
   }
 }
 
 /**
- * Save a session ID for a given task to the sessions file.
- * Merges with any existing sessions.
+ * Save a session ID for a given task to its per-task sessions file.
+ * Atomic per-task writes avoid the cross-task race the single-file format had.
  */
 function saveSessionId(taskId: string, sessionId: string): void {
   try {
-    let data: Record<string, string> = {};
-    if (existsSync(SESSION_FILE_PATH)) {
-      data = JSON.parse(readFileSync(SESSION_FILE_PATH, "utf-8")) as Record<string, string>;
-    }
-    data[taskId] = sessionId;
-    const dir = dirname(SESSION_FILE_PATH);
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    writeFileSync(SESSION_FILE_PATH, JSON.stringify(data, null, 2) + "\n");
+    if (!existsSync(SESSIONS_DIR)) mkdirSync(SESSIONS_DIR, { recursive: true });
+    const path = sessionFileFor(taskId);
+    writeFileSync(path, JSON.stringify({ sessionId }, null, 2) + "\n");
     log("debug", `Saved session ${sessionId} for task ${taskId}`);
   } catch (err) {
     log("warn", `Failed to save session ID for task ${taskId}: ${err}`);
@@ -304,6 +344,7 @@ async function runClaudeInteractive(
   taskId: string,
   model?: string,
   projectContext?: string,
+  cwd?: string,
 ): Promise<ClaudeResult> {
   const systemPrompt = buildSystemPrompt(taskPrompt, taskId, projectContext);
 
@@ -370,7 +411,7 @@ async function runClaudeInteractive(
 
   return new Promise((resolve) => {
     const proc = spawn(CLAUDE_COMMAND, args, {
-      cwd: PROJECT_ROOT,
+      cwd: cwd ?? PROJECT_ROOT,
       env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: "cli" },
       stdio: "inherit",
     });
@@ -429,7 +470,7 @@ function formatToolUse(
 export async function runClaudeOnTask(
   taskPrompt: string,
   taskId: string,
-  options?: { interactive?: boolean; projectContext?: string },
+  options?: { interactive?: boolean; projectContext?: string; cwd?: string },
 ): Promise<ClaudeResult> {
   if (DRY_RUN) {
     log("info", `[DRY RUN] Would run Claude Code on task ${taskId} (prompt: ${taskPrompt.length} chars)`);
@@ -442,14 +483,14 @@ export async function runClaudeOnTask(
     const model = modelsToTry[i];
 
     if (options?.interactive) {
-      return runClaudeInteractive(taskPrompt, taskId, model, options.projectContext);
+      return runClaudeInteractive(taskPrompt, taskId, model, options.projectContext, options.cwd);
     }
 
     if (model) {
       log("info", `Using model: ${model}${i > 0 ? " (fallback)" : ""}`, { taskId });
     }
 
-    const result = await spawnClaudeForTask(taskPrompt, taskId, model, options?.projectContext);
+    const result = await spawnClaudeForTask(taskPrompt, taskId, model, options?.projectContext, options?.cwd);
 
     if (!result.rateLimited || i === modelsToTry.length - 1) {
       if (result.rateLimited) {
@@ -462,7 +503,7 @@ export async function runClaudeOnTask(
   }
 
   // Shouldn't reach here, but fallback to default
-  return spawnClaudeForTask(taskPrompt, taskId);
+  return spawnClaudeForTask(taskPrompt, taskId, undefined, undefined, options?.cwd);
 }
 
 /**
@@ -474,6 +515,7 @@ async function spawnClaudeForTask(
   taskId: string,
   model?: string,
   projectContext?: string,
+  cwd?: string,
 ): Promise<ClaudeResult> {
   const systemPrompt = buildSystemPrompt(taskPrompt, taskId, projectContext);
 
@@ -650,7 +692,7 @@ async function spawnClaudeForTask(
     log("debug", `$ ${CLAUDE_COMMAND} ${args.join(" ")}`);
 
     const proc = spawn(CLAUDE_COMMAND, args, {
-      cwd: PROJECT_ROOT,
+      cwd: cwd ?? PROJECT_ROOT,
       env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: "cli" },
       stdio: ["ignore", "pipe", "pipe"],
       timeout: CLAUDE_TIMEOUT_MS,
@@ -876,7 +918,7 @@ export async function runClaudeOnReviewFeedback(
   taskPrompt: string,
   taskId: string,
   reviewFeedback: string,
-  options?: { interactive?: boolean; projectContext?: string },
+  options?: { interactive?: boolean; projectContext?: string; cwd?: string },
 ): Promise<ClaudeResult> {
   if (DRY_RUN) {
     log("info", `[DRY RUN] Would run Claude Code on review feedback for task ${taskId} (prompt: ${taskPrompt.length} chars, feedback: ${reviewFeedback.length} chars)`);
@@ -894,6 +936,7 @@ export async function runClaudeOnReviewFeedback(
         taskId,
         model,
         options.projectContext,
+        options.cwd,
       );
     }
 
@@ -901,7 +944,7 @@ export async function runClaudeOnReviewFeedback(
       log("info", `Using model: ${model}${i > 0 ? " (fallback)" : ""} for review`, { taskId });
     }
 
-    const result = await spawnClaudeForReview(taskPrompt, taskId, reviewFeedback, model, options?.projectContext);
+    const result = await spawnClaudeForReview(taskPrompt, taskId, reviewFeedback, model, options?.projectContext, options?.cwd);
 
     if (!result.rateLimited || i === modelsToTry.length - 1) {
       if (result.rateLimited) {
@@ -913,7 +956,7 @@ export async function runClaudeOnReviewFeedback(
     log("warn", `Model ${model || "default"} hit usage limit for review. Trying next model...`, { taskId });
   }
 
-  return spawnClaudeForReview(taskPrompt, taskId, reviewFeedback);
+  return spawnClaudeForReview(taskPrompt, taskId, reviewFeedback, undefined, undefined, options?.cwd);
 }
 
 /**
@@ -925,6 +968,7 @@ async function spawnClaudeForReview(
   reviewFeedback: string,
   model?: string,
   projectContext?: string,
+  cwd?: string,
 ): Promise<ClaudeResult> {
   const systemPrompt = buildReviewPrompt(taskPrompt, taskId, reviewFeedback, projectContext);
 
@@ -1077,7 +1121,7 @@ async function spawnClaudeForReview(
     log("debug", `$ ${CLAUDE_COMMAND} ${args.join(" ")}`);
 
     const proc = spawn(CLAUDE_COMMAND, args, {
-      cwd: PROJECT_ROOT,
+      cwd: cwd ?? PROJECT_ROOT,
       env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: "cli" },
       stdio: ["ignore", "pipe", "pipe"],
       timeout: CLAUDE_TIMEOUT_MS,
@@ -1213,6 +1257,7 @@ async function spawnClaudeForReview(
 export async function runClaudeOnConflictResolution(
   conflictedFiles: string[],
   branchName: string,
+  cwd?: string,
 ): Promise<ClaudeResult> {
   if (DRY_RUN) {
     log("info", `[DRY RUN] Would run Claude Code to resolve ${conflictedFiles.length} conflict(s) on ${branchName}`);
@@ -1238,7 +1283,7 @@ INSTRUCTIONS:
 
   log("info", `Running Claude Code to resolve ${conflictedFiles.length} conflicted file(s)...`, { branch: branchName });
 
-  return runClaudeOnTask(prompt, `conflict-resolution-${branchName}`);
+  return runClaudeOnTask(prompt, `conflict-resolution-${branchName}`, { cwd });
 }
 
 /**
