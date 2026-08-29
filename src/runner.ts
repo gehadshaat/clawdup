@@ -2,7 +2,7 @@
 
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import { resolve } from "path";
-import { POLL_INTERVAL_MS, RELAUNCH_INTERVAL_MS, STATUS, BASE_BRANCH, PROJECT_ROOT, GIT_ROOT, CLICKUP_LIST_ID, CLICKUP_PARENT_TASK_ID, AUTO_APPROVE, DRY_RUN, BRANCH_PREFIX, MAX_CONCURRENT_TASKS } from "./config.js";
+import { POLL_INTERVAL_MS, RELAUNCH_INTERVAL_MS, STATUS, BASE_BRANCH, PROJECT_ROOT, GIT_ROOT, CLICKUP_LIST_ID, CLICKUP_PARENT_TASK_ID, AUTO_APPROVE, ADDRESS_PR_COMMENTS, DRY_RUN, BRANCH_PREFIX, MAX_CONCURRENT_TASKS } from "./config.js";
 import { log, startTimer } from "./logger.js";
 import {
   getTasksByStatus,
@@ -16,6 +16,8 @@ import {
   isValidTaskId,
   validateStatuses,
   findPRUrlInComments,
+  findPRUrlInCommentList,
+  getLastAutomationCommentDate,
   createTask,
   getExistingTaskNames,
   getNewReviewFeedback,
@@ -58,6 +60,7 @@ import {
   getPRReviewDecision,
   getPRReviewComments,
   getPRInlineComments,
+  filterCommentsSince,
   getPRCheckStatus,
   createWorktree,
   removeWorktree,
@@ -1323,12 +1326,22 @@ async function collectReviewFeedback(
   return feedbackParts.join("\n\n");
 }
 
+/** What caused a task with an existing PR to be re-processed. */
+type ReturningTaskTrigger = "todo" | "pr_feedback";
+
 /**
- * Process a task that was moved back to TO DO but already has an existing PR.
+ * Process a task that already has an existing PR and needs another round of
+ * work — either because it was moved back to TO DO, or because new review
+ * comments appeared on its PR (`trigger: "pr_feedback"`).
  * Instead of starting from scratch, checks out the existing branch,
  * gathers new comments for context, and runs Claude to continue/fix the work.
  */
-async function processReturningTask(task: ClickUpTask, prUrl: string, cwd?: string): Promise<void> {
+async function processReturningTask(
+  task: ClickUpTask,
+  prUrl: string,
+  cwd?: string,
+  trigger: ReturningTaskTrigger = "todo",
+): Promise<void> {
   if (DRY_RUN) {
     await dryRunProcessReturningTask(task, prUrl);
     return;
@@ -1340,7 +1353,11 @@ async function processReturningTask(task: ClickUpTask, prUrl: string, cwd?: stri
   const isWorktree = cwd !== undefined && cwd !== GIT_ROOT;
 
   log("info", `\n${"=".repeat(60)}`);
-  log("info", `Processing returning task: ${taskName} (${taskId})`, { taskId });
+  log(
+    "info",
+    `Processing returning task (${trigger === "pr_feedback" ? "new PR review comments" : "moved back to TODO"}): ${taskName} (${taskId})`,
+    { taskId },
+  );
   log("info", `Existing PR: ${prUrl}`);
   log("info", `${"=".repeat(60)}\n`);
 
@@ -1388,9 +1405,14 @@ async function processReturningTask(task: ClickUpTask, prUrl: string, cwd?: stri
     // Move task to "In Progress"
     await updateTaskStatus(taskId, STATUS.IN_PROGRESS);
 
+    // NOTE: this comment starts with an automation marker, which advances the
+    // PR-feedback boundary — so the comments that triggered this round won't
+    // trigger another one (see dispatchTasksWithNewPRFeedback).
     await addTaskComment(
       taskId,
-      `🤖 Automation detected this task was moved back to TODO with an existing PR. Continuing work on it.\n\nPR: ${prUrl}`,
+      trigger === "pr_feedback"
+        ? `🤖 Automation noticed new review comments on the PR and is addressing them.\n\nPR: ${prUrl}`
+        : `🤖 Automation detected this task was moved back to TODO with an existing PR. Continuing work on it.\n\nPR: ${prUrl}`,
     );
 
     // Checkout the existing branch. In worktree mode the slot has already been
@@ -1743,7 +1765,11 @@ async function recoverOrphanedTasks(): Promise<void> {
  * IMPORTANT: callers must add the task ID to `inFlightTaskIds` BEFORE
  * awaiting this function so that the same poll cycle can't double-pick it.
  */
-async function dispatchTask(task: ClickUpTask, existingPrUrl: string | null): Promise<void> {
+async function dispatchTask(
+  task: ClickUpTask,
+  existingPrUrl: string | null,
+  trigger: ReturningTaskTrigger = "todo",
+): Promise<void> {
   let slot: Slot | null = null;
   let cwd: string | undefined = undefined;
 
@@ -1761,13 +1787,134 @@ async function dispatchTask(task: ClickUpTask, existingPrUrl: string | null): Pr
 
   try {
     if (existingPrUrl) {
-      await processReturningTask(task, existingPrUrl, cwd);
+      await processReturningTask(task, existingPrUrl, cwd, trigger);
     } else {
       await processTask(task, { cwd });
     }
   } finally {
     if (slot) releaseSlot(slot);
   }
+}
+
+// How many automatic PR-feedback rounds a task may consume per runner
+// session. Guards against ping-pong with auto-review bots that re-review
+// every push: when the cap is hit, a ClickUp comment is posted (advancing
+// the feedback boundary, which stops re-detection) and the task waits for
+// a human. The counter resets on relaunch/restart.
+const MAX_FEEDBACK_ROUNDS_PER_SESSION = 3;
+const feedbackRoundCounts = new Map<string, number>();
+
+// Review states whose top-level body should NOT trigger a feedback round:
+// an approval ("LGTM!") or a dismissed/pending review is not a request for
+// changes. Inline code comments still trigger regardless of review state.
+const NON_ACTIONABLE_REVIEW_STATES = new Set(["APPROVED", "DISMISSED", "PENDING"]);
+
+/**
+ * Poll tasks sitting in IN PROGRESS / IN REVIEW for new review comments on
+ * their PRs, and dispatch any that have some through the returning-task flow
+ * (which collects the feedback, runs Claude on it, and pushes the updates).
+ *
+ * "New" means a GitHub PR review or inline code comment created after the
+ * automation's last ClickUp comment on the task — that comment marks the
+ * last time the automation acted, so anything older was already seen or
+ * addressed. This boundary is what prevents an infinite loop: once the
+ * feedback round completes, the automation's summary comment moves the
+ * boundary past the comments it just addressed.
+ *
+ * Tasks without any automation comment are skipped (nothing to anchor the
+ * boundary to — those PRs are managed manually, so leave them alone).
+ *
+ * Returns the number of tasks dispatched; they consume concurrency capacity
+ * just like TODO dispatches.
+ */
+async function dispatchTasksWithNewPRFeedback(capacity: number): Promise<number> {
+  if (!ADDRESS_PR_COMMENTS || capacity <= 0) return 0;
+
+  let candidates: ClickUpTask[] = [];
+  try {
+    // In-review tasks first — those are the ones reviewers are commenting on.
+    const [inReview, inProgress] = await Promise.all([
+      getTasksByStatus(STATUS.IN_REVIEW),
+      getTasksByStatus(STATUS.IN_PROGRESS),
+    ]);
+    candidates = [...inReview, ...inProgress];
+  } catch (err) {
+    log("warn", `Could not fetch tasks for PR feedback check: ${(err as Error).message}`);
+    return 0;
+  }
+
+  let dispatched = 0;
+  for (const task of candidates) {
+    if (isShuttingDown || dispatched >= capacity) break;
+    if (inFlightTaskIds.has(task.id) || !isValidTaskId(task.id)) continue;
+
+    try {
+      // One comments fetch serves both the PR URL lookup and the boundary.
+      const comments = await getTaskComments(task.id);
+      const prUrl = findPRUrlInCommentList(comments);
+      if (!prUrl) continue;
+
+      const sinceMs = getLastAutomationCommentDate(comments);
+      if (sinceMs === null) continue;
+
+      if ((await getPRState(prUrl)) !== "open") continue;
+
+      const [reviews, inlineComments] = await Promise.all([
+        getPRReviewComments(prUrl),
+        getPRInlineComments(prUrl),
+      ]);
+      const newFeedbackCount =
+        filterCommentsSince(reviews, sinceMs).filter(
+          (r) => !NON_ACTIONABLE_REVIEW_STATES.has((r.state ?? "").toUpperCase()),
+        ).length + filterCommentsSince(inlineComments, sinceMs).length;
+      if (newFeedbackCount === 0) continue;
+
+      const rounds = feedbackRoundCounts.get(task.id) ?? 0;
+      if (rounds >= MAX_FEEDBACK_ROUNDS_PER_SESSION) {
+        log(
+          "warn",
+          `Task ${task.id} hit the automatic PR feedback round limit (${MAX_FEEDBACK_ROUNDS_PER_SESSION}). Leaving it for a human.`,
+          { taskId: task.id },
+        );
+        // This comment carries an automation marker, so it advances the
+        // feedback boundary and stops this task from being re-detected
+        // every poll cycle.
+        await addTaskComment(
+          task.id,
+          `⚠️ Automation reached the limit of ${MAX_FEEDBACK_ROUNDS_PER_SESSION} automatic PR feedback rounds for this task.\n\n` +
+            `PR: ${prUrl}\n\n` +
+            `There are still unaddressed review comments. Move this task back to "${STATUS.TODO}" to run another round, or address them manually.`,
+        );
+        continue;
+      }
+
+      log(
+        "info",
+        `Task "${task.name}" (${task.id}, status "${task.status?.status ?? "unknown"}") has ${newFeedbackCount} new PR review comment(s). Dispatching to address them: ${prUrl}`,
+        { taskId: task.id },
+      );
+      feedbackRoundCounts.set(task.id, rounds + 1);
+
+      // Same in-flight bookkeeping as the TODO dispatch below, but NOT
+      // processedTaskIds — feedback rounds must stay repeatable so the next
+      // batch of review comments triggers another round.
+      inFlightTaskIds.add(task.id);
+      const promise = dispatchTask(task, prUrl, "pr_feedback")
+        .catch((err) => {
+          log("error", `Unhandled error addressing PR feedback for task ${task.id}: ${(err as Error).message}`);
+        })
+        .finally(() => {
+          inFlightTaskIds.delete(task.id);
+          inFlightPromises.delete(task.id);
+        });
+      inFlightPromises.set(task.id, promise);
+      dispatched++;
+    } catch (err) {
+      log("warn", `PR feedback check failed for task ${task.id}: ${(err as Error).message}`);
+    }
+  }
+
+  return dispatched;
 }
 
 /**
@@ -1810,11 +1957,22 @@ async function pollForTasks(): Promise<void> {
     }
 
     // Compute remaining capacity: how many more tasks we can start this cycle.
-    const capacity = Math.max(0, MAX_CONCURRENT_TASKS - inFlightTaskIds.size);
+    let capacity = Math.max(0, MAX_CONCURRENT_TASKS - inFlightTaskIds.size);
     if (capacity === 0) {
       log("debug", `All ${MAX_CONCURRENT_TASKS} slot(s) busy. Waiting for in-flight tasks.`);
       return;
     }
+
+    // Next, check in-progress / in-review tasks for new PR review comments
+    // and dispatch feedback rounds. These run before fresh TODO pickups —
+    // unblocking a waiting reviewer beats starting new work.
+    capacity -= await dispatchTasksWithNewPRFeedback(capacity);
+    if (capacity === 0) {
+      log("debug", "All slots consumed by PR feedback rounds. Waiting for next cycle.");
+      return;
+    }
+
+    if (isShuttingDown) return;
 
     // Then, check for TODO tasks to implement
     const tasks = await getTasksByStatus(STATUS.TODO);
@@ -2315,6 +2473,7 @@ export async function startRunner(options?: { interactive?: boolean }): Promise<
   processedTaskIds.clear();
   inFlightTaskIds.clear();
   inFlightPromises.clear();
+  feedbackRoundCounts.clear();
   interactiveMode = options?.interactive ?? false;
 
   if (DRY_RUN) {

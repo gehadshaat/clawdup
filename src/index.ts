@@ -13,6 +13,8 @@ export {
   notifyTaskCreator,
   getTaskComments,
   findPRUrlInComments,
+  findPRUrlInCommentList,
+  getLastAutomationCommentDate,
   getNewReviewFeedback,
   getCommentText,
   formatTaskForClaude,
@@ -40,6 +42,7 @@ export {
   getPRReviewDecision,
   getPRReviewComments,
   getPRInlineComments,
+  filterCommentsSince,
   getPRCheckStatus,
   isAncestor,
 } from "./git-ops.js";

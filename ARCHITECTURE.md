@@ -164,7 +164,7 @@ A `processedTaskIds` set tracks tasks already worked on. This prevents re-proces
 |--------|---------|-------------------|
 | **TO DO** | Task created or moved back | Runner picks it up on next poll cycle |
 | **IN PROGRESS** | Runner starts processing | Creates branch, runs Claude, commits/pushes, creates PR |
-| **IN REVIEW** | Successful PR creation | Waits for human review. If task is moved back to TODO, collects review feedback and reruns Claude |
+| **IN REVIEW** | Successful PR creation | Waits for human review. New PR review comments are detected on each poll cycle and addressed automatically (`ADDRESS_PR_COMMENTS`, on by default). Moving the task back to TODO also triggers a feedback round |
 | **APPROVED** | Reviewer moves task here | Runner detects it on next poll, squash-merges the PR, deletes branch, moves to COMPLETED |
 | **REQUIRE INPUT** | Claude needs clarification or no changes produced | Posts explanation comment, closes draft PR. Human adds info and moves back to TODO |
 | **BLOCKED** | Error during processing or merge | Posts error comment. Human fixes issue and moves back to TODO |
@@ -195,6 +195,7 @@ startRunner()
   └─ 9. Enter polling loop
          │
          ├─ Poll for APPROVED tasks → processApprovedTask()
+         ├─ Poll IN PROGRESS / IN REVIEW tasks for new PR comments → processReturningTask()
          ├─ Poll for TODO tasks → processTask() or processReturningTask()
          ├─ Check relaunch interval → exit if elapsed and idle
          └─ Sleep POLL_INTERVAL_MS, repeat
@@ -208,7 +209,13 @@ pollForTasks()
   ├─ 1. Fetch tasks with APPROVED status
   │     └─ For each: processApprovedTask() (merge PR)
   │
-  ├─ 2. Fetch tasks with TODO status
+  ├─ 2. Fetch tasks with IN PROGRESS / IN REVIEW status (ADDRESS_PR_COMMENTS)
+  │     └─ Skip in-flight tasks; find each task's PR from its comments
+  │     └─ PR has review/inline comments newer than the automation's
+  │        last ClickUp comment on the task?
+  │           └─ YES → processReturningTask() (address the feedback)
+  │
+  ├─ 3. Fetch tasks with TODO status
   │     └─ Filter out already-processed tasks (processedTaskIds)
   │     └─ Pick first task (highest priority, oldest)
   │           │
@@ -218,7 +225,7 @@ pollForTasks()
   │           │
   │           └─ Add to processedTaskIds
   │
-  └─ 3. Return (sleep until next cycle)
+  └─ 4. Return (sleep until next cycle)
 ```
 
 ---
@@ -256,7 +263,9 @@ processTask(task)
 
 ### Path 2: Returning Task (`processReturningTask`)
 
-For tasks moved back to TODO that already have a PR (review feedback cycle).
+For tasks that already have a PR and need another round of work: tasks moved
+back to TODO, or tasks in IN PROGRESS / IN REVIEW whose PR received new review
+comments since the automation last acted (the `ADDRESS_PR_COMMENTS` poller).
 
 ```
 processReturningTask(task, prUrl)
