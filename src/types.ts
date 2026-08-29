@@ -19,6 +19,8 @@ export interface ClickUpTask {
   status?: { status: string };
   list?: { id: string };
   dependencies?: ClickUpDependency[];
+  parent?: string | null;
+  orderindex?: string;
 }
 
 export interface ClickUpChecklist {
@@ -84,4 +86,40 @@ export interface PullRequestOptions {
   branchName: string;
   baseBranch?: string;
   draft?: boolean;
+}
+
+export type TaskOutcomeStatus =
+  | "success"
+  | "merged"
+  | "needs_input"
+  | "no_changes"
+  | "error"
+  | "dry_run";
+
+export interface TaskOutcome {
+  status: TaskOutcomeStatus;
+  branchName?: string;
+  prUrl?: string;
+}
+
+export interface StackInfo {
+  parentTaskName: string;
+  parentTaskUrl: string;
+  position: number;
+  total: number;
+  baseBranch: string;
+  previousPrUrl?: string;
+  completedInSeries: Array<{ name: string; branchName: string; prUrl?: string }>;
+}
+
+export interface StackContext {
+  promptContext: string;
+  prNote: string;
+}
+
+export interface StackRunSummary {
+  total: number;
+  completed: number;
+  skipped: number;
+  aborted: boolean;
 }

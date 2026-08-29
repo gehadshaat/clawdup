@@ -6,6 +6,7 @@ import { POLL_INTERVAL_MS, RELAUNCH_INTERVAL_MS, STATUS, BASE_BRANCH, PROJECT_RO
 import { log, startTimer } from "./logger.js";
 import {
   getTasksByStatus,
+  getTask,
   getTaskComments,
   updateTaskStatus,
   addTaskComment,
@@ -22,6 +23,8 @@ import {
   getUnresolvedDependencies,
   getAllTasksSummary,
   getRelatedTasksContext,
+  getLeafSubtasks,
+  orderTasksByDependencies,
 } from "./clickup-api.js";
 import {
   detectGitHubRepo,
@@ -60,6 +63,7 @@ import {
   removeWorktree,
   pruneWorktrees,
   resetSlotToBase,
+  isAncestor,
 } from "./git-ops.js";
 import {
   runClaudeOnTask,
@@ -69,9 +73,18 @@ import {
   generateCommitMessage,
   generatePRBody,
   generateWorkSummary,
+  generateStackPRNote,
+  generateStackPromptContext,
 } from "./claude-worker.js";
 import { runPreflightOrAbort } from "./preflight.js";
-import type { ClickUpTask, ClaudeResult } from "./types.js";
+import type {
+  ClickUpTask,
+  ClaudeResult,
+  TaskOutcome,
+  StackContext,
+  StackInfo,
+  StackRunSummary,
+} from "./types.js";
 
 let isShuttingDown = false;
 // True while pollForTasks is mid-cycle. Guards against re-entrant polling,
@@ -502,15 +515,30 @@ async function dryRunProcessReturningTask(task: ClickUpTask, prUrl: string): Pro
   log("info", `\n[DRY RUN] Returning task simulation complete.\n`);
 }
 
+interface ProcessTaskOptions {
+  /** Working directory (worktree slot); defaults to the main checkout. */
+  cwd?: string;
+  /** Branch to base the task branch and PR on; defaults to BASE_BRANCH. */
+  baseBranch?: string;
+  /** Stacked-PR context. Presence also suppresses AUTO_APPROVE. */
+  stack?: StackContext;
+}
+
 /**
  * Process a single ClickUp task end-to-end.
  * Always starts from the latest base branch and creates a PR immediately
  * so that work is visible from the start.
+ * Returns an outcome describing how processing ended; existing callers may
+ * ignore it, stack mode uses it to decide whether to continue the series.
  */
-async function processTask(task: ClickUpTask, cwd?: string): Promise<void> {
+async function processTask(
+  task: ClickUpTask,
+  options?: ProcessTaskOptions,
+): Promise<TaskOutcome> {
+  const cwd = options?.cwd;
   if (DRY_RUN) {
     await dryRunProcessTask(task);
-    return;
+    return { status: "dry_run" };
   }
 
   const taskId = task.id;
@@ -528,7 +556,7 @@ async function processTask(task: ClickUpTask, cwd?: string): Promise<void> {
   // Validate task ID format before using it in branch names and commands
   if (!isValidTaskId(taskId)) {
     log("error", `Invalid task ID format: ${taskId}. Skipping.`);
-    return;
+    return { status: "error" };
   }
 
   try {
@@ -536,7 +564,8 @@ async function processTask(task: ClickUpTask, cwd?: string): Promise<void> {
     await updateTaskStatus(taskId, STATUS.IN_PROGRESS);
 
     // Step 2: Create a feature branch from the latest base branch
-    branchName = await createTaskBranch(taskId, slug, cwd);
+    // (or from the previous branch in the stack, in stacked mode)
+    branchName = await createTaskBranch(taskId, slug, cwd, options?.baseBranch);
     log("info", `Working on branch: ${branchName}`);
 
     // Step 3: Check if a PR already exists for this branch (e.g. from a previous run).
@@ -554,7 +583,7 @@ async function processTask(task: ClickUpTask, cwd?: string): Promise<void> {
           `✅ The associated PR was already merged: ${prUrl}\n\nMoving task to complete.`,
         );
         await updateTaskStatus(taskId, STATUS.COMPLETED);
-        return;
+        return { status: "merged", branchName, prUrl };
       }
     }
 
@@ -566,10 +595,13 @@ async function processTask(task: ClickUpTask, cwd?: string): Promise<void> {
     // Step 4: Build 3-tiered context, format the task for Claude, and run it
     // Save HEAD hash before Claude runs so we can detect if Claude commits via Bash
     const headBefore = await getHeadHash(cwd);
-    const [comments, projectContext] = await Promise.all([
+    const [comments, baseProjectContext] = await Promise.all([
       getTaskComments(taskId),
       buildProjectContext(task),
     ]);
+    const projectContext = options?.stack
+      ? `${baseProjectContext}\n\n${options.stack.promptContext}`
+      : baseProjectContext;
     const taskPrompt = formatTaskForClaude(task, comments);
     const result = await runClaudeOnTask(taskPrompt, taskId, { interactive: interactiveMode, projectContext, cwd });
     const headAfter = await getHeadHash(cwd);
@@ -584,13 +616,13 @@ async function processTask(task: ClickUpTask, cwd?: string): Promise<void> {
     if (result.needsInput) {
       // Claude needs more information
       await handleNeedsInput(task, result, branchName, prUrl, cwd);
-      return;
+      return { status: "needs_input", branchName };
     }
 
     if (!result.success) {
       // Claude encountered an error
       await handleError(task, result, branchName, prUrl, claudeCommitted, cwd);
-      return;
+      return { status: "error", branchName };
     }
 
     // Step 6: Check if Claude actually made changes
@@ -613,7 +645,7 @@ async function processTask(task: ClickUpTask, cwd?: string): Promise<void> {
       if (prUrl) {
         await closePRAndCleanup(prUrl, branchName, cwd);
       }
-      return;
+      return { status: "no_changes", branchName };
     }
 
     // Step 7: Commit (fallback if Claude didn't), push, and create/update the PR
@@ -625,8 +657,11 @@ async function processTask(task: ClickUpTask, cwd?: string): Promise<void> {
     await pushBranch(branchName, cwd);
 
     // Build PR body with full details
-    const { stat, files } = await getChangesSummary(cwd);
-    const prBody = generatePRBody(task, result.output, files);
+    const { stat, files } = await getChangesSummary(cwd, options?.baseBranch);
+    let prBody = generatePRBody(task, result.output, files);
+    if (options?.stack) {
+      prBody += `\n\n${options.stack.prNote}`;
+    }
 
     if (!prUrl) {
       // Create the PR now that we have actual changes pushed
@@ -634,7 +669,7 @@ async function processTask(task: ClickUpTask, cwd?: string): Promise<void> {
         title: `[CU-${taskId}] ${taskName}`,
         body: prBody,
         branchName,
-        baseBranch: BASE_BRANCH,
+        baseBranch: options?.baseBranch ?? BASE_BRANCH,
       });
       log("info", `PR created: ${prUrl}`);
     } else {
@@ -646,7 +681,10 @@ async function processTask(task: ClickUpTask, cwd?: string): Promise<void> {
     // Step 8: Update ClickUp task with a summary of the work done
     const workSummary = generateWorkSummary(result.output, stat, files);
 
-    if (AUTO_APPROVE) {
+    // Stacked PRs must be merged bottom-up in order, so auto-merge is
+    // suppressed in stack mode (merging would also delete the branch the
+    // next task in the stack builds on).
+    if (AUTO_APPROVE && !options?.stack) {
       // Auto-approve mode: merge immediately without waiting for manual review
       await autoApproveAndMerge(task, prUrl, branchName, workSummary, cwd);
     } else {
@@ -662,6 +700,7 @@ async function processTask(task: ClickUpTask, cwd?: string): Promise<void> {
     }
 
     log("info", `Task ${taskId} completed successfully! PR: ${prUrl}`, { taskId, elapsed: timer() });
+    return { status: "success", branchName, prUrl: prUrl ?? undefined };
   } catch (err) {
     log("error", `Error processing task ${taskId}: ${(err as Error).message}`, { taskId, elapsed: timer() });
 
@@ -693,6 +732,7 @@ async function processTask(task: ClickUpTask, cwd?: string): Promise<void> {
       }
       await cleanupBranch(branchName, cwd);
     }
+    return { status: "error", branchName: branchName ?? undefined };
   } finally {
     // Always return to base branch
     try {
@@ -1325,7 +1365,7 @@ async function processReturningTask(task: ClickUpTask, prUrl: string, cwd?: stri
   if (prState === "closed") {
     // PR was closed without merging — treat as a fresh task
     log("info", `PR was closed for task ${taskId}. Processing as new task.`);
-    await processTask(task, cwd);
+    await processTask(task, { cwd });
     return;
   }
 
@@ -1723,7 +1763,7 @@ async function dispatchTask(task: ClickUpTask, existingPrUrl: string | null): Pr
     if (existingPrUrl) {
       await processReturningTask(task, existingPrUrl, cwd);
     } else {
-      await processTask(task, cwd);
+      await processTask(task, { cwd });
     }
   } finally {
     if (slot) releaseSlot(slot);
@@ -1895,7 +1935,6 @@ export async function runSingleTask(taskId: string, options?: { interactive?: bo
     // Run preflight checks before processing the task
     await runPreflightOrAbort();
 
-    const { getTask } = await import("./clickup-api.js");
     const task = await getTask(taskId);
 
     // Warn about unresolved dependencies (but still proceed since this is an explicit single-task run)
@@ -1915,6 +1954,350 @@ export async function runSingleTask(taskId: string, options?: { interactive?: bo
     }
 
     await processTask(task);
+  } finally {
+    if (!DRY_RUN) releaseLock();
+  }
+}
+
+interface StackLeafRecord {
+  leaf: ClickUpTask;
+  disposition: "completed" | "adopted" | "skipped" | "failed" | "not_attempted";
+  detail?: string;
+  branchName?: string;
+  prUrl?: string;
+}
+
+/**
+ * Build the summary comment posted on the parent task after a stack run.
+ */
+function buildStackSummaryComment(
+  records: StackLeafRecord[],
+  abortReason: string | null,
+): string {
+  const lines: string[] = [];
+  const completed = records.filter((r) => r.disposition === "completed").length;
+
+  lines.push(
+    abortReason
+      ? `⚠️ Automation stack run aborted after ${completed} new PR(s).`
+      : `✅ Automation stack run finished: ${completed} new PR(s) created.`,
+  );
+  lines.push("");
+
+  records.forEach((r, i) => {
+    const label = `${i + 1}. ${r.leaf.name} (CU-${r.leaf.id})`;
+    switch (r.disposition) {
+      case "completed":
+        lines.push(`${label} — ✅ PR: ${r.prUrl ?? "(unknown)"}`);
+        break;
+      case "adopted":
+        lines.push(`${label} — 🔁 already in review${r.prUrl ? `: ${r.prUrl}` : ""}`);
+        break;
+      case "skipped":
+        lines.push(`${label} — ⏭️ skipped (${r.detail ?? "already done"})`);
+        break;
+      case "failed":
+        lines.push(`${label} — ❌ ${r.detail ?? "failed"}`);
+        break;
+      case "not_attempted":
+        lines.push(`${label} — ⏸️ not attempted (stack aborted earlier)`);
+        break;
+    }
+  });
+
+  lines.push("");
+  lines.push(
+    `The PRs are stacked: each one targets the branch of the PR before it. ` +
+      `Merge them bottom-up, in the order listed above.`,
+  );
+  if (abortReason) {
+    lines.push("");
+    lines.push(`Resolve the failure and re-run \`--stack\` to resume — finished PRs are picked up where they left off.`);
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Implement all leaf subtasks of a parent task sequentially as stacked PRs.
+ * Leaf subtasks are collected recursively (subtasks that have their own
+ * subtasks are treated as grouping only), ordered by their ClickUp
+ * dependencies, and processed one at a time in the main checkout: the first
+ * branch is created from BASE_BRANCH, each following branch from the previous
+ * one, and each PR targets its branch's base.
+ * Aborts the remaining series when a subtask fails; re-running resumes.
+ */
+export async function runTaskStack(
+  parentTaskId: string,
+  options?: { interactive?: boolean },
+): Promise<StackRunSummary> {
+  interactiveMode = options?.interactive ?? false;
+
+  if (DRY_RUN) {
+    log("info", "\n=== DRY RUN MODE — no changes will be made ===\n");
+  }
+
+  if (!isValidTaskId(parentTaskId)) {
+    throw new Error(`Invalid task ID format: ${parentTaskId}`);
+  }
+
+  // Prevent concurrent instances (skip in dry-run since we're read-only)
+  if (!DRY_RUN) acquireLock();
+
+  try {
+    await runPreflightOrAbort();
+
+    const parent = await getTask(parentTaskId);
+    log("info", `Collecting leaf subtasks of "${parent.name}" (${parentTaskId})...`);
+    const leaves = await getLeafSubtasks(parentTaskId);
+    if (leaves.length === 0) {
+      throw new Error(
+        `Task "${parent.name}" (${parentTaskId}) has no subtasks — use --once ${parentTaskId} to process it directly.`,
+      );
+    }
+
+    // Order by in-stack dependencies; throws on a dependency cycle
+    const ordered = orderTasksByDependencies(leaves);
+    const stackIds = new Set(ordered.map((t) => t.id));
+
+    // Warn about unresolved dependencies OUTSIDE the stack (in-stack ones are
+    // satisfied by the ordering). Warn-only, matching --once behavior.
+    for (const leaf of ordered) {
+      try {
+        const external = (await getUnresolvedDependencies(leaf.id)).filter(
+          (d) => !stackIds.has(d.id),
+        );
+        if (external.length > 0) {
+          const depList = external
+            .map((d) => `"${d.name}" (${d.id}, status: ${d.status})`)
+            .join(", ");
+          log(
+            "warn",
+            `Subtask "${leaf.name}" (${leaf.id}) has unresolved dependencies outside the stack: ${depList}. Proceeding anyway.`,
+          );
+        }
+      } catch (err) {
+        log("warn", `Could not check dependencies for ${leaf.id}: ${(err as Error).message}`);
+      }
+    }
+
+    // Print the planned stack topology
+    log("info", `\nPlanned stack (${ordered.length} task(s), base: ${BASE_BRANCH}):`);
+    let plannedBase = BASE_BRANCH;
+    for (let i = 0; i < ordered.length; i++) {
+      const leaf = ordered[i]!;
+      const branch = `${BRANCH_PREFIX}/CU-${leaf.id}-${slugify(leaf.name)}`;
+      log("info", `  ${i + 1}. ${leaf.name} (${leaf.id}) — ${branch} → PR into ${plannedBase}`);
+      plannedBase = branch;
+    }
+
+    if (AUTO_APPROVE) {
+      log(
+        "warn",
+        "AUTO_APPROVE is suppressed in stack mode — stacked PRs must be merged bottom-up, in order.",
+      );
+    }
+
+    if (DRY_RUN) {
+      // Annotate the plan with existing branches/PRs (read-only), then stop.
+      for (const leaf of ordered) {
+        const existing = await findBranchForTask(leaf.id);
+        const prUrl = await findPRUrlInComments(leaf.id);
+        if (existing || prUrl) {
+          log(
+            "info",
+            `[DRY RUN] ${leaf.id}: existing branch: ${existing ?? "none"}, PR: ${prUrl ?? "none"}`,
+          );
+        }
+      }
+      return { total: ordered.length, completed: 0, skipped: 0, aborted: false };
+    }
+
+    // One up-front fetch/sync; each processTask re-syncs its own base
+    await syncBaseBranch();
+
+    let currentBase = BASE_BRANCH;
+    let previousPrUrl: string | undefined;
+    const completedInSeries: StackInfo["completedInSeries"] = [];
+    const records: StackLeafRecord[] = [];
+    let completed = 0;
+    let skipped = 0;
+    let abortReason: string | null = null;
+
+    // Whether an existing branch can serve as (or extend) the stack head.
+    // The ancestry requirement only applies when the current base is itself a
+    // stack branch — a branch must contain its predecessor's work. When the
+    // current base is BASE_BRANCH there is no predecessor, and requiring
+    // descent from the latest base would falsely reject resumes after the
+    // base branch has advanced.
+    const isOnStack = async (branch: string): Promise<boolean> =>
+      currentBase === BASE_BRANCH || isAncestor(currentBase, branch);
+
+    for (let i = 0; i < ordered.length; i++) {
+      const leaf = ordered[i]!;
+
+      if (abortReason) {
+        records.push({ leaf, disposition: "not_attempted" });
+        continue;
+      }
+
+      log("info", `\n>>> Stack ${i + 1}/${ordered.length}: ${leaf.name} (${leaf.id}) — base: ${currentBase}`);
+
+      // Re-fetch for a fresh status (statuses may change during a long run)
+      let fresh: ClickUpTask;
+      try {
+        fresh = await getTask(leaf.id);
+      } catch (err) {
+        abortReason = `Could not fetch subtask ${leaf.id}: ${(err as Error).message}`;
+        records.push({ leaf, disposition: "failed", detail: abortReason });
+        continue;
+      }
+      const status = fresh.status?.status?.toLowerCase() ?? "";
+      const existing = await findBranchForTask(leaf.id);
+
+      if (status === STATUS.COMPLETED.toLowerCase()) {
+        // Already done. If it left an unmerged stack branch behind, keep
+        // stacking on it; otherwise its work is already in the chain's base.
+        if (existing && (await isOnStack(existing))) {
+          currentBase = existing;
+        }
+        skipped++;
+        records.push({
+          leaf,
+          disposition: "skipped",
+          detail: "already completed",
+          branchName: existing ?? undefined,
+        });
+        continue;
+      }
+
+      if (
+        status === STATUS.IN_REVIEW.toLowerCase() ||
+        status === STATUS.APPROVED.toLowerCase()
+      ) {
+        // Typically a PR from a previous stack run awaiting review — adopt
+        // its branch as the stack head and continue with the next subtask.
+        if (existing && (await isOnStack(existing))) {
+          currentBase = existing;
+          const prUrl = (await findExistingPR(existing)) ?? undefined;
+          previousPrUrl = prUrl;
+          completedInSeries.push({ name: fresh.name, branchName: existing, prUrl });
+          skipped++;
+          records.push({
+            leaf,
+            disposition: "adopted",
+            detail: `status "${status}" — reusing its branch as the stack base`,
+            branchName: existing,
+            prUrl,
+          });
+          continue;
+        }
+        abortReason =
+          `Subtask "${fresh.name}" (${leaf.id}) is "${status}" but its branch is ` +
+          (existing
+            ? `not based on the stack (${existing} does not contain ${currentBase}).`
+            : `missing.`) +
+          ` Merge or complete it first, then re-run --stack.`;
+        records.push({ leaf, disposition: "failed", detail: abortReason });
+        continue;
+      }
+
+      if (
+        status !== STATUS.TODO.toLowerCase() &&
+        status !== STATUS.IN_PROGRESS.toLowerCase()
+      ) {
+        // blocked / require input / unknown — unsafe to build on ambiguity
+        abortReason =
+          `Subtask "${fresh.name}" (${leaf.id}) has unresolved status "${status}". ` +
+          `Resolve it in ClickUp (move it to "${STATUS.TODO}") and re-run --stack.`;
+        records.push({ leaf, disposition: "failed", detail: abortReason });
+        continue;
+      }
+
+      // TODO / IN_PROGRESS: a leftover branch must be based on the stack,
+      // since createTaskBranch will reuse it instead of branching fresh.
+      if (existing && !(await isOnStack(existing))) {
+        abortReason =
+          `Subtask "${fresh.name}" (${leaf.id}) has a stale branch ${existing} that is not ` +
+          `based on ${currentBase}. Delete the branch or finish that task via --once, then re-run --stack.`;
+        records.push({ leaf, disposition: "failed", detail: abortReason });
+        continue;
+      }
+
+      const info: StackInfo = {
+        parentTaskName: parent.name,
+        parentTaskUrl: parent.url,
+        position: i + 1,
+        total: ordered.length,
+        baseBranch: currentBase,
+        previousPrUrl,
+        completedInSeries: [...completedInSeries],
+      };
+      const stack: StackContext = {
+        promptContext: generateStackPromptContext(info),
+        prNote: generateStackPRNote(info),
+      };
+
+      const outcome = await processTask(fresh, { baseBranch: currentBase, stack });
+
+      if (outcome.status === "success" && outcome.branchName) {
+        completed++;
+        currentBase = outcome.branchName;
+        previousPrUrl = outcome.prUrl;
+        completedInSeries.push({
+          name: fresh.name,
+          branchName: outcome.branchName,
+          prUrl: outcome.prUrl,
+        });
+        records.push({
+          leaf,
+          disposition: "completed",
+          branchName: outcome.branchName,
+          prUrl: outcome.prUrl,
+        });
+      } else if (outcome.status === "merged") {
+        // PR already merged into its base — its work is already in the chain
+        skipped++;
+        records.push({
+          leaf,
+          disposition: "skipped",
+          detail: "PR already merged",
+          prUrl: outcome.prUrl,
+        });
+      } else {
+        abortReason =
+          `Subtask "${fresh.name}" (${leaf.id}) ended with "${outcome.status}". ` +
+          `See the task's comments for details.`;
+        records.push({
+          leaf,
+          disposition: "failed",
+          detail: abortReason,
+          branchName: outcome.branchName,
+          prUrl: outcome.prUrl,
+        });
+      }
+    }
+
+    if (abortReason) {
+      log("error", `Stack run aborted: ${abortReason}`);
+    }
+    log(
+      "info",
+      `\nStack run finished: ${completed} completed, ${skipped} skipped, ${ordered.length} total.`,
+    );
+
+    try {
+      await addTaskComment(parentTaskId, buildStackSummaryComment(records, abortReason));
+    } catch (err) {
+      log("warn", `Could not post stack summary on parent task: ${(err as Error).message}`);
+    }
+
+    return {
+      total: ordered.length,
+      completed,
+      skipped,
+      aborted: abortReason !== null,
+    };
   } finally {
     if (!DRY_RUN) releaseLock();
   }

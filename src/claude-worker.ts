@@ -19,7 +19,7 @@ import {
   DRY_RUN,
 } from "./config.js";
 import { log, startTimer } from "./logger.js";
-import type { ClickUpTask, ClaudeResult } from "./types.js";
+import type { ClickUpTask, ClaudeResult, StackInfo } from "./types.js";
 
 /**
  * Directory holding one session-id file per task: .clawdup-sessions/<taskId>.json
@@ -1466,6 +1466,69 @@ export function generatePRBody(
   parts.push(`---`);
   parts.push(`*Automated by [clawdup](https://github.com)*`);
   parts.push(`ClickUp Task: ${task.url}`);
+
+  return parts.join("\n");
+}
+
+/**
+ * Generate the "Stacked PR" section appended to a PR body in stack mode.
+ */
+export function generateStackPRNote(info: StackInfo): string {
+  const parts: string[] = [];
+
+  parts.push(`## Stacked PR (${info.position} of ${info.total})`);
+  parts.push(
+    `Part of the stacked series for ClickUp task: [${info.parentTaskName}](${info.parentTaskUrl})`,
+  );
+  parts.push("");
+  parts.push(`- **Base branch:** \`${info.baseBranch}\``);
+  if (info.previousPrUrl) {
+    parts.push(`- **Previous PR in the stack:** ${info.previousPrUrl} — merge it first`);
+  }
+  parts.push("");
+  parts.push(
+    `> ⚠️ Merge this stack bottom-up (PR 1 first). After a lower PR merges, ` +
+      `GitHub retargets this PR to its base and the diff may temporarily show ` +
+      `the earlier changes until the base is merged in.`,
+  );
+
+  return parts.join("\n");
+}
+
+/**
+ * Generate the "Stacked Task Series" context block appended to the project
+ * context given to Claude in stack mode.
+ */
+export function generateStackPromptContext(info: StackInfo): string {
+  const parts: string[] = [];
+
+  parts.push(`## Stacked Task Series`);
+  parts.push(
+    `This task is part ${info.position} of ${info.total} in a sequential series ` +
+      `implementing the subtasks of "${info.parentTaskName}".`,
+  );
+
+  if (info.completedInSeries.length > 0) {
+    parts.push("");
+    parts.push(
+      `Your branch already contains the work from the previous tasks in the series:`,
+    );
+    for (const done of info.completedInSeries) {
+      parts.push(
+        `- ${done.name} (branch \`${done.branchName}\`${done.prUrl ? `, PR: ${done.prUrl}` : ""})`,
+      );
+    }
+    parts.push("");
+    parts.push(
+      `Build on that work — do NOT re-implement, revert, or duplicate it.`,
+    );
+  }
+
+  if (info.position < info.total) {
+    parts.push(
+      `Later tasks in the series will build on your changes, so keep them focused on this task only.`,
+    );
+  }
 
   return parts.join("\n");
 }

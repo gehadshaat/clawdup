@@ -1,8 +1,12 @@
 // Programmatic API - import this to use clawdup from code.
-export { startRunner, runSingleTask } from "./runner.js";
+export { startRunner, runSingleTask, runTaskStack } from "./runner.js";
 export {
   getTasksByStatus,
   getTask,
+  getTaskWithSubtasks,
+  getLeafSubtasks,
+  orderTasksByDependencies,
+  compareSubtaskOrder,
   updateTaskStatus,
   addTaskComment,
   addTaskCommentForUser,
@@ -37,8 +41,16 @@ export {
   getPRReviewComments,
   getPRInlineComments,
   getPRCheckStatus,
+  isAncestor,
 } from "./git-ops.js";
-export { runClaudeOnTask, runClaudeOnReviewFeedback, generateWorkSummary, scanOutputForSafetyIssues } from "./claude-worker.js";
+export {
+  runClaudeOnTask,
+  runClaudeOnReviewFeedback,
+  generateWorkSummary,
+  scanOutputForSafetyIssues,
+  generateStackPRNote,
+  generateStackPromptContext,
+} from "./claude-worker.js";
 export { runPreflightChecks, runPreflightOrAbort, printPreflightResults } from "./preflight.js";
 export { STATUS, PROJECT_ROOT, GIT_ROOT, DRY_RUN } from "./config.js";
 export { log, setLogLevel, setJsonOutput, isDebug, startTimer } from "./logger.js";
@@ -53,6 +65,11 @@ export type {
   ClaudeResult,
   UserConfig,
   PullRequestOptions,
+  TaskOutcome,
+  TaskOutcomeStatus,
+  StackInfo,
+  StackContext,
+  StackRunSummary,
 } from "./types.js";
 export type { PreflightCheckResult, PreflightResult } from "./preflight.js";
 export { detectPackageManager, globalInstallCommand, installCommand, runScriptCommand, initCommand } from "./package-manager.js";
