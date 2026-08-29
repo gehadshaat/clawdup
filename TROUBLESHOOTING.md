@@ -316,6 +316,28 @@ When a task is moved to "approved", Clawdup tries to merge its PR. If the PR was
 
 ---
 
+### Stack Run Aborted Mid-Way (`--stack`)
+
+**Symptoms:**
+- Parent task comment: `⚠️ Automation stack run aborted after N new PR(s).`
+- Some subtasks listed as `⏸️ not attempted (stack aborted earlier)`
+- `clawdup --stack` exited with a non-zero code
+
+**What happens:**
+Stack mode builds each subtask's branch on the previous one, so when a subtask fails (error, needs input, no changes, or an unresolved status like "blocked"), the remaining subtasks are deliberately not attempted — they would build on missing work.
+
+**Recovery:**
+1. Fix the failing subtask: address the error or add the requested details, then move it back to **"to do"** (the parent comment names the exact blocker)
+2. Re-run `clawdup --stack <parent-task-id>` — completed subtasks are skipped, subtasks already **"in review"** are re-adopted as stacking bases, and processing resumes at the first unfinished one
+3. If the abort message says a branch is *"not based on"* the stack (a stale branch from a non-stack run), delete that branch or finish that task via `--once` first
+
+**Notes:**
+- Merge stacked PRs **bottom-up** (PR 1 first). After a lower PR merges (squash + branch delete), GitHub retargets the next PR to the base branch and its diff may temporarily include the earlier changes — the approved-task flow's conflict resolution handles this when the task is moved to "approved"
+- Starting the continuous polling runner between stack runs prunes local branches; that's fine — stack resume recreates them from `origin/`
+- `AUTO_APPROVE` is intentionally ignored in stack mode
+
+---
+
 ## Where to Look in Logs
 
 Clawdup logs all operations with timestamps and severity levels. Set `LOG_LEVEL=debug` in `.clawdup.env` for verbose output.

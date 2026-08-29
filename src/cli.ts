@@ -2,6 +2,7 @@
 // Usage:
 //   clawdup              Start continuous polling
 //   clawdup --once <id>  Process a single task by ID
+//   clawdup --stack <id> Implement all leaf subtasks of a task as sequential stacked PRs
 //   clawdup --interactive  Run Claude in interactive mode (accepts user input)
 //   clawdup --check      Validate config and exit
 //   clawdup --doctor     Run preflight environment health checks
@@ -70,7 +71,7 @@ async function main(): Promise<void> {
   }
 
   // Everything below requires config to be loaded
-  const { startRunner, runSingleTask } = await import("./runner.js");
+  const { startRunner, runSingleTask, runTaskStack } = await import("./runner.js");
   const { validateStatuses, getListInfo, getTask } = await import("./clickup-api.js");
   const { detectGitHubRepo } = await import("./git-ops.js");
   const { CLICKUP_PARENT_TASK_ID } = await import("./config.js");
@@ -82,6 +83,11 @@ async function main(): Promise<void> {
 
   const interactive = args.includes("--interactive");
 
+  if (args.includes("--once") && args.includes("--stack")) {
+    console.error("Error: --once and --stack cannot be used together");
+    process.exit(1);
+  }
+
   if (args.includes("--once")) {
     const taskIdIndex = args.indexOf("--once") + 1;
     const taskId = args[taskIdIndex];
@@ -92,6 +98,17 @@ async function main(): Promise<void> {
     }
     await runSingleTask(taskId, { interactive });
     process.exit(0);
+  }
+
+  if (args.includes("--stack")) {
+    const taskId = args[args.indexOf("--stack") + 1];
+    if (!taskId || taskId.startsWith("--")) {
+      console.error("Error: --stack requires a parent task ID argument");
+      console.error("Usage: clawdup --stack <parent-task-id>");
+      process.exit(1);
+    }
+    const summary = await runTaskStack(taskId, { interactive });
+    process.exit(summary.aborted ? 1 : 0);
   }
 
   // Default: start the continuous polling runner with periodic relaunch.
@@ -117,6 +134,9 @@ them, creates GitHub PRs, and updates task statuses.
 Usage:
   clawdup                     Start continuous polling
   clawdup --once <task-id>    Process a single task
+  clawdup --stack <task-id>   Implement all leaf subtasks of a task, one at a
+                              time, as stacked PRs (each branch/PR based on
+                              the previous one; dependencies decide the order)
   clawdup --interactive       Run Claude in interactive mode (accepts user input)
   clawdup --dry-run           Simulate the full flow without making any changes
   clawdup --debug             Enable debug-level logging with timing
@@ -167,6 +187,15 @@ Flow:
   9. Repeats
 
   With AUTO_APPROVE=true, step 5 merges the PR immediately (skipping manual review).
+
+Stack mode (--stack <task-id>):
+  Collects all leaf subtasks of the given task (nested subtasks are traversed;
+  subtasks with children are treated as grouping only), orders them by their
+  ClickUp dependencies, and implements them strictly one after another:
+  the first branch is created from the base branch, each next branch from the
+  previous one, and each PR targets its branch's base (base > b1 (PR1) > b2 (PR2)).
+  Merge the PRs bottom-up. AUTO_APPROVE is ignored in this mode. If a subtask
+  fails, the remaining ones are not attempted — re-run --stack to resume.
 
 Signals:
   SIGINT/SIGTERM: Graceful shutdown (finishes current task, then exits)

@@ -181,11 +181,15 @@ export async function syncBaseBranch(cwd?: string): Promise<void> {
  * Branch name format: {prefix}/CU-{task-id}-{slug}
  * The CU-{id} prefix enables ClickUp's GitHub integration to auto-link
  * branches, commits, and PRs to the corresponding ClickUp task.
+ *
+ * When `baseRef` names a branch other than BASE_BRANCH (stacked-PR mode),
+ * the new branch is created from that branch instead of the base branch.
  */
 export async function createTaskBranch(
   taskId: string,
   slug: string,
   cwd?: string,
+  baseRef?: string,
 ): Promise<string> {
   const branchName = `${BRANCH_PREFIX}/CU-${taskId}-${slug}`;
   if (DRY_RUN) {
@@ -194,13 +198,18 @@ export async function createTaskBranch(
   }
   const dir = cwd ?? GIT_ROOT;
   const isWorktree = dir !== GIT_ROOT;
-  log("info", `Creating branch: ${branchName}`);
+  const stackedBase = baseRef && baseRef !== BASE_BRANCH ? baseRef : null;
+  log("info", `Creating branch: ${branchName}${stackedBase ? ` (from ${stackedBase})` : ""}`);
 
-  // For the main checkout, sync base before branching. For a slot worktree,
-  // the runner has already done `resetSlotToBase(dir)` before calling us —
-  // syncing again would attempt `checkout BASE_BRANCH`, which git refuses
-  // when the branch is checked out elsewhere.
-  if (!isWorktree) {
+  if (stackedBase) {
+    // Stacked mode: start from the previous branch in the stack. It was
+    // pushed when its own task succeeded, so origin has it if local is stale.
+    await checkoutExistingBranch(stackedBase, dir);
+  } else if (!isWorktree) {
+    // For the main checkout, sync base before branching. For a slot worktree,
+    // the runner has already done `resetSlotToBase(dir)` before calling us —
+    // syncing again would attempt `checkout BASE_BRANCH`, which git refuses
+    // when the branch is checked out elsewhere.
     await syncBaseBranch(dir);
   }
 
@@ -236,15 +245,18 @@ export async function getHeadHash(cwd?: string): Promise<string> {
 
 /**
  * Get a summary of changes between the base branch and HEAD (for PR description).
- * Diffs BASE_BRANCH...HEAD so it works correctly after commits have been made.
+ * Diffs {base}...HEAD so it works correctly after commits have been made.
+ * Pass `baseRef` to diff against another branch (stacked-PR mode), so a
+ * stacked PR's summary shows only its own delta.
  */
-export async function getChangesSummary(cwd?: string): Promise<{
+export async function getChangesSummary(cwd?: string, baseRef?: string): Promise<{
   stat: string;
   files: string[];
 }> {
   const dir = cwd ?? GIT_ROOT;
-  const diffStat = await gitAt(dir, "diff", "--stat", `${BASE_BRANCH}...HEAD`);
-  const filesChanged = await gitAt(dir, "diff", "--name-only", `${BASE_BRANCH}...HEAD`);
+  const base = baseRef || BASE_BRANCH;
+  const diffStat = await gitAt(dir, "diff", "--stat", `${base}...HEAD`);
+  const filesChanged = await gitAt(dir, "diff", "--name-only", `${base}...HEAD`);
   return {
     stat: diffStat,
     files: filesChanged.split("\n").filter(Boolean),
@@ -519,6 +531,44 @@ export async function branchHasBeenPushed(
 ): Promise<boolean> {
   try {
     await git("rev-parse", "--verify", `origin/${branchName}`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Resolve a ref to a commit SHA, preferring the local ref and falling back
+ * to origin/{ref}. Returns null when neither resolves.
+ */
+async function resolveRefToSha(ref: string, cwd: string): Promise<string | null> {
+  for (const candidate of [ref, `origin/${ref}`]) {
+    try {
+      return await gitAt(cwd, "rev-parse", "--verify", `${candidate}^{commit}`);
+    } catch {
+      // Try the next candidate
+    }
+  }
+  return null;
+}
+
+/**
+ * Check whether `ancestorRef` is an ancestor of `descendantRef`.
+ * Each ref is resolved locally first, then via origin/ (branches adopted
+ * during a stack resume may exist only on the remote). Returns false when
+ * either ref cannot be resolved or the check fails.
+ */
+export async function isAncestor(
+  ancestorRef: string,
+  descendantRef: string,
+  cwd?: string,
+): Promise<boolean> {
+  const dir = cwd ?? GIT_ROOT;
+  const ancestorSha = await resolveRefToSha(ancestorRef, dir);
+  const descendantSha = await resolveRefToSha(descendantRef, dir);
+  if (!ancestorSha || !descendantSha) return false;
+  try {
+    await gitAt(dir, "merge-base", "--is-ancestor", ancestorSha, descendantSha);
     return true;
   } catch {
     return false;

@@ -470,6 +470,18 @@ Prevents multiple Clawdup instances from running simultaneously in the same proj
 
 Only one task is processed at a time. The `isProcessing` flag prevents the polling loop from picking up new tasks while one is in flight.
 
+### Stack Mode (`--stack <task-id>`)
+
+`runTaskStack` implements all **leaf subtasks** of one parent task sequentially as **stacked PRs**:
+
+1. **Collect:** `getLeafSubtasks` recursively fetches the subtask tree (`GET /task/{id}?include_subtasks=true` per node). Subtasks with children are grouping-only and excluded; leaves keep their fully hydrated task objects.
+2. **Order:** `orderTasksByDependencies` topologically sorts the leaves using only in-stack ClickUp dependencies (ties broken by input order, which follows ClickUp's `orderindex`). A dependency cycle is a hard error; unresolved dependencies *outside* the stack only warn (same as `--once`).
+3. **Process sequentially** in the main checkout (no worktrees, `MAX_CONCURRENT_TASKS` ignored). Each subtask runs through the normal `processTask` pipeline with two overrides: its branch is created from the previous subtask's branch (the first from `BASE_BRANCH`), and its PR targets that base (`base > b1 (PR1) > b2 (PR2)`). The Claude prompt and PR body carry a stack-series context block.
+4. **Abort on failure:** if a subtask ends in `needs_input`, `no_changes`, or `error`, the remaining subtasks are not attempted (they would build on missing work). A summary comment on the parent task lists the outcome per subtask.
+5. **Resume:** re-running `--stack` skips `complete` subtasks and adopts the existing branch of `in review`/`approved` subtasks as the next stacking base — guarded by a `git merge-base --is-ancestor` check whenever the current base is itself a stack branch, so a branch that doesn't contain its predecessor's work aborts with guidance instead of producing a broken stack.
+
+`AUTO_APPROVE` is suppressed in stack mode: auto-merging PR *N* would delete the branch PR *N+1* builds on. Stacked PRs are merged manually, bottom-up.
+
 ---
 
 ## Security Model

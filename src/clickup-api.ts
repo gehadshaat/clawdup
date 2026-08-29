@@ -175,6 +175,15 @@ export async function getTask(taskId: string): Promise<ClickUpTask> {
 }
 
 /**
+ * Get a single task by ID including its direct subtasks.
+ * The returned task itself is fully hydrated (description, dependencies,
+ * status); the entries in `subtasks` are shallow objects.
+ */
+export async function getTaskWithSubtasks(taskId: string): Promise<ClickUpTask> {
+  return request<ClickUpTask>("GET", `/task/${taskId}?include_subtasks=true`);
+}
+
+/**
  * Get dependencies for a task.
  * Returns both `dependencies` (tasks blocked by this one) and `waitingOn` (tasks this one waits on).
  *
@@ -230,6 +239,115 @@ export async function getUnresolvedDependencies(
   }
 
   return unresolved;
+}
+
+/**
+ * Compare two subtasks by their ClickUp ordering.
+ * Sorts by numeric orderindex, falling back to creation date, then ID.
+ */
+export function compareSubtaskOrder(a: ClickUpTask, b: ClickUpTask): number {
+  const ai = parseFloat(a.orderindex ?? "");
+  const bi = parseFloat(b.orderindex ?? "");
+  if (!Number.isNaN(ai) && !Number.isNaN(bi) && ai !== bi) return ai - bi;
+  const ad = parseInt(a.date_created ?? "", 10);
+  const bd = parseInt(b.date_created ?? "", 10);
+  if (!Number.isNaN(ad) && !Number.isNaN(bd) && ad !== bd) return ad - bd;
+  return a.id.localeCompare(b.id);
+}
+
+// Safety cap for recursive subtask traversal (ClickUp allows nested subtasks).
+const MAX_SUBTASK_DEPTH = 10;
+
+/**
+ * Recursively collect all leaf subtasks under a parent task.
+ * A leaf is a task with no subtasks of its own; tasks with children are
+ * treated as grouping-only containers and excluded. Each node is fetched
+ * exactly once via `fetchTask` (injectable for tests), so the returned
+ * leaves are fully hydrated task objects.
+ * The parent itself is never included; returns [] when it has no subtasks.
+ */
+export async function getLeafSubtasks(
+  parentTaskId: string,
+  fetchTask: (id: string) => Promise<ClickUpTask> = getTaskWithSubtasks,
+): Promise<ClickUpTask[]> {
+  const leaves: ClickUpTask[] = [];
+  const visited = new Set<string>([parentTaskId]);
+
+  async function collect(taskId: string, depth: number): Promise<void> {
+    const task = await fetchTask(taskId);
+    const children = [...(task.subtasks ?? [])].sort(compareSubtaskOrder);
+
+    if (children.length === 0) {
+      // The root parent is never a leaf, even when it has no subtasks
+      if (depth > 0) leaves.push(task);
+      return;
+    }
+
+    if (depth >= MAX_SUBTASK_DEPTH) {
+      log(
+        "warn",
+        `Subtask depth cap (${MAX_SUBTASK_DEPTH}) reached at task ${taskId}; not descending further`,
+      );
+      return;
+    }
+
+    for (const child of children) {
+      if (visited.has(child.id)) {
+        log("warn", `Skipping already-visited subtask ${child.id} (cyclic subtask link?)`);
+        continue;
+      }
+      if (!isValidTaskId(child.id)) {
+        log("warn", `Skipping subtask with invalid ID format: ${child.id}`);
+        continue;
+      }
+      visited.add(child.id);
+      await collect(child.id, depth + 1);
+    }
+  }
+
+  await collect(parentTaskId, 0);
+  return leaves;
+}
+
+/**
+ * Order tasks so that every task comes after the tasks it depends on.
+ * Only dependencies between tasks in the given set are considered — external
+ * dependencies are the caller's concern. Deterministic: among unblocked
+ * tasks, the one earliest in the input order is picked first.
+ * Throws when the in-set dependency graph contains a cycle.
+ */
+export function orderTasksByDependencies(tasks: ClickUpTask[]): ClickUpTask[] {
+  const ids = new Set(tasks.map((t) => t.id));
+  const blockersOf = new Map<string, string[]>();
+
+  for (const t of tasks) {
+    // A dependency row where this task is on the `task_id` side means this
+    // task is blocked by `depends_on` (same reading as getTaskDependencies).
+    const blockers = (t.dependencies ?? [])
+      .filter((d) => d.task_id === t.id)
+      .map((d) => d.depends_on)
+      .filter((id) => ids.has(id) && id !== t.id);
+    blockersOf.set(t.id, blockers);
+  }
+
+  const ordered: ClickUpTask[] = [];
+  const placed = new Set<string>();
+  const remaining = [...tasks];
+
+  while (remaining.length > 0) {
+    const readyIndex = remaining.findIndex((t) =>
+      blockersOf.get(t.id)!.every((b) => placed.has(b)),
+    );
+    if (readyIndex === -1) {
+      const cycle = remaining.map((t) => `"${t.name}" (${t.id})`).join(", ");
+      throw new Error(`Dependency cycle detected among tasks: ${cycle}`);
+    }
+    const next = remaining.splice(readyIndex, 1)[0]!;
+    placed.add(next.id);
+    ordered.push(next);
+  }
+
+  return ordered;
 }
 
 /**
