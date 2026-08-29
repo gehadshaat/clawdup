@@ -861,11 +861,12 @@ export async function getPRReviewDecision(prUrl: string): Promise<string> {
 
 /**
  * Get review comments from a pull request.
- * Returns an array of review comments with author, body, and creation date.
+ * Returns an array of review comments with author, body, creation date, and
+ * review state (APPROVED, CHANGES_REQUESTED, COMMENTED, ...).
  */
 export async function getPRReviewComments(
   prUrl: string,
-): Promise<Array<{ author: string; body: string; createdAt: string }>> {
+): Promise<Array<{ author: string; body: string; createdAt: string; state?: string }>> {
   try {
     const result = await gh(
       "pr",
@@ -874,13 +875,30 @@ export async function getPRReviewComments(
       "--json",
       "reviews",
       "--jq",
-      '[.reviews[] | select(.body != "") | {author: .author.login, body: .body, createdAt: .submittedAt}]',
+      '[.reviews[] | select(.body != "") | {author: .author.login, body: .body, createdAt: .submittedAt, state: .state}]',
     );
     if (!result || result === "[]") return [];
-    return JSON.parse(result) as Array<{ author: string; body: string; createdAt: string }>;
+    return JSON.parse(result) as Array<{ author: string; body: string; createdAt: string; state?: string }>;
   } catch {
     return [];
   }
+}
+
+/**
+ * Filter GitHub comments/reviews to those created strictly after `sinceMs`
+ * (epoch ms). Entries with a missing or unparsable createdAt are dropped —
+ * without a timestamp they can't be proven new, and treating them as new
+ * would re-trigger feedback processing on every poll cycle.
+ * Pure helper used by the PR feedback poller.
+ */
+export function filterCommentsSince<T extends { createdAt: string }>(
+  comments: T[],
+  sinceMs: number,
+): T[] {
+  return comments.filter((c) => {
+    const createdMs = c.createdAt ? Date.parse(c.createdAt) : NaN;
+    return !isNaN(createdMs) && createdMs > sinceMs;
+  });
 }
 
 /**

@@ -230,6 +230,15 @@ export const CLAUDE_MODEL: string = process.env.CLAUDE_MODEL || "";
 // Auto-approve mode: skip manual review and merge PRs immediately after Claude completes
 export const AUTO_APPROVE: boolean = (process.env.AUTO_APPROVE || "").toLowerCase() === "true";
 
+// Address PR review comments automatically (default: enabled).
+// The runner polls tasks sitting in "in progress" / "in review" for new
+// GitHub PR review comments (reviews and inline code comments posted after
+// the automation's last activity on the task) and runs Claude to address
+// them — no need to move the task back to "to do" first.
+// Set ADDRESS_PR_COMMENTS=false to require the manual move-back-to-TODO flow.
+export const ADDRESS_PR_COMMENTS: boolean =
+  (process.env.ADDRESS_PR_COMMENTS || "true").toLowerCase() === "true";
+
 // Dry-run mode: simulate the full automation flow without making any changes
 export const DRY_RUN: boolean = (process.env.DRY_RUN || "").toLowerCase() === "true";
 

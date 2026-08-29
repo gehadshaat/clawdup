@@ -72,8 +72,9 @@ clawdup
    - **Confused** — Comments on task with what's missing, moves to "require input"
    - **Something broke** — Comments with error details, moves to "blocked"
    - **Nothing to do** — Comments that no changes were needed, moves to "require input"
-6. **Approval** — When you move a task to "approved", the automation merges the PR
-7. **Repeat** — Returns to the base branch and picks up the next task
+6. **Review feedback** — Leave a review or inline comment on the PR and the automation notices it on the next poll, re-runs Claude with your feedback, and pushes the updates to the same PR (disable with `ADDRESS_PR_COMMENTS=false`)
+7. **Approval** — When you move a task to "approved", the automation merges the PR
+8. **Repeat** — Returns to the base branch and picks up the next task
 
 ## Installation
 
@@ -306,6 +307,7 @@ If your project has a `CLAUDE.md` file (used by Claude Code for project context)
 | `CLAUDE_TIMEOUT_MS`    | No       | `1800000`       | Timeout per task (ms)               |
 | `CLAUDE_MAX_TURNS`     | No       | `100`           | Max agentic turns per task          |
 | `MAX_CONCURRENT_TASKS` | No       | `2`             | Tasks processed in parallel (1=off, range 1-10) |
+| `ADDRESS_PR_COMMENTS`  | No       | `true`          | Auto-address new PR review comments on in-progress / in-review tasks |
 | `LOG_LEVEL`            | No       | `info`          | `debug` / `info` / `warn` / `error` |
 | `STATUS_TODO`          | No       | `to do`         | ClickUp status: to do               |
 | `STATUS_IN_PROGRESS`   | No       | `in progress`   | ClickUp status: in progress         |

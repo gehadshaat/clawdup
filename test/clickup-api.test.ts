@@ -13,6 +13,8 @@ import {
   formatTaskForClaude,
   isValidTaskId,
   slugify,
+  findPRUrlInCommentList,
+  getLastAutomationCommentDate,
 } from "../src/clickup-api.js";
 import type { ClickUpComment, ClickUpTask } from "../src/types.js";
 
@@ -565,5 +567,128 @@ describe("PR URL detection in comments", () => {
     }
 
     assert.equal(foundUrl, "https://github.com/org/repo/pull/2");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// findPRUrlInCommentList
+// ---------------------------------------------------------------------------
+describe("findPRUrlInCommentList", () => {
+  it("finds a PR URL in a comment", () => {
+    const comments: ClickUpComment[] = [
+      { comment_text: "PR created: https://github.com/org/repo/pull/12" },
+    ];
+    assert.equal(
+      findPRUrlInCommentList(comments),
+      "https://github.com/org/repo/pull/12",
+    );
+  });
+
+  it("returns the newest PR URL when several comments contain one", () => {
+    const comments: ClickUpComment[] = [
+      { comment_text: "PR: https://github.com/org/repo/pull/1" },
+      { comment_text: "Some human comment" },
+      { comment_text: "PR: https://github.com/org/repo/pull/2" },
+    ];
+    assert.equal(
+      findPRUrlInCommentList(comments),
+      "https://github.com/org/repo/pull/2",
+    );
+  });
+
+  it("returns null when no comment contains a PR URL", () => {
+    const comments: ClickUpComment[] = [
+      { comment_text: "Please fix the login page." },
+      { comment_text: "Check https://github.com/org/repo/issues/42" },
+    ];
+    assert.equal(findPRUrlInCommentList(comments), null);
+  });
+
+  it("returns null for an empty comment list", () => {
+    assert.equal(findPRUrlInCommentList([]), null);
+  });
+
+  it("extracts the URL from rich-text comment blocks", () => {
+    const comments: ClickUpComment[] = [
+      {
+        comment: [
+          { text: "The PR is ready: " },
+          { text: "https://github.com/org/repo/pull/77" },
+        ],
+      },
+    ];
+    assert.equal(
+      findPRUrlInCommentList(comments),
+      "https://github.com/org/repo/pull/77",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getLastAutomationCommentDate
+// ---------------------------------------------------------------------------
+describe("getLastAutomationCommentDate", () => {
+  it("returns null when there are no comments", () => {
+    assert.equal(getLastAutomationCommentDate([]), null);
+  });
+
+  it("returns null when no comment is from the automation", () => {
+    const comments: ClickUpComment[] = [
+      { comment_text: "Please fix the login page.", date: "1700000000000" },
+      { comment_text: "Also check the styles.", date: "1700000001000" },
+    ];
+    assert.equal(getLastAutomationCommentDate(comments), null);
+  });
+
+  it("returns the date of the automation comment", () => {
+    const comments: ClickUpComment[] = [
+      { comment_text: "Human comment", date: "1700000000000" },
+      {
+        comment_text: "🤖 Automation picked up this task and is now working on it.",
+        date: "1700000005000",
+      },
+    ];
+    assert.equal(getLastAutomationCommentDate(comments), 1700000005000);
+  });
+
+  it("returns the most recent automation comment date regardless of order", () => {
+    const comments: ClickUpComment[] = [
+      {
+        comment_text: "✅ Automation completed! The pull request is ready for review:",
+        date: "1700000009000",
+      },
+      { comment_text: "Human feedback after completion", date: "1700000010000" },
+      {
+        comment_text: "🤖 Automation picked up this task and is now working on it.",
+        date: "1700000001000",
+      },
+    ];
+    assert.equal(getLastAutomationCommentDate(comments), 1700000009000);
+  });
+
+  it("recognizes automation comments that start with a user mention", () => {
+    // notifyTaskCreator prepends "@username " to the automation text
+    const comments: ClickUpComment[] = [
+      {
+        comment_text: "@alice ⚠️ Automation encountered an error but made partial changes.",
+        date: "1700000003000",
+      },
+    ];
+    assert.equal(getLastAutomationCommentDate(comments), 1700000003000);
+  });
+
+  it("ignores automation comments with missing or invalid dates", () => {
+    const comments: ClickUpComment[] = [
+      { comment_text: "🤖 Automation picked up this task and is now working on it." },
+      {
+        comment_text: "✅ Automation completed! Ready for review.",
+        date: "not-a-date",
+      },
+      {
+        comment_text: "🔄 Automation restarted — no prior work found. Retrying task.",
+        date: "1700000002000",
+      },
+    ];
+    assert.equal(getLastAutomationCommentDate(comments), 1700000002000);
   });
 });

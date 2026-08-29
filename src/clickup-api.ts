@@ -437,15 +437,13 @@ export async function getTaskComments(
 }
 
 /**
- * Find the PR URL from a task's comments.
- * The automation posts a comment with the PR URL when it creates one.
+ * Find a GitHub PR URL in a list of task comments (searched newest-first).
+ * Pure helper shared by findPRUrlInComments and the PR feedback poller.
  * Returns the URL string or null if not found.
  */
-export async function findPRUrlInComments(
-  taskId: string,
-): Promise<string | null> {
-  const comments = await getTaskComments(taskId);
-  // Search comments newest-first for a GitHub PR URL
+export function findPRUrlInCommentList(
+  comments: ClickUpComment[],
+): string | null {
   const prUrlPattern = /https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+/;
   for (let i = comments.length - 1; i >= 0; i--) {
     const text = getCommentText(comments[i]!);
@@ -455,6 +453,18 @@ export async function findPRUrlInComments(
     }
   }
   return null;
+}
+
+/**
+ * Find the PR URL from a task's comments.
+ * The automation posts a comment with the PR URL when it creates one.
+ * Returns the URL string or null if not found.
+ */
+export async function findPRUrlInComments(
+  taskId: string,
+): Promise<string | null> {
+  const comments = await getTaskComments(taskId);
+  return findPRUrlInCommentList(comments);
 }
 
 /**
@@ -851,6 +861,27 @@ const AUTOMATION_COMMENT_MARKERS = [
  */
 function isAutomationComment(commentText: string): boolean {
   return AUTOMATION_COMMENT_MARKERS.some((marker) => commentText.includes(marker));
+}
+
+/**
+ * Get the timestamp (epoch ms) of the automation's most recent comment in a
+ * list of task comments, or null when the automation has never commented.
+ * Pure helper used as the boundary for detecting new PR review feedback:
+ * GitHub comments created after the automation last reported activity on the
+ * task are considered new (everything older was already seen or addressed).
+ */
+export function getLastAutomationCommentDate(
+  comments: ClickUpComment[],
+): number | null {
+  let latest: number | null = null;
+  for (const comment of comments) {
+    if (!isAutomationComment(getCommentText(comment))) continue;
+    const date = comment.date ? parseInt(comment.date, 10) : NaN;
+    if (!isNaN(date) && (latest === null || date > latest)) {
+      latest = date;
+    }
+  }
+  return latest;
 }
 
 /**

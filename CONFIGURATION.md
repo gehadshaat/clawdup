@@ -170,6 +170,7 @@ Project context file used by Claude Code. Automatically included in every task p
 | --- | --- | --- |
 | `POLL_INTERVAL_MS` | `30000` (30s) | How often to poll ClickUp for new tasks. Minimum: 5000ms (5s). |
 | `RELAUNCH_INTERVAL_MS` | `600000` (10min) | How often to restart the runner process. Set to `0` to disable. Minimum when enabled: 60000ms (1min). See [Relaunch Behavior](#relaunch-behavior). |
+| `ADDRESS_PR_COMMENTS` | `true` | Automatically address new PR review comments. Each poll cycle, tasks sitting in "in progress" / "in review" are checked for GitHub PR reviews and inline code comments posted after the automation's last activity on the task; when found, the automation re-runs Claude with the feedback and pushes the updates to the same PR. Approval-only reviews (e.g. "LGTM") don't trigger a round, and each task is limited to 3 automatic rounds per runner session (a guard against ping-pong with auto-review bots) — after that, a comment asks a human to take over. Set to `false` to require the manual flow (move the task back to "to do" to trigger a feedback round). |
 
 ### Claude Code
 
