@@ -2,7 +2,7 @@
 
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import { resolve } from "path";
-import { POLL_INTERVAL_MS, RELAUNCH_INTERVAL_MS, STATUS, BASE_BRANCH, GIT_ROOT, CLICKUP_LIST_ID, CLICKUP_PARENT_TASK_ID, AUTO_APPROVE, ADDRESS_PR_COMMENTS, DRY_RUN, BRANCH_PREFIX, MAX_CONCURRENT_TASKS } from "./config.js";
+import { POLL_INTERVAL_MS, RELAUNCH_INTERVAL_MS, STATUS, BASE_BRANCH, GIT_ROOT, CLICKUP_LIST_ID, CLICKUP_PARENT_TASK_ID, AUTO_APPROVE, ADDRESS_PR_COMMENTS, DRY_RUN, BRANCH_PREFIX, MAX_CONCURRENT_TASKS, NATIVE_STACKS } from "./config.js";
 import { log, startTimer } from "./logger.js";
 import {
   getTasksByStatus,
@@ -72,6 +72,8 @@ import {
   pruneWorktrees,
   resetSlotToBase,
   isAncestor,
+  linkStackPRs,
+  selectLinkablePrUrls,
 } from "./git-ops.js";
 import {
   runClaudeOnTask,
@@ -91,6 +93,7 @@ import type {
   TaskOutcome,
   StackContext,
   StackInfo,
+  StackLinkResult,
   StackRunSummary,
 } from "./types.js";
 
@@ -2187,6 +2190,7 @@ interface StackLeafRecord {
 function buildStackSummaryComment(
   records: StackLeafRecord[],
   abortReason: string | null,
+  stackLink: StackLinkResult | null,
 ): string {
   const lines: string[] = [];
   const completed = records.filter((r) => r.disposition === "completed").length;
@@ -2220,10 +2224,24 @@ function buildStackSummaryComment(
   });
 
   lines.push("");
-  lines.push(
-    `The PRs are stacked: each one targets the branch of the PR before it. ` +
-      `Merge them bottom-up, in the order listed above.`,
-  );
+  if (
+    stackLink &&
+    (stackLink.outcome === "created" ||
+      stackLink.outcome === "extended" ||
+      stackLink.outcome === "already-linked")
+  ) {
+    lines.push(
+      `🪜 The open PRs are linked as a native GitHub stack (#${stackLink.stackNumber}). ` +
+        `Merge bottom-up as usual — when a lower PR merges, GitHub automatically ` +
+        `rebases and retargets the ones above it.`,
+    );
+  } else {
+    lines.push(
+      `The PRs are stacked: each one targets the branch of the PR before it. ` +
+        `Merge them bottom-up, in the order listed above, deleting each merged ` +
+        `branch — GitHub only retargets the next PR when the merged branch is deleted.`,
+    );
+  }
   if (abortReason) {
     lines.push("");
     lines.push(`Resolve the failure and re-run \`--stack\` to resume — finished PRs are picked up where they left off.`);
@@ -2566,7 +2584,34 @@ export async function runTaskStack(
       `\nStack run finished: ${completed} completed, ${skipped} skipped, ${ordered.length} total.`,
     );
 
-    const summaryComment = buildStackSummaryComment(records, abortReason);
+    // Link the series' open PRs into a native GitHub stack (public preview),
+    // so merging a lower PR automatically rebases and retargets the ones
+    // above it. Best-effort and additive: where the Stacks API is
+    // unavailable, the chained PRs behave exactly as before.
+    let stackLink: StackLinkResult | null = null;
+    if (NATIVE_STACKS) {
+      stackLink = await linkStackPRs(selectLinkablePrUrls(completedInSeries));
+      switch (stackLink.outcome) {
+        case "created":
+          log("info", `Linked ${stackLink.prNumbers.length} PR(s) into native GitHub stack #${stackLink.stackNumber}.`);
+          break;
+        case "extended":
+          log("info", `Added ${stackLink.prNumbers.length} PR(s) to native GitHub stack #${stackLink.stackNumber}.`);
+          break;
+        case "already-linked":
+          log("info", `PRs already linked as native GitHub stack #${stackLink.stackNumber}.`);
+          break;
+        case "skipped":
+          log("info", `Native stack linking skipped: ${stackLink.reason}.`);
+          break;
+        case "unavailable":
+        case "failed":
+          log("warn", `Native stack linking ${stackLink.outcome === "unavailable" ? "unavailable" : "failed"}: ${stackLink.reason}. The PRs still work as a chained series — merge bottom-up and delete each merged branch.`);
+          break;
+      }
+    }
+
+    const summaryComment = buildStackSummaryComment(records, abortReason, stackLink);
     if (source.summaryTaskId) {
       try {
         await addTaskComment(source.summaryTaskId, summaryComment);

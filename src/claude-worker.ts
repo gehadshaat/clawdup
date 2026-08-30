@@ -1476,9 +1476,10 @@ export function generateStackPRNote(info: StackInfo): string {
   }
   parts.push("");
   parts.push(
-    `> ⚠️ Merge this stack bottom-up (PR 1 first). After a lower PR merges, ` +
-      `GitHub retargets this PR to its base and the diff may temporarily show ` +
-      `the earlier changes until the base is merged in.`,
+    `> ⚠️ Merge this stack bottom-up (PR 1 first). When the series is linked as a ` +
+      `native GitHub stack, merging a lower PR automatically rebases and retargets ` +
+      `this one. Otherwise, delete each merged branch so GitHub retargets this PR — ` +
+      `its diff may temporarily show the earlier changes until the base is merged in.`,
   );
 
   return parts.join("\n");

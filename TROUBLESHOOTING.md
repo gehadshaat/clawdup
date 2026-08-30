@@ -334,9 +334,27 @@ Stack mode builds each subtask's branch on the previous one, so when a subtask f
 3. If the abort message says a branch is *"not based on"* the stack (a stale branch from a non-stack run), delete that branch or finish that task via `--once` first
 
 **Notes:**
-- Merge stacked PRs **bottom-up** (PR 1 first). After a lower PR merges (squash + branch delete), GitHub retargets the next PR to the base branch and its diff may temporarily include the earlier changes — the approved-task flow's conflict resolution handles this when the task is moved to "approved"
+- Merge stacked PRs **bottom-up** (PR 1 first). When the run linked the PRs as a native GitHub stack (see the run summary), merging a lower PR automatically rebases and retargets the ones above it. Otherwise, delete each merged branch — GitHub only retargets the next PR when the merged branch is deleted — and the next PR's diff may temporarily include the earlier changes; the approved-task flow's conflict resolution handles this when the task is moved to "approved"
 - Starting the continuous polling runner between stack runs prunes local branches; that's fine — stack resume recreates them from `origin/`
 - `AUTO_APPROVE` is intentionally ignored in stack mode
+
+### Stacked PR Still Targets a Merged Branch (`--stack`)
+
+**Symptoms:**
+- The first PR of a stack was merged, but the next PR still targets the merged branch instead of the base branch
+- The next PR's diff looks stale or shows the already-merged changes
+
+**What happens:**
+Clawdup links a stack run's open PRs into a **native GitHub stack** (Stacks REST API, public preview) so GitHub retargets automatically after each merge. When that linking didn't happen — the API was unavailable for the repository, `NATIVE_STACKS=false`, or the stack predates the feature — the PRs are plain chained PRs, and GitHub only retargets the next PR when the merged PR's **head branch is deleted**. Merging without deleting the branch leaves the next PR pointing at a merged, stale branch.
+
+**Recovery:**
+1. Delete the merged PR's branch (the "Delete branch" button on the merged PR, or `git push origin --delete <branch>`) — GitHub retargets the dependent PR immediately, even after the fact. Or retarget manually: `gh pr edit <pr-number> --base <base-branch>`
+2. If the merge was a squash, the retargeted PR's diff still shows the earlier changes until the base branch is merged into its branch (or the task is moved to "approved", where the merge-conflict flow handles it)
+3. Optionally link the remaining open PRs into a native stack yourself: `gh api --method POST repos/<owner>/<repo>/stacks -F "pull_requests[]=<lower>" -F "pull_requests[]=<upper>"` (bottom-up), or `gh stack link <lower> <upper>` with the [gh-stack extension](https://docs.github.com/en/pull-requests/reference/stacked-prs-cli-commands)
+
+**Prevention:**
+- Leave `NATIVE_STACKS` enabled (the default) — the run summary comment says whether linking succeeded
+- Enable **Settings → General → "Automatically delete head branches"** on the repository, so plain chained PRs also retarget on every merge
 
 ---
 
