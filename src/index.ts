@@ -5,6 +5,7 @@ export {
   getTask,
   getTaskWithSubtasks,
   getLeafSubtasks,
+  getLeafListTasks,
   orderTasksByDependencies,
   compareSubtaskOrder,
   updateTaskStatus,

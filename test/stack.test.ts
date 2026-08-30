@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import {
   compareSubtaskOrder,
   getLeafSubtasks,
+  getLeafListTasks,
   orderTasksByDependencies,
 } from "../src/clickup-api.js";
 import {
@@ -216,12 +217,103 @@ describe("getLeafSubtasks", () => {
 });
 
 // ---------------------------------------------------------------------------
+// getLeafListTasks
+// ---------------------------------------------------------------------------
+describe("getLeafListTasks", () => {
+  function makeFetcher(tree: Record<string, ClickUpTask>) {
+    const fetched: string[] = [];
+    const fetchTask = async (id: string): Promise<ClickUpTask> => {
+      fetched.push(id);
+      const task = tree[id];
+      if (!task) throw new Error(`fixture missing task ${id}`);
+      return task;
+    };
+    return { fetchTask, fetched };
+  }
+
+  it("returns childless top-level tasks as leaves, in list order", async () => {
+    const tree: Record<string, ClickUpTask> = {
+      t1: makeTask("t1"),
+      t2: makeTask("t2"),
+    };
+    const { fetchTask, fetched } = makeFetcher(tree);
+    const topLevel = [
+      makeTask("t2", { orderindex: "2" }),
+      makeTask("t1", { orderindex: "1" }),
+    ];
+    const leaves = await getLeafListTasks(fetchTask, async () => topLevel);
+    assert.deepEqual(leaves.map((t) => t.id), ["t1", "t2"]);
+    // Each task fetched exactly once, in walk order
+    assert.deepEqual(fetched, ["t1", "t2"]);
+  });
+
+  it("recurses into top-level tasks with subtasks, excluding the containers", async () => {
+    const tree: Record<string, ClickUpTask> = {
+      group: makeTask("group", {
+        subtasks: [
+          makeTask("g2", { orderindex: "2" }),
+          makeTask("g1", { orderindex: "1" }),
+        ],
+      }),
+      g1: makeTask("g1"),
+      g2: makeTask("g2"),
+      solo: makeTask("solo"),
+    };
+    const { fetchTask } = makeFetcher(tree);
+    const topLevel = [
+      makeTask("group", { orderindex: "1" }),
+      makeTask("solo", { orderindex: "2" }),
+    ];
+    const leaves = await getLeafListTasks(fetchTask, async () => topLevel);
+    assert.deepEqual(leaves.map((t) => t.id), ["g1", "g2", "solo"]);
+  });
+
+  it("returns an empty array for an empty list", async () => {
+    const { fetchTask, fetched } = makeFetcher({});
+    const leaves = await getLeafListTasks(fetchTask, async () => []);
+    assert.deepEqual(leaves, []);
+    assert.deepEqual(fetched, []);
+  });
+
+  it("skips top-level tasks with invalid IDs and duplicates without fetching them", async () => {
+    const tree: Record<string, ClickUpTask> = { ok1: makeTask("ok1") };
+    const { fetchTask, fetched } = makeFetcher(tree);
+    const topLevel = [
+      makeTask("ok1", { orderindex: "1" }),
+      makeTask("bad-id!", { orderindex: "2" }),
+      makeTask("ok1", { orderindex: "3" }),
+    ];
+    const leaves = await getLeafListTasks(fetchTask, async () => topLevel);
+    assert.deepEqual(leaves.map((t) => t.id), ["ok1"]);
+    assert.deepEqual(fetched, ["ok1"]);
+  });
+
+  it("does not re-visit a task reachable from two containers", async () => {
+    const tree: Record<string, ClickUpTask> = {
+      a: makeTask("a", { subtasks: [makeTask("shared")] }),
+      b: makeTask("b", { subtasks: [makeTask("shared"), makeTask("b1")] }),
+      shared: makeTask("shared"),
+      b1: makeTask("b1"),
+    };
+    const { fetchTask, fetched } = makeFetcher(tree);
+    const topLevel = [
+      makeTask("a", { orderindex: "1" }),
+      makeTask("b", { orderindex: "2" }),
+    ];
+    const leaves = await getLeafListTasks(fetchTask, async () => topLevel);
+    assert.deepEqual(leaves.map((t) => t.id), ["shared", "b1"]);
+    assert.deepEqual(fetched, ["a", "shared", "b", "b1"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // generateStackPRNote / generateStackPromptContext
 // ---------------------------------------------------------------------------
 describe("stack text builders", () => {
   const info: StackInfo = {
-    parentTaskName: "Big Feature",
-    parentTaskUrl: "https://app.clickup.com/t/parent1",
+    sourceKind: "task",
+    sourceName: "Big Feature",
+    sourceUrl: "https://app.clickup.com/t/parent1",
     position: 2,
     total: 3,
     baseBranch: "clickup/CU-a1-first-task",
@@ -264,5 +356,23 @@ describe("stack text builders", () => {
     const context = generateStackPromptContext(first);
     assert.ok(!context.includes("already contains"));
     assert.ok(!context.includes("Later tasks"));
+  });
+
+  it("handles a list source without a URL in both builders", () => {
+    const listInfo: StackInfo = {
+      ...info,
+      sourceKind: "list",
+      sourceName: "Backlog",
+      sourceUrl: undefined,
+    };
+
+    const note = generateStackPRNote(listInfo);
+    assert.ok(note.includes("Stacked PR (2 of 3)"));
+    assert.ok(note.includes('ClickUp list: "Backlog"'));
+    assert.ok(!note.includes("]("));
+
+    const context = generateStackPromptContext(listInfo);
+    assert.ok(context.includes('tasks of the "Backlog" list'));
+    assert.ok(!context.includes("subtasks of"));
   });
 });

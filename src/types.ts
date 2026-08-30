@@ -103,8 +103,11 @@ export interface TaskOutcome {
 }
 
 export interface StackInfo {
-  parentTaskName: string;
-  parentTaskUrl: string;
+  /** What the stack was collected from: a parent task's subtasks or a full list. */
+  sourceKind: "task" | "list";
+  sourceName: string;
+  /** ClickUp URL of the source; lists have no directly-addressable URL. */
+  sourceUrl?: string;
   position: number;
   total: number;
   baseBranch: string;

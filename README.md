@@ -359,6 +359,8 @@ clawdup                     # Let it cook (continuous polling)
 clawdup --once <task-id>    # YOLO one task
 clawdup --stack <task-id>   # Implement all leaf subtasks of a task sequentially
                             # as stacked PRs (each branch/PR built on the last)
+clawdup --stack             # Same, for the full configured source (every open
+                            # task in the list, or the parent task's subtasks)
 clawdup --interactive       # Pair-program with the AI (accepts user input)
 clawdup --check             # Vibe check your configuration
 clawdup --statuses          # Show recommended ClickUp statuses

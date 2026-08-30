@@ -26,6 +26,8 @@ import {
   getAllTasksSummary,
   getRelatedTasksContext,
   getLeafSubtasks,
+  getLeafListTasks,
+  getListInfo,
   orderTasksByDependencies,
 } from "./clickup-api.js";
 import {
@@ -2177,16 +2179,72 @@ function buildStackSummaryComment(
 }
 
 /**
- * Implement all leaf subtasks of a parent task sequentially as stacked PRs.
- * Leaf subtasks are collected recursively (subtasks that have their own
- * subtasks are treated as grouping only), ordered by their ClickUp
- * dependencies, and processed one at a time in the main checkout: the first
- * branch is created from BASE_BRANCH, each following branch from the previous
- * one, and each PR targets its branch's base.
- * Aborts the remaining series when a subtask fails; re-running resumes.
+ * Describes what a stack run was collected from — a parent task's subtasks
+ * or the whole configured list.
+ */
+interface StackSource {
+  kind: "task" | "list";
+  name: string;
+  url?: string;
+  /** Task to post the run summary comment on (parent-task mode only). */
+  summaryTaskId?: string;
+}
+
+/**
+ * Resolve the stack source and collect the leaf tasks to stack.
+ * With an explicit parent task ID (or CLICKUP_PARENT_TASK_ID configured),
+ * stacks that task's leaf subtasks. Otherwise stacks the full configured
+ * list: every open task, where tasks with subtasks are grouping-only
+ * containers contributing their leaf descendants.
+ */
+async function collectStackLeaves(
+  explicitParentId: string | null,
+): Promise<{ source: StackSource; leaves: ClickUpTask[] }> {
+  const parentTaskId = explicitParentId ?? (CLICKUP_PARENT_TASK_ID || null);
+
+  if (parentTaskId) {
+    const parent = await getTask(parentTaskId);
+    log("info", `Collecting leaf subtasks of "${parent.name}" (${parentTaskId})...`);
+    const leaves = await getLeafSubtasks(parentTaskId);
+    if (leaves.length === 0) {
+      throw new Error(
+        `Task "${parent.name}" (${parentTaskId}) has no subtasks — use --once ${parentTaskId} to process it directly.`,
+      );
+    }
+    return {
+      source: {
+        kind: "task",
+        name: parent.name,
+        url: parent.url,
+        summaryTaskId: parentTaskId,
+      },
+      leaves,
+    };
+  }
+
+  const list = await getListInfo();
+  log("info", `Collecting leaf tasks of the full list "${list.name}" (${list.id})...`);
+  const leaves = await getLeafListTasks();
+  if (leaves.length === 0) {
+    throw new Error(`List "${list.name}" (${list.id}) has no open tasks to stack.`);
+  }
+  return { source: { kind: "list", name: list.name }, leaves };
+}
+
+/**
+ * Implement a series of tasks sequentially as stacked PRs.
+ * With a parent task ID, its leaf subtasks are stacked (subtasks that have
+ * their own subtasks are treated as grouping only). Without one, the whole
+ * configured source is stacked: the configured parent task's subtasks, or
+ * every open task of the configured list.
+ * The collected tasks are ordered by their ClickUp dependencies and
+ * processed one at a time in the main checkout: the first branch is created
+ * from BASE_BRANCH, each following branch from the previous one, and each PR
+ * targets its branch's base.
+ * Aborts the remaining series when a task fails; re-running resumes.
  */
 export async function runTaskStack(
-  parentTaskId: string,
+  parentTaskId?: string | null,
   options?: { interactive?: boolean },
 ): Promise<StackRunSummary> {
   interactiveMode = options?.interactive ?? false;
@@ -2195,7 +2253,7 @@ export async function runTaskStack(
     log("info", "\n=== DRY RUN MODE — no changes will be made ===\n");
   }
 
-  if (!isValidTaskId(parentTaskId)) {
+  if (parentTaskId != null && !isValidTaskId(parentTaskId)) {
     throw new Error(`Invalid task ID format: ${parentTaskId}`);
   }
 
@@ -2205,14 +2263,7 @@ export async function runTaskStack(
   try {
     await runPreflightOrAbort();
 
-    const parent = await getTask(parentTaskId);
-    log("info", `Collecting leaf subtasks of "${parent.name}" (${parentTaskId})...`);
-    const leaves = await getLeafSubtasks(parentTaskId);
-    if (leaves.length === 0) {
-      throw new Error(
-        `Task "${parent.name}" (${parentTaskId}) has no subtasks — use --once ${parentTaskId} to process it directly.`,
-      );
-    }
+    const { source, leaves } = await collectStackLeaves(parentTaskId ?? null);
 
     // Order by in-stack dependencies; throws on a dependency cycle
     const ordered = orderTasksByDependencies(leaves);
@@ -2231,7 +2282,7 @@ export async function runTaskStack(
             .join(", ");
           log(
             "warn",
-            `Subtask "${leaf.name}" (${leaf.id}) has unresolved dependencies outside the stack: ${depList}. Proceeding anyway.`,
+            `Stack task "${leaf.name}" (${leaf.id}) has unresolved dependencies outside the stack: ${depList}. Proceeding anyway.`,
           );
         }
       } catch (err) {
@@ -2306,7 +2357,7 @@ export async function runTaskStack(
       try {
         fresh = await getTask(leaf.id);
       } catch (err) {
-        abortReason = `Could not fetch subtask ${leaf.id}: ${(err as Error).message}`;
+        abortReason = `Could not fetch stack task ${leaf.id}: ${(err as Error).message}`;
         records.push({ leaf, disposition: "failed", detail: abortReason });
         continue;
       }
@@ -2351,7 +2402,7 @@ export async function runTaskStack(
           continue;
         }
         abortReason =
-          `Subtask "${fresh.name}" (${leaf.id}) is "${status}" but its branch is ` +
+          `Stack task "${fresh.name}" (${leaf.id}) is "${status}" but its branch is ` +
           (existing
             ? `not based on the stack (${existing} does not contain ${currentBase}).`
             : `missing.`) +
@@ -2366,7 +2417,7 @@ export async function runTaskStack(
       ) {
         // blocked / require input / unknown — unsafe to build on ambiguity
         abortReason =
-          `Subtask "${fresh.name}" (${leaf.id}) has unresolved status "${status}". ` +
+          `Stack task "${fresh.name}" (${leaf.id}) has unresolved status "${status}". ` +
           `Resolve it in ClickUp (move it to "${STATUS.TODO}") and re-run --stack.`;
         records.push({ leaf, disposition: "failed", detail: abortReason });
         continue;
@@ -2376,15 +2427,16 @@ export async function runTaskStack(
       // since createTaskBranch will reuse it instead of branching fresh.
       if (existing && !(await isOnStack(existing))) {
         abortReason =
-          `Subtask "${fresh.name}" (${leaf.id}) has a stale branch ${existing} that is not ` +
+          `Stack task "${fresh.name}" (${leaf.id}) has a stale branch ${existing} that is not ` +
           `based on ${currentBase}. Delete the branch or finish that task via --once, then re-run --stack.`;
         records.push({ leaf, disposition: "failed", detail: abortReason });
         continue;
       }
 
       const info: StackInfo = {
-        parentTaskName: parent.name,
-        parentTaskUrl: parent.url,
+        sourceKind: source.kind,
+        sourceName: source.name,
+        sourceUrl: source.url,
         position: i + 1,
         total: ordered.length,
         baseBranch: currentBase,
@@ -2424,7 +2476,7 @@ export async function runTaskStack(
         });
       } else {
         abortReason =
-          `Subtask "${fresh.name}" (${leaf.id}) ended with "${outcome.status}". ` +
+          `Stack task "${fresh.name}" (${leaf.id}) ended with "${outcome.status}". ` +
           `See the task's comments for details.`;
         records.push({
           leaf,
@@ -2444,10 +2496,17 @@ export async function runTaskStack(
       `\nStack run finished: ${completed} completed, ${skipped} skipped, ${ordered.length} total.`,
     );
 
-    try {
-      await addTaskComment(parentTaskId, buildStackSummaryComment(records, abortReason));
-    } catch (err) {
-      log("warn", `Could not post stack summary on parent task: ${(err as Error).message}`);
+    const summaryComment = buildStackSummaryComment(records, abortReason);
+    if (source.summaryTaskId) {
+      try {
+        await addTaskComment(source.summaryTaskId, summaryComment);
+      } catch (err) {
+        log("warn", `Could not post stack summary on parent task: ${(err as Error).message}`);
+      }
+    } else {
+      // A full-list stack has no parent task to comment on — each task
+      // already carries its own PR comment, so just log the overview.
+      log("info", `\n${summaryComment}`);
     }
 
     return {

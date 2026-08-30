@@ -259,26 +259,22 @@ export function compareSubtaskOrder(a: ClickUpTask, b: ClickUpTask): number {
 const MAX_SUBTASK_DEPTH = 10;
 
 /**
- * Recursively collect all leaf subtasks under a parent task.
+ * Shared recursive leaf collector for getLeafSubtasks / getLeafListTasks.
  * A leaf is a task with no subtasks of its own; tasks with children are
  * treated as grouping-only containers and excluded. Each node is fetched
- * exactly once via `fetchTask` (injectable for tests), so the returned
- * leaves are fully hydrated task objects.
- * The parent itself is never included; returns [] when it has no subtasks.
+ * exactly once via `fetchTask`, so collected leaves are fully hydrated task
+ * objects. Nodes entered at depth 0 are roots and never count as leaves.
  */
-export async function getLeafSubtasks(
-  parentTaskId: string,
-  fetchTask: (id: string) => Promise<ClickUpTask> = getTaskWithSubtasks,
-): Promise<ClickUpTask[]> {
+function createLeafCollector(fetchTask: (id: string) => Promise<ClickUpTask>) {
   const leaves: ClickUpTask[] = [];
-  const visited = new Set<string>([parentTaskId]);
+  const visited = new Set<string>();
 
   async function collect(taskId: string, depth: number): Promise<void> {
     const task = await fetchTask(taskId);
     const children = [...(task.subtasks ?? [])].sort(compareSubtaskOrder);
 
     if (children.length === 0) {
-      // The root parent is never a leaf, even when it has no subtasks
+      // Depth-0 roots are never leaves, even when they have no subtasks
       if (depth > 0) leaves.push(task);
       return;
     }
@@ -305,8 +301,90 @@ export async function getLeafSubtasks(
     }
   }
 
-  await collect(parentTaskId, 0);
-  return leaves;
+  return { leaves, visited, collect };
+}
+
+/**
+ * Recursively collect all leaf subtasks under a parent task.
+ * A leaf is a task with no subtasks of its own; tasks with children are
+ * treated as grouping-only containers and excluded. Each node is fetched
+ * exactly once via `fetchTask` (injectable for tests), so the returned
+ * leaves are fully hydrated task objects.
+ * The parent itself is never included; returns [] when it has no subtasks.
+ */
+export async function getLeafSubtasks(
+  parentTaskId: string,
+  fetchTask: (id: string) => Promise<ClickUpTask> = getTaskWithSubtasks,
+): Promise<ClickUpTask[]> {
+  const collector = createLeafCollector(fetchTask);
+  collector.visited.add(parentTaskId);
+  await collector.collect(parentTaskId, 0);
+  return collector.leaves;
+}
+
+// The list task endpoint returns at most this many tasks per page.
+const LIST_TASKS_PAGE_SIZE = 100;
+// Hard cap on paging in case the API stops reporting last_page correctly.
+const LIST_TASKS_MAX_PAGES = 50;
+
+/**
+ * Fetch all open (non-closed) top-level tasks of the configured list.
+ * Subtasks are excluded (the ClickUp default) — they're reached through
+ * their parents by getLeafListTasks. Pages through the endpoint's
+ * 100-task-per-page limit so large lists are returned in full.
+ */
+async function getOpenTopLevelListTasks(): Promise<ClickUpTask[]> {
+  const listId = await getEffectiveListId();
+  const all: ClickUpTask[] = [];
+
+  for (let page = 0; page < LIST_TASKS_MAX_PAGES; page++) {
+    const params = new URLSearchParams({
+      include_closed: "false",
+      page: String(page),
+    });
+    const data = await request<{ tasks: ClickUpTask[]; last_page?: boolean }>(
+      "GET",
+      `/list/${listId}/task?${params.toString()}`,
+    );
+    const tasks = data.tasks || [];
+    all.push(...tasks);
+    if (tasks.length < LIST_TASKS_PAGE_SIZE || data.last_page === true) break;
+  }
+
+  return all;
+}
+
+/**
+ * Collect the leaf tasks of the whole configured list, for stacking.
+ * Every open top-level task without subtasks is a leaf itself; tasks WITH
+ * subtasks are grouping-only containers contributing their leaf descendants
+ * instead (same semantics as getLeafSubtasks). Top-level tasks are walked in
+ * ClickUp list order (orderindex). Closed/completed top-level tasks are
+ * excluded — their work is treated as already merged — while completed
+ * subtasks inside a container are still returned so stack resume can skip
+ * them or adopt their branches, matching parent-task stacks.
+ * Fetchers are injectable for tests.
+ */
+export async function getLeafListTasks(
+  fetchTask: (id: string) => Promise<ClickUpTask> = getTaskWithSubtasks,
+  fetchTopLevelTasks: () => Promise<ClickUpTask[]> = getOpenTopLevelListTasks,
+): Promise<ClickUpTask[]> {
+  const topLevel = [...(await fetchTopLevelTasks())].sort(compareSubtaskOrder);
+  const collector = createLeafCollector(fetchTask);
+
+  for (const task of topLevel) {
+    if (collector.visited.has(task.id)) continue;
+    if (!isValidTaskId(task.id)) {
+      log("warn", `Skipping list task with invalid ID format: ${task.id}`);
+      continue;
+    }
+    collector.visited.add(task.id);
+    // Depth 1: unlike a parent-mode root, a childless top-level task IS a
+    // unit of work and must be stacked itself.
+    await collector.collect(task.id, 1);
+  }
+
+  return collector.leaves;
 }
 
 /**
