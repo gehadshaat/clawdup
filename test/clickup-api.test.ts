@@ -15,6 +15,7 @@ import {
   slugify,
   findPRUrlInCommentList,
   getLastAutomationCommentDate,
+  computeStatusFallbacks,
 } from "../src/clickup-api.js";
 import type { ClickUpComment, ClickUpTask } from "../src/types.js";
 
@@ -246,15 +247,14 @@ describe("formatTaskForClaude", () => {
     assert.ok(result.includes("Fallback description"));
   });
 
-  it("truncates long descriptions", () => {
+  it("includes long descriptions in full (context budget applies to comments)", () => {
     const task: ClickUpTask = {
       ...baseTask,
       text_content: "x".repeat(6000),
     };
     const result = formatTaskForClaude(task);
-    assert.ok(result.includes("(truncated)"));
-    // The description should not exceed 5000 chars + truncation suffix
-    assert.ok(result.length < 6000);
+    assert.ok(result.includes("x".repeat(6000)));
+    assert.ok(!result.includes("(truncated)"));
   });
 
   it("includes checklist items", () => {
@@ -276,34 +276,34 @@ describe("formatTaskForClaude", () => {
     assert.ok(result.includes("[ ] Configure DB"));
   });
 
-  it("includes comments (limited to most recent 10)", () => {
+  it("includes all comments newest-first with a count header", () => {
     const comments: ClickUpComment[] = Array.from({ length: 15 }, (_, i) => ({
       comment_text: `Comment ${i + 1}`,
       user: { username: `user${i}` },
-      date: String(Date.now()),
+      // Increasing dates so "Comment 15" is the newest
+      date: String(1700000000000 + i * 1000),
     }));
     const result = formatTaskForClaude(baseTask, comments);
     assert.ok(result.includes("## Comments"));
-    assert.ok(result.includes("showing 10 most recent of 15 comments"));
-    // Should include the last comment but not the first 5
+    assert.ok(result.includes("(15 comments, newest first)"));
+    // All comments fit the budget, so every one is present, newest first
     assert.ok(result.includes("Comment 15"));
-    // "Comment 5" appears at the boundary — check for user0-user4 absence
-    // (user0 through user4 are the first 5 comments that should be excluded)
-    assert.ok(!result.includes("**user0**"), "First comment's user should not appear");
-    assert.ok(!result.includes("**user4**"), "Fifth comment's user should not appear");
-    assert.ok(result.includes("**user5**"), "Sixth comment's user should appear");
+    assert.ok(result.includes("**user0**"));
+    assert.ok(result.indexOf("Comment 15") < result.indexOf("Comment 1\n"));
   });
 
-  it("truncates long comments", () => {
-    const comments: ClickUpComment[] = [
-      {
-        comment_text: "y".repeat(3000),
-        user: { username: "reviewer" },
-        date: String(Date.now()),
-      },
-    ];
+  it("omits oldest comments when the context budget is exceeded", () => {
+    // ~60KB of comments blows past the 50KB tier-3 budget
+    const comments: ClickUpComment[] = Array.from({ length: 20 }, (_, i) => ({
+      comment_text: `Comment ${i + 1}: ${"y".repeat(3000)}`,
+      user: { username: `user${i}` },
+      date: String(1700000000000 + i * 1000),
+    }));
     const result = formatTaskForClaude(baseTask, comments);
-    assert.ok(result.includes("(truncated)"));
+    assert.ok(result.includes("older comments omitted to fit context budget"));
+    // Newest comment survives; the oldest is dropped
+    assert.ok(result.includes("Comment 20"));
+    assert.ok(!result.includes("Comment 1:"));
   });
 
   // Security: injection detection is logged but content is still included
@@ -690,5 +690,154 @@ describe("getLastAutomationCommentDate", () => {
       },
     ];
     assert.equal(getLastAutomationCommentDate(comments), 1700000002000);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// computeStatusFallbacks (minimal 3-status list support)
+// ---------------------------------------------------------------------------
+describe("computeStatusFallbacks", () => {
+  const FULL_STATUS_MAP = {
+    TODO: "to do",
+    IN_PROGRESS: "in progress",
+    IN_REVIEW: "in review",
+    APPROVED: "approved",
+    REQUIRE_INPUT: "require input",
+    COMPLETED: "complete",
+    BLOCKED: "blocked",
+  };
+
+  const FULL_LIST = [
+    { status: "to do", type: "open" },
+    { status: "in progress", type: "custom" },
+    { status: "in review", type: "custom" },
+    { status: "approved", type: "custom" },
+    { status: "require input", type: "custom" },
+    { status: "blocked", type: "custom" },
+    { status: "complete", type: "closed" },
+  ];
+
+  const MINIMAL_LIST = [
+    { status: "TO DO", type: "open" },
+    { status: "IN PROGRESS", type: "custom" },
+    { status: "DONE", type: "closed" },
+  ];
+
+  it("leaves a full recommended list untouched", () => {
+    const { resolved, fallbacks, approveFlowEnabled } = computeStatusFallbacks(
+      FULL_STATUS_MAP,
+      FULL_LIST,
+    );
+    assert.deepEqual(resolved, FULL_STATUS_MAP);
+    assert.deepEqual(fallbacks, []);
+    assert.equal(approveFlowEnabled, true);
+  });
+
+  it("collapses optional statuses on a minimal TO DO / IN PROGRESS / DONE list", () => {
+    const { resolved, approveFlowEnabled } = computeStatusFallbacks(
+      FULL_STATUS_MAP,
+      MINIMAL_LIST,
+    );
+    // Name matching is case-insensitive, so the required pair keeps its
+    // configured casing.
+    assert.equal(resolved.TODO, "to do");
+    assert.equal(resolved.IN_PROGRESS, "in progress");
+    // "complete" doesn't exist — falls back to the closed-type status.
+    assert.equal(resolved.COMPLETED, "DONE");
+    // Optional refinements collapse onto in progress.
+    assert.equal(resolved.IN_REVIEW, "in progress");
+    assert.equal(resolved.REQUIRE_INPUT, "in progress");
+    assert.equal(resolved.BLOCKED, "in progress");
+    // No "approved" status — the approve-to-merge flow is disabled.
+    assert.equal(approveFlowEnabled, false);
+  });
+
+  it("records which statuses fell back and to what", () => {
+    const { fallbacks } = computeStatusFallbacks(FULL_STATUS_MAP, MINIMAL_LIST);
+    const byKey = Object.fromEntries(fallbacks.map((f) => [f.key, f.to]));
+    assert.deepEqual(byKey, {
+      COMPLETED: "DONE",
+      IN_REVIEW: "in progress",
+      REQUIRE_INPUT: "in progress",
+      BLOCKED: "in progress",
+    });
+  });
+
+  it("falls back to the open-type status when 'to do' is named differently", () => {
+    const { resolved } = computeStatusFallbacks(FULL_STATUS_MAP, [
+      { status: "OPEN", type: "open" },
+      { status: "in progress", type: "custom" },
+      { status: "closed", type: "closed" },
+    ]);
+    assert.equal(resolved.TODO, "OPEN");
+  });
+
+  it("prefers a closed-type status over a done-type status for COMPLETED", () => {
+    const { resolved } = computeStatusFallbacks(FULL_STATUS_MAP, [
+      { status: "to do", type: "open" },
+      { status: "in progress", type: "custom" },
+      { status: "shipped", type: "done" },
+      { status: "archived", type: "closed" },
+    ]);
+    assert.equal(resolved.COMPLETED, "archived");
+  });
+
+  it("falls back to a done-type status when no closed-type exists", () => {
+    const { resolved } = computeStatusFallbacks(FULL_STATUS_MAP, [
+      { status: "to do", type: "open" },
+      { status: "in progress", type: "custom" },
+      { status: "shipped", type: "done" },
+    ]);
+    assert.equal(resolved.COMPLETED, "shipped");
+  });
+
+  it("routes blocked through require input when only blocked is missing", () => {
+    const { resolved } = computeStatusFallbacks(FULL_STATUS_MAP, [
+      { status: "to do", type: "open" },
+      { status: "in progress", type: "custom" },
+      { status: "require input", type: "custom" },
+      { status: "complete", type: "closed" },
+    ]);
+    assert.equal(resolved.BLOCKED, "require input");
+    assert.equal(resolved.REQUIRE_INPUT, "require input");
+  });
+
+  it("keeps optional statuses that do exist", () => {
+    const { resolved, approveFlowEnabled } = computeStatusFallbacks(
+      FULL_STATUS_MAP,
+      [
+        { status: "to do", type: "open" },
+        { status: "in progress", type: "custom" },
+        { status: "blocked", type: "custom" },
+        { status: "complete", type: "closed" },
+      ],
+    );
+    assert.equal(resolved.BLOCKED, "blocked");
+    assert.equal(resolved.IN_REVIEW, "in progress");
+    assert.equal(approveFlowEnabled, false);
+  });
+
+  it("leaves unmappable statuses alone so validation can report them", () => {
+    // Pathological 2-status list without "in progress": the optional
+    // statuses can't fall back to a missing target.
+    const { resolved } = computeStatusFallbacks(FULL_STATUS_MAP, [
+      { status: "to do", type: "open" },
+      { status: "complete", type: "closed" },
+    ]);
+    assert.equal(resolved.IN_PROGRESS, "in progress");
+    assert.equal(resolved.IN_REVIEW, "in review");
+    assert.equal(resolved.REQUIRE_INPUT, "require input");
+  });
+
+  it("respects custom status names from STATUS_* overrides", () => {
+    const custom = { ...FULL_STATUS_MAP, COMPLETED: "shipped", TODO: "backlog" };
+    const { resolved, fallbacks } = computeStatusFallbacks(custom, [
+      { status: "Backlog", type: "open" },
+      { status: "in progress", type: "custom" },
+      { status: "Shipped", type: "closed" },
+    ]);
+    assert.equal(resolved.TODO, "backlog");
+    assert.equal(resolved.COMPLETED, "shipped");
+    assert.equal(fallbacks.some((f) => f.key === "TODO" || f.key === "COMPLETED"), false);
   });
 });

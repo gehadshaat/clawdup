@@ -1,42 +1,31 @@
 // Configuration module.
 // Resolves settings from (in priority order):
 //   1. Environment variables
-//   2. .clawdup.env in the package directory (cwd)
-//   3. clawdup.config.mjs in the package directory (cwd)
+//   2. .clawdup.env at the repository root
+//   3. clawdup.config.mjs at the repository root
 //   4. Defaults
 //
-// Designed for per-package use: each package that depends on clawdup
-// has its own .clawdup.env with its own ClickUp list ID, API key, etc.
+// clawdup is installed globally, never as a project dependency. Each
+// repository is set up by dropping an untracked .clawdup.env at its root
+// (created by `clawdup --init` / `clawdup --setup`, which also gitignore it).
 
 import { existsSync, readFileSync } from "fs";
 import { resolve } from "path";
-import { execFileSync } from "child_process";
+import { detectRepoRoot } from "./repo-root.js";
 import type { UserConfig } from "./types.js";
 
-// PROJECT_ROOT is the directory where clawdup was invoked (the package directory).
-// Config files (.clawdup.env, clawdup.config.mjs, CLAUDE.md) are resolved from here.
-export const PROJECT_ROOT: string = process.cwd();
-
-// GIT_ROOT is the repository root (where .git lives).
-// Git operations (branch, commit, push) always run from here.
-// In a monorepo, this is the repo root, not the individual package directory.
-export const GIT_ROOT: string = (() => {
-  try {
-    return execFileSync("git", ["rev-parse", "--show-toplevel"], {
-      cwd: PROJECT_ROOT,
-      encoding: "utf-8",
-      timeout: 5000,
-    }).trim();
-  } catch {
-    return PROJECT_ROOT;
-  }
-})();
+// GIT_ROOT is the repository root (where .git lives), detected from the
+// invocation directory — so clawdup behaves the same no matter which
+// subdirectory of the repo it is run from. Config files (.clawdup.env,
+// clawdup.config.mjs, CLAUDE.md), runtime state files, and git operations
+// all anchor here. Falls back to cwd outside a git repository.
+export const GIT_ROOT: string = detectRepoRoot();
 
 // --- .env loading ---
-// Look for .clawdup.env in the project root
+// Look for .clawdup.env at the repository root
 const envCandidates = [
-  resolve(PROJECT_ROOT, ".clawdup.env"),
-  resolve(PROJECT_ROOT, ".env.clickup"),
+  resolve(GIT_ROOT, ".clawdup.env"),
+  resolve(GIT_ROOT, ".env.clickup"),
 ];
 
 for (const envPath of envCandidates) {
@@ -64,7 +53,7 @@ for (const envPath of envCandidates) {
 // Load clawdup.config.mjs if it exists.
 // This allows users to customize the Claude prompt, hooks, etc.
 let userConfig: UserConfig = {};
-const configPath = resolve(PROJECT_ROOT, "clawdup.config.mjs");
+const configPath = resolve(GIT_ROOT, "clawdup.config.mjs");
 if (existsSync(configPath)) {
   try {
     const mod = await import(`file://${configPath}`);
@@ -91,7 +80,8 @@ function required(name: string): string {
   const val = process.env[name];
   if (!val) {
     console.error(`ERROR: Missing required environment variable: ${name}`);
-    console.error(`Set it in .clawdup.env (in your project root) or export it.`);
+    console.error(`Set it in .clawdup.env (at your repo root) or export it.`);
+    console.error(`Run "clawdup --setup" or "clawdup --init" to create the file.`);
     process.exit(1);
   }
   return val;
@@ -107,7 +97,7 @@ if (!CLICKUP_LIST_ID && !CLICKUP_PARENT_TASK_ID) {
     "ERROR: Either CLICKUP_LIST_ID or CLICKUP_PARENT_TASK_ID must be set.",
   );
   console.error(
-    "Set one in .clawdup.env (in your project root) or export it.",
+    "Set one in .clawdup.env (at your repo root) or export it.",
   );
   process.exit(1);
 }
@@ -116,8 +106,23 @@ if (!CLICKUP_LIST_ID && !CLICKUP_PARENT_TASK_ID) {
 export const GITHUB_REPO: string = process.env.GITHUB_REPO || "";
 export const BASE_BRANCH: string = process.env.BASE_BRANCH || "main";
 
-// Task statuses
-export const STATUS = {
+// Task statuses.
+// Only TODO, IN_PROGRESS, and COMPLETED need to exist in the ClickUp list —
+// a minimal "TO DO / IN PROGRESS / DONE" list works out of the box. The
+// remaining statuses are optional refinements: when the list doesn't have
+// them, resolveStatusFallbacks() (clickup-api.ts) rewrites this map at
+// startup so each missing status falls back to an existing one.
+export interface StatusMap {
+  TODO: string;
+  IN_PROGRESS: string;
+  IN_REVIEW: string;
+  APPROVED: string;
+  REQUIRE_INPUT: string;
+  COMPLETED: string;
+  BLOCKED: string;
+}
+
+export const STATUS: StatusMap = {
   TODO: process.env.STATUS_TODO || "to do",
   IN_PROGRESS: process.env.STATUS_IN_PROGRESS || "in progress",
   IN_REVIEW: process.env.STATUS_IN_REVIEW || "in review",
@@ -125,7 +130,7 @@ export const STATUS = {
   REQUIRE_INPUT: process.env.STATUS_REQUIRE_INPUT || "require input",
   COMPLETED: process.env.STATUS_COMPLETED || "complete",
   BLOCKED: process.env.STATUS_BLOCKED || "blocked",
-} as const;
+};
 
 // --- Validation helpers ---
 

@@ -170,6 +170,8 @@ A `processedTaskIds` set tracks tasks already worked on. This prevents re-proces
 | **BLOCKED** | Error during processing or merge | Posts error comment. Human fixes issue and moves back to TODO |
 | **COMPLETED** | PR merged successfully | Terminal state — no further automation |
 
+> **Minimal status lists:** only TO DO, IN PROGRESS, and a done/closed status must exist. Missing optional statuses are resolved at startup — IN REVIEW / REQUIRE INPUT / BLOCKED collapse onto IN PROGRESS (comments disambiguate), COMPLETED maps to the list's closed-type status, and without APPROVED the merge poll is disabled (humans merge, or `AUTO_APPROVE=true`). In that mode, orphaned-task recovery is also skipped, since a task parked in IN PROGRESS may be waiting on a human.
+
 ---
 
 ## Core Processing Loop
@@ -182,7 +184,10 @@ startRunner()
   ├─ 1. Reset module state (processedTaskIds, flags)
   ├─ 2. Acquire lock file (.clawdup.lock)
   ├─ 3. Load & validate configuration
-  ├─ 4. Validate ClickUp statuses against list
+  ├─ 4. Resolve status fallbacks & validate against list
+  │     └─ Missing optional statuses collapse onto existing ones
+  │        (minimal TO DO / IN PROGRESS / DONE lists work; without
+  │        an "approved" status the approved poll is skipped)
   ├─ 5. Ensure clean git state (abort merges, reset, clean)
   ├─ 6. Sync base branch (fetch + reset to origin)
   ├─ 7. Prune stale local branches
@@ -194,7 +199,7 @@ startRunner()
   │
   └─ 9. Enter polling loop
          │
-         ├─ Poll for APPROVED tasks → processApprovedTask()
+         ├─ Poll for APPROVED tasks → processApprovedTask()  (skipped when the list has no "approved" status)
          ├─ Poll IN PROGRESS / IN REVIEW tasks for new PR comments → processReturningTask()
          ├─ Poll for TODO tasks → processTask() or processReturningTask()
          ├─ Check relaunch interval → exit if elapsed and idle
@@ -386,8 +391,7 @@ The system prompt sent to Claude is built in layers:
 │    - Refuse destructive commands         │
 ├─────────────────────────────────────────┤
 │ 3. CLAUDE.md (project context)           │
-│    - Checked in PROJECT_ROOT, then       │
-│      GIT_ROOT for monorepo support       │
+│    - Read from GIT_ROOT (repo root)      │
 ├─────────────────────────────────────────┤
 │ 4. User config prompt                    │
 │    - From clawdup.config.mjs             │
@@ -451,7 +455,9 @@ Runner detects relaunch needed
   ├─ Return true to cli.ts
   │
   └─ cli.ts:
-     ├─ Run "npm run build" (recompile TypeScript)
+     ├─ Rebuild TypeScript — only when running from a source
+     │  checkout (git clone + npm link); a global install ships
+     │  pre-built dist/ and skips this step
      ├─ Exit with code 75
      │
      └─ bin/clawdup.js detects code 75
@@ -529,12 +535,11 @@ Settings are resolved from multiple sources with clear precedence:
 └─────────────────────────┘
 ```
 
-### Monorepo Awareness
+### Repo-Root Anchoring
 
-Two root paths are tracked:
-- **`PROJECT_ROOT`** = `process.cwd()` — where config files are resolved
-- **`GIT_ROOT`** = `git rev-parse --show-toplevel` — where git operations run
+Everything is anchored at a single root path:
+- **`GIT_ROOT`** = `git rev-parse --show-toplevel`, detected from the invocation directory (falls back to `cwd` outside a git repo)
 
-This allows each workspace package to have its own ClickUp list and Claude instructions while sharing a single git repository.
+Config files (`.clawdup.env`, `clawdup.config.mjs`, `CLAUDE.md`), runtime state files (`.clawdup.lock`, `.clawdup.todo.json`, `.clawdup-sessions/`), and all git operations resolve from `GIT_ROOT` — so `clawdup` behaves identically from any subdirectory of the repository. clawdup itself is installed globally; the repo carries only the untracked `.clawdup.env`.
 
 For the full configuration reference, see [CONFIGURATION.md](CONFIGURATION.md).

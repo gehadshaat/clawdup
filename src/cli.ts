@@ -9,16 +9,15 @@
 //   clawdup --doctor     Run preflight environment health checks
 //   clawdup --statuses   Show recommended ClickUp statuses
 //   clawdup --setup      Interactive setup wizard
-//   clawdup --init       Create example config files in current directory
+//   clawdup --init       Create example config files at the repo root
+//
+// clawdup is installed globally (npm install -g clawdup) and configured
+// per-repository via an untracked .clawdup.env at the repo root.
 
 import { resolve } from "path";
 import { existsSync, writeFileSync } from "fs";
-import {
-  detectPackageManager,
-  globalInstallCommand,
-  installCommand,
-  runScriptCommand,
-} from "./package-manager.js";
+import { detectPackageManager, globalInstallCommand } from "./package-manager.js";
+import { detectRepoRoot, ensureGitignoreEntries } from "./repo-root.js";
 
 const args = process.argv.slice(2);
 
@@ -47,9 +46,6 @@ async function main(): Promise<void> {
 
   if (args.includes("--init")) {
     await initProject();
-    const { addPackageJsonScripts } = await import("./setup.js");
-    console.log("Adding clawdup to package.json...\n");
-    addPackageJsonScripts();
     process.exit(0);
   }
 
@@ -143,33 +139,33 @@ Usage:
   clawdup --dry-run           Simulate the full flow without making any changes
   clawdup --debug             Enable debug-level logging with timing
   clawdup --json-log          Output logs in JSON format
-  clawdup --upgrade            Upgrade clawdup to the latest version
+  clawdup --upgrade           Upgrade clawdup to the latest version
   clawdup --check             Validate configuration
   clawdup --doctor            Run preflight environment health checks
   clawdup --statuses          Show recommended ClickUp statuses
   clawdup --setup             Interactive setup wizard
-  clawdup --init              Create config files in current directory
+  clawdup --init              Create config files at the repo root
   clawdup --help              Show this help
 
 Quick Start:
-  ${pm === "pnpm" ? "pnpm dlx" : "npx"} clawdup --setup           One-line setup: config + package.json scripts
-  ${pm === "pnpm" ? "pnpm dlx" : "npx"} clawdup --init            Non-interactive: create config files + scripts
-
-  After setup, use the added scripts:
-    ${runScriptCommand(pm, "cook")}                     Start continuous polling
-    ${runScriptCommand(pm, "clawdup:once")}             Process a single task
-    ${runScriptCommand(pm, "clawdup:vibe-check")}       Validate configuration
+  ${globalInstallCommand(pm, "clawdup")}     Install once, globally
+  clawdup --setup                Interactive setup (writes .clawdup.env at the
+                                 repo root and gitignores it)
+  clawdup --init                 Non-interactive: create example config files
+  clawdup                        Run from anywhere inside the repo
 
 Configuration:
-  Create a .clawdup.env file in your project root with:
+  clawdup is configured per-repository via a .clawdup.env file at the repo
+  root. The file holds secrets and is never committed (--setup / --init add
+  it to .gitignore automatically):
     CLICKUP_API_TOKEN=pk_xxx
     CLICKUP_LIST_ID=xxx          # Poll tasks from a list
     # OR
     CLICKUP_PARENT_TASK_ID=xxx   # Poll subtasks of a parent task
     AUTO_APPROVE=true            # Auto-merge PRs without manual review
 
-  Optionally create clawdup.config.mjs for custom Claude prompts.
-  Run --init to generate example config files.
+  Optionally create clawdup.config.mjs (also at the repo root) for custom
+  Claude prompts. Run --init to generate example config files.
 
 Debugging:
   Use --debug or set LOG_LEVEL=debug to enable verbose logging with
@@ -214,7 +210,7 @@ function printRecommendedStatuses(): void {
 Recommended ClickUp List Statuses
 ===================================
 
-Set up these statuses in your ClickUp list for the automation to work:
+Full recommended setup (finest-grained workflow):
 
   Status           Type       Color     Description
   ─────────────    ─────      ──────    ───────────────────────────────────────
@@ -225,6 +221,19 @@ Set up these statuses in your ClickUp list for the automation to work:
   require input    active     #f9d900   Task needs clarification (comment added)
   blocked          active     #f44336   Automation hit an error
   complete         closed     #6bc950   Task is done (PR merged)
+
+Only three statuses are REQUIRED — a minimal default ClickUp list works too:
+
+  to do, in progress, and a done/closed status (e.g. DONE or COMPLETE)
+
+When the optional statuses don't exist in your list, clawdup falls back:
+  in review      → in progress   (PR link is posted as a task comment)
+  require input  → in progress   (a comment explains what's needed; move the
+                                  task back to "to do" after answering)
+  blocked        → in progress   (a comment explains the error)
+  approved       → disabled      (merge PRs yourself, or set AUTO_APPROVE=true;
+                                  move the task to done after merging)
+  complete       → your list's done/closed-type status (e.g. "done")
 
 How to set up:
   1. Open your ClickUp list
@@ -237,11 +246,11 @@ Status names can be customized via environment variables (STATUS_TODO, etc).
 }
 
 async function initProject(): Promise<void> {
-  const cwd = process.cwd();
-  const envDest = resolve(cwd, ".clawdup.env");
-  const configDest = resolve(cwd, "clawdup.config.mjs");
+  const repoRoot = detectRepoRoot();
+  const envDest = resolve(repoRoot, ".clawdup.env");
+  const configDest = resolve(repoRoot, "clawdup.config.mjs");
 
-  console.log("Initializing clawdup in current directory...\n");
+  console.log(`Initializing clawdup at the repo root: ${repoRoot}\n`);
 
   if (existsSync(envDest)) {
     console.log(`  SKIP  ${envDest} (already exists)`);
@@ -249,7 +258,8 @@ async function initProject(): Promise<void> {
     writeFileSync(
       envDest,
       `# ClickUp Task Automation - Environment Variables
-# Docs: https://github.com/your-org/clawdup
+# This file holds secrets — it is gitignored and must never be committed.
+# Docs: https://github.com/gehadshaat/clawdup
 
 # === REQUIRED ===
 
@@ -271,7 +281,10 @@ CLICKUP_LIST_ID=
 # Base branch to create feature branches from
 # BASE_BRANCH=main
 
-# ClickUp status names (must match your list's statuses, case-insensitive)
+# ClickUp status names (must match your list's statuses, case-insensitive).
+# Only "to do", "in progress", and a done/closed status are required — a
+# minimal TO DO / IN PROGRESS / DONE list works; missing optional statuses
+# fall back automatically (run "clawdup --statuses" for details).
 # STATUS_TODO=to do
 # STATUS_IN_PROGRESS=in progress
 # STATUS_IN_REVIEW=in review
@@ -338,15 +351,21 @@ Run the formatter/linter after making changes to ensure code style is correct.
     console.log(`  CREATE  ${configDest}`);
   }
 
-  const pm = detectPackageManager(cwd);
+  // The env file holds secrets — make sure it (and clawdup's runtime state
+  // files) can never be committed.
+  const added = ensureGitignoreEntries(repoRoot);
+  if (added.length > 0) {
+    console.log(`  UPDATE  .gitignore (added: ${added.join(", ")})`);
+  } else {
+    console.log("  SKIP  .gitignore (already covers clawdup files)");
+  }
+
   console.log(`
 Done! Next steps:
   1. Edit .clawdup.env with your ClickUp API token and list ID
   2. Optionally customize clawdup.config.mjs
-  3. Add .clawdup.env to your .gitignore
-  4. Install dependencies: ${installCommand(pm)}
-  5. Run: ${runScriptCommand(pm, "clawdup:vibe-check")}   (validate config)
-  6. Run: ${runScriptCommand(pm, "cook")}                  (start automation)
+  3. Run: clawdup --check   (validate config)
+  4. Run: clawdup           (start automation)
 `);
 }
 
@@ -487,18 +506,20 @@ async function runChecks({
     }
   }
 
-  // Check for CLAUDE.md
-  const claudeMd = resolve(process.cwd(), "CLAUDE.md");
+  // Check for CLAUDE.md / config file at the repo root (where clawdup
+  // resolves them from, regardless of the invocation directory)
+  const { GIT_ROOT } = await import("./config.js");
+
+  const claudeMd = resolve(GIT_ROOT, "CLAUDE.md");
   if (existsSync(claudeMd)) {
     console.log("  CLAUDE.md: found (will be used for project context)");
   } else {
     console.log(
-      "  CLAUDE.md: not found (optional — add one for better task context)",
+      "  CLAUDE.md: not found (optional — add one at the repo root for better task context)",
     );
   }
 
-  // Check for config file
-  const configFile = resolve(process.cwd(), "clawdup.config.mjs");
+  const configFile = resolve(GIT_ROOT, "clawdup.config.mjs");
   if (existsSync(configFile)) {
     console.log("  Config file: found");
   } else {
@@ -568,40 +589,22 @@ async function upgradeClawdup(): Promise<void> {
 
   console.log(`\nUpgrading ${currentVersion} → ${latestVersion}...\n`);
 
-  // Determine how clawdup was installed
+  // clawdup is a global-only install: always upgrade the global package.
   const pm = detectPackageManager(process.cwd());
-  const isGlobal = isGlobalInstall(clawdupRoot);
-
   let cmd: string;
   let cmdArgs: string[];
-
-  if (isGlobal) {
-    // Global install: npm install -g clawdup@latest / pnpm add -g clawdup@latest
-    if (pm === "pnpm") {
-      cmd = "pnpm";
-      cmdArgs = ["add", "-g", `${PACKAGE_NAME}@latest`];
-    } else {
-      cmd = "npm";
-      cmdArgs = ["install", "-g", `${PACKAGE_NAME}@latest`];
-    }
+  if (pm === "pnpm") {
+    cmd = "pnpm";
+    cmdArgs = ["add", "-g", `${PACKAGE_NAME}@latest`];
   } else {
-    // Local install: upgrade in the project that has clawdup as a dependency
-    const projectRoot = process.cwd();
-    if (pm === "pnpm") {
-      cmd = "pnpm";
-      cmdArgs = ["add", `${PACKAGE_NAME}@latest`, "-D"];
-    } else {
-      cmd = "npm";
-      cmdArgs = ["install", `${PACKAGE_NAME}@latest`, "--save-dev"];
-    }
-    console.log(`Upgrading in: ${projectRoot}`);
+    cmd = "npm";
+    cmdArgs = ["install", "-g", `${PACKAGE_NAME}@latest`];
   }
 
   console.log(`Running: ${cmd} ${cmdArgs.join(" ")}\n`);
 
   try {
     const { stdout, stderr } = await execFileAsync(cmd, cmdArgs, {
-      cwd: isGlobal ? undefined : process.cwd(),
       timeout: 120000,
       env: { ...process.env },
     });
@@ -615,39 +618,19 @@ async function upgradeClawdup(): Promise<void> {
   }
 }
 
-/**
- * Check if clawdup appears to be installed globally by seeing if our
- * package root lives inside a global node_modules path rather than a
- * project-local node_modules.
- */
-function isGlobalInstall(clawdupRoot: string): boolean {
-  // Local installs live under <project>/node_modules/clawdup
-  // Global installs live under <prefix>/lib/node_modules/clawdup or <prefix>/node_modules/clawdup
-  const normalized = clawdupRoot.replace(/\\/g, "/");
-  const nmIndex = normalized.lastIndexOf("/node_modules/");
-  if (nmIndex === -1) {
-    // Not inside node_modules at all (e.g., running from source) — treat as local
-    return false;
-  }
-  const parentDir = normalized.substring(0, nmIndex);
-  // Global prefixes typically have no package.json in the parent directory
-  return !existsSync(resolve(parentDir, "package.json"));
-}
-
 function printManualUpgradeInstructions(): void {
   const pm = detectPackageManager(process.cwd());
-  console.log(`  Global:  ${globalInstallCommand(pm, "clawdup@latest")}`);
-  if (pm === "pnpm") {
-    console.log(`  Local:   pnpm add clawdup@latest -D`);
-  } else {
-    console.log(`  Local:   npm install clawdup@latest --save-dev`);
-  }
+  console.log(`  ${globalInstallCommand(pm, "clawdup@latest")}`);
 }
 
 /**
  * Rebuild TypeScript before relaunch so the new process loads fresh code.
- * dist/ is gitignored, so after syncBaseBranch() pulls new source, the
- * compiled JS is stale until we run tsc again.
+ *
+ * Only applies when clawdup runs from a source checkout (git clone +
+ * npm link) that is also the repo being automated: dist/ is gitignored
+ * there, so after syncBaseBranch() pulls new source the compiled JS is
+ * stale until tsc runs again. A regular global install ships pre-built
+ * dist/ with no sources, so the rebuild is skipped.
  */
 async function rebuildBeforeRelaunch(): Promise<void> {
   const { execFile: execFileCb } = await import("child_process");
@@ -661,6 +644,15 @@ async function rebuildBeforeRelaunch(): Promise<void> {
   // Resolve clawdup's own package root from the compiled CLI location
   // (dist/cli.js -> package root)
   const clawdupRoot = resolveFn(dirnameFn(fileURLToPath(import.meta.url)), "..");
+
+  const isSourceCheckout =
+    existsSync(resolve(clawdupRoot, "tsconfig.json")) &&
+    existsSync(resolve(clawdupRoot, "src"));
+  if (!isSourceCheckout) {
+    log("debug", "Global install detected — skipping rebuild before relaunch.");
+    return;
+  }
+
   const pm = detectPackageManager(clawdupRoot);
 
   log("info", "Rebuilding to pick up latest code changes...");

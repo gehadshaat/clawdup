@@ -2,6 +2,7 @@
 // Docs: https://clickup.com/api
 
 import { CLICKUP_API_TOKEN, CLICKUP_LIST_ID, CLICKUP_PARENT_TASK_ID, STATUS, DRY_RUN } from "./config.js";
+import type { StatusMap } from "./config.js";
 import { log } from "./logger.js";
 import type { ClickUpTask, ClickUpUser, ClickUpList, ClickUpComment, ClickUpDependency } from "./types.js";
 
@@ -1033,10 +1034,142 @@ export async function getListInfo(): Promise<ClickUpList> {
   return request<ClickUpList>("GET", `/list/${listId}`);
 }
 
+// --- Status resolution -----------------------------------------------------
+//
+// Only three statuses are required in the ClickUp list: "to do",
+// "in progress", and a done/closed status — so a minimal default list
+// (TO DO / IN PROGRESS / DONE) works out of the box. The remaining
+// lifecycle statuses are optional refinements; when the list doesn't have
+// them, the STATUS map is rewritten at startup so each one falls back to a
+// status that does exist:
+//
+//   to do          → the list's open-type status (when the name differs)
+//   complete       → the list's closed/done-type status (e.g. "done")
+//   in review      → in progress
+//   require input  → in progress
+//   blocked        → require input, else in progress
+//   approved       → no fallback: approve-to-merge polling is disabled
+
+/**
+ * Runtime feature flags derived from status resolution.
+ * approveFlowEnabled is false when the list has no "approved" status —
+ * the runner then skips approve-to-merge polling and tells reviewers to
+ * merge PRs themselves.
+ */
+export const statusFeatures = {
+  approveFlowEnabled: true,
+};
+
+export interface StatusFallback {
+  key: keyof StatusMap;
+  from: string;
+  to: string;
+}
+
+export interface StatusResolutionResult {
+  resolved: StatusMap;
+  fallbacks: StatusFallback[];
+  approveFlowEnabled: boolean;
+}
+
+/**
+ * Compute status fallbacks for a list's actual statuses (pure — does not
+ * touch global state). See the module comment above for the fallback table.
+ */
+export function computeStatusFallbacks(
+  current: StatusMap,
+  listStatuses: Array<{ status: string; type?: string }>,
+): StatusResolutionResult {
+  const names = new Set(listStatuses.map((s) => s.status.toLowerCase()));
+  const has = (name: string): boolean => names.has(name.toLowerCase());
+  const byType = (...types: string[]): string | undefined =>
+    listStatuses.find((s) => s.type !== undefined && types.includes(s.type))?.status;
+
+  const resolved: StatusMap = { ...current };
+  const fallbacks: StatusFallback[] = [];
+
+  // Apply a fallback only when the configured status is missing AND the
+  // fallback target actually exists — otherwise leave the configured value
+  // for validateStatuses to report.
+  const fallBack = (key: keyof StatusMap, to: string | undefined): void => {
+    if (to === undefined || has(resolved[key]) || !has(to)) return;
+    fallbacks.push({ key, from: resolved[key], to });
+    resolved[key] = to;
+  };
+
+  // Required trio: fall back by ClickUp status *type* when the configured
+  // name is missing (a list's open status may be named "OPEN", its final
+  // status "DONE" instead of "complete", etc).
+  fallBack("TODO", byType("open"));
+  fallBack("COMPLETED", byType("closed") ?? byType("done"));
+  // IN_PROGRESS has no type-based equivalent — validateStatuses reports it.
+
+  // Optional refinements: collapse onto coarser statuses that do exist.
+  fallBack("IN_REVIEW", resolved.IN_PROGRESS);
+  fallBack("REQUIRE_INPUT", resolved.IN_PROGRESS);
+  fallBack("BLOCKED", has(resolved.REQUIRE_INPUT) ? resolved.REQUIRE_INPUT : resolved.IN_PROGRESS);
+
+  // APPROVED has no safe stand-in: any existing status it fell back to
+  // would make the runner merge every PR in that status. Disable the
+  // approve-to-merge flow instead.
+  const approveFlowEnabled = has(resolved.APPROVED);
+
+  return { resolved, fallbacks, approveFlowEnabled };
+}
+
+let statusResolutionApplied = false;
+
+/**
+ * Fetch the list's statuses once and rewrite the global STATUS map so every
+ * lifecycle status points at one that actually exists (or disable the
+ * approve flow). Idempotent; a fetch failure logs a warning and leaves the
+ * configured statuses untouched.
+ */
+export async function resolveStatusFallbacks(): Promise<void> {
+  if (statusResolutionApplied) return;
+  statusResolutionApplied = true;
+
+  let list: ClickUpList;
+  try {
+    list = await getListInfo();
+  } catch (err) {
+    log(
+      "warn",
+      `Could not fetch list statuses for fallback resolution: ${(err as Error).message}. Using configured statuses as-is.`,
+    );
+    return;
+  }
+
+  const { resolved, fallbacks, approveFlowEnabled } = computeStatusFallbacks(
+    STATUS,
+    list.statuses,
+  );
+  Object.assign(STATUS, resolved);
+  statusFeatures.approveFlowEnabled = approveFlowEnabled;
+
+  for (const fb of fallbacks) {
+    log(
+      "info",
+      `Status "${fb.from}" not in list "${list.name}" — falling back to "${fb.to}".`,
+    );
+  }
+  if (!approveFlowEnabled) {
+    log(
+      "info",
+      `Status "${STATUS.APPROVED}" not in list "${list.name}" — approve-to-merge polling is disabled. ` +
+        `Merge PRs yourself (or set AUTO_APPROVE=true) and move tasks to "${STATUS.COMPLETED}" after merging.`,
+    );
+  }
+}
+
 /**
  * Validate that the configured statuses exist in the ClickUp list.
+ * Fallbacks are resolved first, so only genuinely required statuses can
+ * end up reported as missing (see computeStatusFallbacks).
  */
 export async function validateStatuses(): Promise<boolean> {
+  await resolveStatusFallbacks();
+
   const list = await getListInfo();
   const availableStatuses = list.statuses.map((s) => s.status.toLowerCase());
 
@@ -1044,6 +1177,8 @@ export async function validateStatuses(): Promise<boolean> {
 
   const missing: string[] = [];
   for (const [key, value] of Object.entries(STATUS)) {
+    // Without an "approved" status the approve flow is simply disabled.
+    if (key === "APPROVED" && !statusFeatures.approveFlowEnabled) continue;
     if (!availableStatuses.includes(value.toLowerCase())) {
       missing.push(`${key}: "${value}"`);
     }
@@ -1060,7 +1195,8 @@ export async function validateStatuses(): Promise<boolean> {
     );
     log(
       "warn",
-      `Please create these statuses in ClickUp or update your .env config.`,
+      `Please create these statuses in ClickUp or map yours via STATUS_* variables in .clawdup.env. ` +
+        `Only "to do", "in progress", and a done/closed status are required — run "clawdup --statuses" for details.`,
     );
     return false;
   }

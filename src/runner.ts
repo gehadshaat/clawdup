@@ -2,7 +2,7 @@
 
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import { resolve } from "path";
-import { POLL_INTERVAL_MS, RELAUNCH_INTERVAL_MS, STATUS, BASE_BRANCH, PROJECT_ROOT, GIT_ROOT, CLICKUP_LIST_ID, CLICKUP_PARENT_TASK_ID, AUTO_APPROVE, ADDRESS_PR_COMMENTS, DRY_RUN, BRANCH_PREFIX, MAX_CONCURRENT_TASKS } from "./config.js";
+import { POLL_INTERVAL_MS, RELAUNCH_INTERVAL_MS, STATUS, BASE_BRANCH, GIT_ROOT, CLICKUP_LIST_ID, CLICKUP_PARENT_TASK_ID, AUTO_APPROVE, ADDRESS_PR_COMMENTS, DRY_RUN, BRANCH_PREFIX, MAX_CONCURRENT_TASKS } from "./config.js";
 import { log, startTimer } from "./logger.js";
 import {
   getTasksByStatus,
@@ -29,6 +29,8 @@ import {
   getLeafListTasks,
   getListInfo,
   orderTasksByDependencies,
+  resolveStatusFallbacks,
+  statusFeatures,
 } from "./clickup-api.js";
 import {
   detectGitHubRepo,
@@ -101,8 +103,27 @@ let signalHandlersRegistered = false;
 let interactiveMode = false;
 let shouldRelaunchAfterMerge = false;
 
-const TODO_FILE_PATH = resolve(PROJECT_ROOT, ".clawdup.todo.json");
-const LOCK_FILE_PATH = resolve(PROJECT_ROOT, ".clawdup.lock");
+const TODO_FILE_PATH = resolve(GIT_ROOT, ".clawdup.todo.json");
+const LOCK_FILE_PATH = resolve(GIT_ROOT, ".clawdup.lock");
+
+/**
+ * The instruction posted on tasks whose PR awaits a human decision.
+ * With an "approved" status in the list, the automation merges on approval;
+ * on a minimal status list (no "approved") the human merges the PR and
+ * moves the task to done themselves.
+ */
+function reviewInstruction(): string {
+  return statusFeatures.approveFlowEnabled
+    ? `Please review the PR. When ready, move this task to "${STATUS.APPROVED}" and the automation will merge it.`
+    : `Please review the PR. When ready, merge it and move this task to "${STATUS.COMPLETED}".`;
+}
+
+/** How to retry/perform a merge the automation could not do right now. */
+function retryMergeInstruction(): string {
+  return statusFeatures.approveFlowEnabled
+    ? `Move this task to "${STATUS.APPROVED}" to retry the merge.`
+    : `Merge the PR manually once it's ready, then move this task to "${STATUS.COMPLETED}".`;
+}
 
 // Tracks task IDs that have been processed in this runner session.
 // Prevents the same task from being picked up again if a status update
@@ -302,7 +323,7 @@ function releaseLock(): void {
  */
 async function processTodoFile(cwd?: string): Promise<void> {
   // Claude writes the todo file in its working directory. In parallel mode
-  // that's the slot worktree, not PROJECT_ROOT — read from the same place.
+  // that's the slot worktree, not GIT_ROOT — read from the same place.
   const todoPath = cwd ? resolve(cwd, ".clawdup.todo.json") : TODO_FILE_PATH;
   if (!existsSync(todoPath)) return;
 
@@ -700,7 +721,7 @@ async function processTask(
           `${prUrl}\n\n` +
           `Branch: \`${branchName}\`\n\n` +
           `${workSummary}\n\n` +
-          `Please review the PR. When ready, move this task to "${STATUS.APPROVED}" and the automation will merge it.`,
+          reviewInstruction(),
       );
     }
 
@@ -714,7 +735,7 @@ async function processTask(
         taskId,
         task.creator,
         `❌ Automation encountered an error:\n\n\`\`\`\n${(err as Error).message}\n\`\`\`\n\n` +
-          `The task has been moved to "Blocked". Please investigate and retry.\n\n` +
+          `The task has been moved to "${STATUS.BLOCKED}". Please investigate and retry.\n\n` +
           `See the [Troubleshooting Guide](https://github.com/gehadshaat/clawdup/blob/main/TROUBLESHOOTING.md#blocked-tasks-automation-error) for recovery steps.` +
           (prUrl ? `\n\nPR: ${prUrl}` : ""),
       );
@@ -1065,7 +1086,7 @@ async function autoApproveAndMerge(
         `⚠️ Auto-merge skipped — CI checks failed:\n\n` +
           checkStatus.failing.map((name) => `- \`${name}\``).join("\n") +
           `\n\nPR: ${prUrl}\n\n` +
-          `Please investigate the failing checks. Move this task to "${STATUS.APPROVED}" to retry merge after fixes.`,
+          `Please investigate the failing checks. After fixes: ${retryMergeInstruction()}`,
       );
       return false;
     }
@@ -1077,7 +1098,7 @@ async function autoApproveAndMerge(
         taskId,
         `⏳ Auto-merge deferred — CI checks are still running.\n\n` +
           `PR: ${prUrl}\n\n` +
-          `Move this task to "${STATUS.APPROVED}" to retry merge once checks complete.`,
+          `Once checks complete: ${retryMergeInstruction()}`,
       );
       return false;
     }
@@ -1108,7 +1129,7 @@ async function autoApproveAndMerge(
         taskId,
         `⚠️ Auto-merge failed:\n\n\`\`\`\n${(err as Error).message}\n\`\`\`\n\n` +
           `PR: ${prUrl}\n\n` +
-          `Falling back to manual review. Move this task to "${STATUS.APPROVED}" to retry merge.`,
+          `Falling back to manual review. ${retryMergeInstruction()}`,
       );
     } catch (commentErr) {
       log("error", `Failed to update task after auto-merge failure: ${(commentErr as Error).message}`);
@@ -1581,7 +1602,7 @@ async function processReturningTask(
           `${prUrl}\n\n` +
           `Branch: \`${branchName}\`\n\n` +
           `${workSummary}\n\n` +
-          `Please review the PR. When ready, move this task to "${STATUS.APPROVED}" and the automation will merge it.`,
+          reviewInstruction(),
       );
     }
 
@@ -1595,7 +1616,7 @@ async function processReturningTask(
         task.creator,
         `❌ Automation encountered an error while continuing work on this task:\n\n` +
           `\`\`\`\n${(err as Error).message}\n\`\`\`\n\n` +
-          `The task has been moved to "Blocked". Please investigate.\nPR: ${prUrl}`,
+          `The task has been moved to "${STATUS.BLOCKED}". Please investigate.\nPR: ${prUrl}`,
       );
       await updateTaskStatus(taskId, STATUS.BLOCKED);
     } catch (commentErr) {
@@ -1617,6 +1638,23 @@ async function processReturningTask(
  * from the appropriate point in the pipeline.
  */
 async function recoverOrphanedTasks(): Promise<void> {
+  // On minimal status lists, "require input" and "blocked" fall back onto
+  // the in-progress status — a task sitting there may be deliberately
+  // parked waiting on a human, not orphaned by a crash. Auto-recovery
+  // can't tell the difference, so it is disabled in that mode.
+  const inProgressLower = STATUS.IN_PROGRESS.toLowerCase();
+  if (
+    STATUS.REQUIRE_INPUT.toLowerCase() === inProgressLower ||
+    STATUS.BLOCKED.toLowerCase() === inProgressLower
+  ) {
+    log(
+      "info",
+      `Skipping in-progress task recovery — "${STATUS.IN_PROGRESS}" also serves as the require-input/blocked fallback status, ` +
+        `so tasks there may be waiting on a human. Move a stalled task back to "${STATUS.TODO}" to retry it.`,
+    );
+    return;
+  }
+
   const recoveryTimer = startTimer();
   const inProgressTasks = await getTasksByStatus(STATUS.IN_PROGRESS);
 
@@ -1835,9 +1873,13 @@ async function dispatchTasksWithNewPRFeedback(capacity: number): Promise<number>
   let candidates: ClickUpTask[] = [];
   try {
     // In-review tasks first — those are the ones reviewers are commenting on.
+    // On minimal status lists IN_REVIEW falls back onto IN_PROGRESS; fetch
+    // the shared status only once.
+    const sameStatus =
+      STATUS.IN_REVIEW.toLowerCase() === STATUS.IN_PROGRESS.toLowerCase();
     const [inReview, inProgress] = await Promise.all([
       getTasksByStatus(STATUS.IN_REVIEW),
-      getTasksByStatus(STATUS.IN_PROGRESS),
+      sameStatus ? Promise.resolve([]) : getTasksByStatus(STATUS.IN_PROGRESS),
     ]);
     candidates = [...inReview, ...inProgress];
   } catch (err) {
@@ -1943,10 +1985,14 @@ async function pollForTasks(): Promise<void> {
     // First, check for approved tasks that need their PRs merged.
     // Approved merges run sequentially in the main checkout — they're fast
     // and we'd rather not consume a slot for a `gh pr merge` call.
-    const approvedTasks = await getTasksByStatus(STATUS.APPROVED);
-    for (const task of approvedTasks) {
-      if (isShuttingDown) break;
-      await processApprovedTask(task);
+    // Skipped when the list has no "approved" status (minimal status lists):
+    // PRs are then merged by a human, or immediately via AUTO_APPROVE.
+    if (statusFeatures.approveFlowEnabled) {
+      const approvedTasks = await getTasksByStatus(STATUS.APPROVED);
+      for (const task of approvedTasks) {
+        if (isShuttingDown) break;
+        await processApprovedTask(task);
+      }
     }
 
     if (isShuttingDown) return;
@@ -2092,6 +2138,9 @@ export async function runSingleTask(taskId: string, options?: { interactive?: bo
   if (!DRY_RUN) acquireLock();
 
   try {
+    // Map missing optional statuses to existing ones (minimal status lists)
+    await resolveStatusFallbacks();
+
     // Run preflight checks before processing the task
     await runPreflightOrAbort();
 
@@ -2261,6 +2310,9 @@ export async function runTaskStack(
   if (!DRY_RUN) acquireLock();
 
   try {
+    // Map missing optional statuses to existing ones (minimal status lists)
+    await resolveStatusFallbacks();
+
     await runPreflightOrAbort();
 
     const { source, leaves } = await collectStackLeaves(parentTaskId ?? null);
@@ -2380,15 +2432,28 @@ export async function runTaskStack(
         continue;
       }
 
-      if (
+      // On minimal status lists IN_REVIEW falls back onto IN_PROGRESS, making
+      // the two indistinguishable by status alone — there, a task counts as
+      // in-review only when its branch already carries a PR; otherwise it is
+      // (re)processed like an in-progress task.
+      let inReviewLike =
         status === STATUS.IN_REVIEW.toLowerCase() ||
-        status === STATUS.APPROVED.toLowerCase()
-      ) {
+        status === STATUS.APPROVED.toLowerCase();
+      let adoptedPrUrl: string | undefined;
+      if (inReviewLike && status === STATUS.IN_PROGRESS.toLowerCase()) {
+        adoptedPrUrl = existing
+          ? ((await findExistingPR(existing)) ?? undefined)
+          : undefined;
+        inReviewLike = adoptedPrUrl !== undefined;
+      }
+
+      if (inReviewLike) {
         // Typically a PR from a previous stack run awaiting review — adopt
         // its branch as the stack head and continue with the next subtask.
         if (existing && (await isOnStack(existing))) {
           currentBase = existing;
-          const prUrl = (await findExistingPR(existing)) ?? undefined;
+          const prUrl =
+            adoptedPrUrl ?? ((await findExistingPR(existing)) ?? undefined);
           previousPrUrl = prUrl;
           completedInSeries.push({ name: fresh.name, branchName: existing, prUrl });
           skipped++;

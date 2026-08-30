@@ -6,34 +6,7 @@
   "bin": {
     "clawdup": "./bin/clawdup.js"
   },
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    },
-    "./config": {
-      "types": "./dist/config.d.ts",
-      "default": "./dist/config.js"
-    },
-    "./clickup-api": {
-      "types": "./dist/clickup-api.d.ts",
-      "default": "./dist/clickup-api.js"
-    },
-    "./git-ops": {
-      "types": "./dist/git-ops.d.ts",
-      "default": "./dist/git-ops.js"
-    },
-    "./claude-worker": {
-      "types": "./dist/claude-worker.d.ts",
-      "default": "./dist/claude-worker.js"
-    },
-    "./runner": {
-      "types": "./dist/runner.d.ts",
-      "default": "./dist/runner.js"
-    }
-  },
+  "preferGlobal": true,
   "files": [
     "bin/",
     "dist/",
@@ -43,11 +16,7 @@
   "scripts": {
     "build": "tsc",
     "test": "tsc -p tsconfig.test.json && node --test dist-test/test/**/*.test.js",
-    "prepublishOnly": "npm run build",
-    "cook": "clawdup",
-    "vibe-check": "clawdup --check",
-    "summon": "clawdup --setup",
-    "yolo": "clawdup --once"
+    "prepublishOnly": "npm run build"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
