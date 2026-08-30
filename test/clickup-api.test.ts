@@ -11,6 +11,7 @@ import {
   getCommentText,
   detectInjectionPatterns,
   formatTaskForClaude,
+  formatParentTaskContext,
   isValidTaskId,
   slugify,
   findPRUrlInCommentList,
@@ -328,6 +329,98 @@ describe("formatTaskForClaude", () => {
     const result = formatTaskForClaude(task);
     assert.ok(result.includes("## Subtasks"));
     assert.ok(result.includes("Write tests"));
+  });
+
+  it("includes parent task context when a parent is provided", () => {
+    const parent: ClickUpTask = {
+      id: "parent1",
+      name: "Build signup flow",
+      url: "https://app.clickup.com/t/parent1",
+      text_content: "Users should be able to register with email and password.",
+    };
+    const result = formatTaskForClaude(baseTask, undefined, parent);
+    assert.ok(result.includes("## Parent Task Context"));
+    assert.ok(result.includes("Build signup flow"));
+    assert.ok(result.includes("CU-parent1"));
+    assert.ok(result.includes("Users should be able to register with email and password."));
+  });
+
+  it("places parent context before comments so the budget covers it", () => {
+    const parent: ClickUpTask = {
+      id: "parent1",
+      name: "Build signup flow",
+      url: "https://app.clickup.com/t/parent1",
+    };
+    const comments: ClickUpComment[] = [{ comment_text: "A review note" }];
+    const result = formatTaskForClaude(baseTask, comments, parent);
+    assert.ok(
+      result.indexOf("## Parent Task Context") < result.indexOf("## Comments"),
+    );
+  });
+
+  it("omits parent context when no parent is provided", () => {
+    assert.ok(!formatTaskForClaude(baseTask).includes("## Parent Task Context"));
+    assert.ok(
+      !formatTaskForClaude(baseTask, undefined, null).includes("## Parent Task Context"),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatParentTaskContext
+// ---------------------------------------------------------------------------
+describe("formatParentTaskContext", () => {
+  const parent: ClickUpTask = {
+    id: "parent1",
+    name: "Build signup flow",
+    url: "https://app.clickup.com/t/parent1",
+    text_content: "Users should be able to register with email and password.",
+    status: { status: "in progress" },
+    subtasks: [
+      { id: "sub2", name: "Add validation", url: "", status: { status: "to do" }, orderindex: "2" },
+      { id: "sub1", name: "Create form UI", url: "", status: { status: "complete" }, orderindex: "1" },
+    ],
+  };
+
+  it("includes parent name, id, url, status, and description", () => {
+    const result = formatParentTaskContext(parent, "sub2");
+    assert.ok(result.includes('subtask of "Build signup flow" (CU-parent1)'));
+    assert.ok(result.includes("Parent URL: https://app.clickup.com/t/parent1"));
+    assert.ok(result.includes("Parent status: in progress"));
+    assert.ok(result.includes("### Parent Description"));
+    assert.ok(result.includes("Users should be able to register with email and password."));
+  });
+
+  it("lists siblings in ClickUp order and marks the current task", () => {
+    const result = formatParentTaskContext(parent, "sub2");
+    assert.ok(result.includes("### All Subtasks of the Parent"));
+    assert.ok(result.includes("- Add validation [to do] ← current task"));
+    assert.ok(result.includes("- Create form UI [complete]"));
+    // orderindex 1 comes before orderindex 2
+    assert.ok(result.indexOf("Create form UI") < result.indexOf("Add validation"));
+  });
+
+  it("truncates very long parent descriptions", () => {
+    const longParent: ClickUpTask = { ...parent, text_content: "x".repeat(6000) };
+    const result = formatParentTaskContext(longParent, "sub2");
+    assert.ok(result.includes("(truncated)"));
+    assert.ok(!result.includes("x".repeat(6000)));
+  });
+
+  it("falls back to the description field and omits empty sections", () => {
+    const bare: ClickUpTask = {
+      id: "parent2",
+      name: "Bare parent",
+      url: "https://app.clickup.com/t/parent2",
+      description: "Fallback parent description",
+    };
+    const result = formatParentTaskContext(bare, "subX");
+    assert.ok(result.includes("Fallback parent description"));
+    assert.ok(!result.includes("### All Subtasks of the Parent"));
+
+    const empty: ClickUpTask = { id: "parent3", name: "Empty parent", url: "" };
+    const emptyResult = formatParentTaskContext(empty, "subX");
+    assert.ok(!emptyResult.includes("### Parent Description"));
   });
 });
 

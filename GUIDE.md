@@ -594,6 +594,7 @@ Here's what happens when clawdup processes a task:
 4. **Branch** — Creates a branch named `clickup/CU-{task-id}-{slug}` from the base branch
 5. **Claude Code** — Runs Claude Code with:
    - The task title, description, checklists, subtasks, and comments
+   - The parent task's name, description, and sibling subtasks (when the task is a subtask), so Claude knows the overall goal the subtask belongs to
    - Your `CLAUDE.md` project context (if it exists)
    - Custom instructions from `clawdup.config.mjs` (if configured)
 6. **Result handling:**
