@@ -328,7 +328,7 @@ Stack mode builds each subtask's branch on the previous one, so when a subtask f
 
 **Recovery:**
 1. Fix the failing subtask: address the error or add the requested details, then move it back to **"to do"** (the parent comment names the exact blocker)
-2. Re-run `clawdup --stack <parent-task-id>` — completed subtasks are skipped, subtasks already **"in review"** are re-adopted as stacking bases, and processing resumes at the first unfinished one
+2. Re-run `clawdup --stack <parent-task-id>` (or plain `clawdup --stack` for a full-list stack) — completed tasks are skipped, tasks already **"in review"** are re-adopted as stacking bases, and processing resumes at the first unfinished one
 3. If the abort message says a branch is *"not based on"* the stack (a stale branch from a non-stack run), delete that branch or finish that task via `--once` first
 
 **Notes:**

@@ -25,7 +25,7 @@ Complete reference for all CLI options, environment variables, and configuration
 | --- | --- |
 | *(no flags)* | Start the continuous polling loop. Polls ClickUp for tasks and processes them automatically. |
 | `--once <task-id>` | Process a single ClickUp task by its ID, then exit. Useful for testing or manual runs. |
-| `--stack <task-id>` | Implement **all leaf subtasks** of the given task sequentially as **stacked PRs**: subtasks are collected recursively (subtasks with children are treated as grouping only), ordered by their ClickUp dependencies, and processed one at a time — the first branch is created from the base branch, each next branch from the previous one, and each PR targets its branch's base (`base > b1 (PR1) > b2 (PR2)`). Runs in the main checkout only (`MAX_CONCURRENT_TASKS` is ignored) and `AUTO_APPROVE` is suppressed — merge the PRs bottom-up. If a subtask fails, the remaining ones are not attempted; re-running `--stack` resumes where it left off. Exits non-zero when the stack aborted. |
+| `--stack [task-id]` | Implement a series of tasks sequentially as **stacked PRs**. With a task ID, **all leaf subtasks** of that task are stacked: subtasks are collected recursively (subtasks with children are treated as grouping only). Without a task ID, the **full configured source** is stacked the same way — every open task in `CLICKUP_LIST_ID` (tasks with subtasks contribute their leaf subtasks instead), or the subtasks of `CLICKUP_PARENT_TASK_ID` when that is configured. Collected tasks are ordered by their ClickUp dependencies and processed one at a time — the first branch is created from the base branch, each next branch from the previous one, and each PR targets its branch's base (`base > b1 (PR1) > b2 (PR2)`). Runs in the main checkout only (`MAX_CONCURRENT_TASKS` is ignored) and `AUTO_APPROVE` is suppressed — merge the PRs bottom-up. If a task fails, the remaining ones are not attempted; re-running `--stack` resumes where it left off. Exits non-zero when the stack aborted. |
 | `--interactive` | Run Claude Code in interactive mode. Instead of running autonomously, Claude accepts user input via the terminal. Can be combined with `--once` or continuous mode. |
 | `--check` | Validate all configuration (API keys, statuses, CLI tools) and exit. Non-zero exit code on failure. |
 | `--statuses` | Print the recommended ClickUp list statuses and exit. Does not require configuration. |
@@ -44,6 +44,10 @@ clawdup --once abc123
 
 # Implement all leaf subtasks of a parent task as stacked PRs, in dependency order
 clawdup --stack abc123
+
+# Stack the full configured source instead: every open task in the list
+# (or the configured parent task's subtasks)
+clawdup --stack
 
 # Preview the planned stack (order, branches, PR targets) without changing anything
 clawdup --dry-run --stack abc123

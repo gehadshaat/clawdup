@@ -1476,10 +1476,13 @@ export function generatePRBody(
 export function generateStackPRNote(info: StackInfo): string {
   const parts: string[] = [];
 
+  const sourceLabel = info.sourceKind === "list" ? "ClickUp list" : "ClickUp task";
+  const sourceRef = info.sourceUrl
+    ? `[${info.sourceName}](${info.sourceUrl})`
+    : `"${info.sourceName}"`;
+
   parts.push(`## Stacked PR (${info.position} of ${info.total})`);
-  parts.push(
-    `Part of the stacked series for ClickUp task: [${info.parentTaskName}](${info.parentTaskUrl})`,
-  );
+  parts.push(`Part of the stacked series for ${sourceLabel}: ${sourceRef}`);
   parts.push("");
   parts.push(`- **Base branch:** \`${info.baseBranch}\``);
   if (info.previousPrUrl) {
@@ -1505,7 +1508,9 @@ export function generateStackPromptContext(info: StackInfo): string {
   parts.push(`## Stacked Task Series`);
   parts.push(
     `This task is part ${info.position} of ${info.total} in a sequential series ` +
-      `implementing the subtasks of "${info.parentTaskName}".`,
+      (info.sourceKind === "list"
+        ? `implementing the tasks of the "${info.sourceName}" list.`
+        : `implementing the subtasks of "${info.sourceName}".`),
   );
 
   if (info.completedInSeries.length > 0) {

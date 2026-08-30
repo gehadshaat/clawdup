@@ -479,11 +479,11 @@ Prevents multiple Clawdup instances from running simultaneously in the same proj
 
 Only one task is processed at a time. The `isProcessing` flag prevents the polling loop from picking up new tasks while one is in flight.
 
-### Stack Mode (`--stack <task-id>`)
+### Stack Mode (`--stack [task-id]`)
 
-`runTaskStack` implements all **leaf subtasks** of one parent task sequentially as **stacked PRs**:
+`runTaskStack` implements a series of tasks sequentially as **stacked PRs** — the **leaf subtasks** of one parent task, or (without a task ID) the **full configured source**: every open task of the list, or the configured parent task's subtasks.
 
-1. **Collect:** `getLeafSubtasks` recursively fetches the subtask tree (`GET /task/{id}?include_subtasks=true` per node). Subtasks with children are grouping-only and excluded; leaves keep their fully hydrated task objects.
+1. **Collect:** `getLeafSubtasks` recursively fetches the subtask tree (`GET /task/{id}?include_subtasks=true` per node). Subtasks with children are grouping-only and excluded; leaves keep their fully hydrated task objects. In full-list mode, `getLeafListTasks` seeds the same traversal with the list's open top-level tasks in list order (paging past the endpoint's 100-task limit) — a childless top-level task is itself a leaf, and closed top-level tasks are excluded (their work is treated as already merged).
 2. **Order:** `orderTasksByDependencies` topologically sorts the leaves using only in-stack ClickUp dependencies (ties broken by input order, which follows ClickUp's `orderindex`). A dependency cycle is a hard error; unresolved dependencies *outside* the stack only warn (same as `--once`).
 3. **Process sequentially** in the main checkout (no worktrees, `MAX_CONCURRENT_TASKS` ignored). Each subtask runs through the normal `processTask` pipeline with two overrides: its branch is created from the previous subtask's branch (the first from `BASE_BRANCH`), and its PR targets that base (`base > b1 (PR1) > b2 (PR2)`). The Claude prompt and PR body carry a stack-series context block.
 4. **Abort on failure:** if a subtask ends in `needs_input`, `no_changes`, or `error`, the remaining subtasks are not attempted (they would build on missing work). A summary comment on the parent task lists the outcome per subtask.
