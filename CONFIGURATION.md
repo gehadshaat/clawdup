@@ -29,8 +29,8 @@ Complete reference for all CLI options, environment variables, and configuration
 | `--interactive` | Run Claude Code in interactive mode. Instead of running autonomously, Claude accepts user input via the terminal. Can be combined with `--once` or continuous mode. |
 | `--check` | Validate all configuration (API keys, statuses, CLI tools) and exit. Non-zero exit code on failure. |
 | `--statuses` | Print the recommended ClickUp list statuses and exit. Does not require configuration. |
-| `--setup` | Run the interactive setup wizard that guides you through creating a `.clawdup.env` file. |
-| `--init` | Create example `.clawdup.env` and `clawdup.config.mjs` files in the current directory. |
+| `--setup` | Run the interactive setup wizard that guides you through creating a `.clawdup.env` file at the repository root (and gitignoring it). |
+| `--init` | Create example `.clawdup.env` and `clawdup.config.mjs` files at the repository root, and add them to `.gitignore`. |
 | `--help`, `-h` | Print usage information and exit. |
 
 ### Examples
@@ -61,7 +61,7 @@ clawdup --interactive
 # Validate config before starting
 clawdup --check
 
-# Bootstrap a new project
+# Bootstrap a repository (writes config files at the repo root)
 clawdup --init
 ```
 
@@ -97,7 +97,6 @@ CLICKUP_PARENT_TASK_ID=abc123xyz
 | --- | --- |
 | Dedicated list for automation | `CLICKUP_LIST_ID` |
 | Tasks mixed with non-automated tasks | `CLICKUP_PARENT_TASK_ID` |
-| Monorepo with per-package lists | `CLICKUP_LIST_ID` per package |
 | Quick trial / single parent task | `CLICKUP_PARENT_TASK_ID` |
 
 ### Validation
@@ -114,10 +113,10 @@ CLICKUP_PARENT_TASK_ID=abc123xyz
 
 Primary configuration file. Contains API tokens and settings as `KEY=VALUE` pairs.
 
-- Searched in the current working directory.
+- Lives at the **repository root** and is resolved from there no matter which subdirectory `clawdup` is run from.
 - Alternative filename: `.env.clickup` (first found wins).
 - Values do **not** override existing environment variables.
-- **Must be added to `.gitignore`** (contains secrets).
+- **Never committed** — it contains secrets. `clawdup --setup` / `clawdup --init` add it to `.gitignore` automatically; keep it there.
 
 Run `clawdup --init` to generate an example file.
 
@@ -146,7 +145,7 @@ Always write tests for new functions.
 
 ### `CLAUDE.md`
 
-Project context file used by Claude Code. Automatically included in every task prompt. In a monorepo, clawdup checks the package directory first, then falls back to the repository root.
+Project context file used by Claude Code, at the repository root. Automatically included in every task prompt.
 
 ---
 
@@ -189,15 +188,34 @@ Project context file used by Claude Code. Automatically included in every task p
 
 Customize status names to match your ClickUp list configuration. Names are case-insensitive.
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `STATUS_TODO` | `to do` | Task ready to be picked up. |
-| `STATUS_IN_PROGRESS` | `in progress` | Automation is currently working. |
-| `STATUS_IN_REVIEW` | `in review` | PR created, awaiting review. |
-| `STATUS_APPROVED` | `approved` | Approved — automation will merge the PR. |
-| `STATUS_REQUIRE_INPUT` | `require input` | Task needs clarification. |
-| `STATUS_COMPLETED` | `complete` | Task done, PR merged. |
-| `STATUS_BLOCKED` | `blocked` | Automation hit an error. |
+| Variable | Default | Required in list? | Description |
+| --- | --- | --- | --- |
+| `STATUS_TODO` | `to do` | **Yes** (or any open-type status) | Task ready to be picked up. |
+| `STATUS_IN_PROGRESS` | `in progress` | **Yes** | Automation is currently working. |
+| `STATUS_IN_REVIEW` | `in review` | No | PR created, awaiting review. |
+| `STATUS_APPROVED` | `approved` | No | Approved — automation will merge the PR. |
+| `STATUS_REQUIRE_INPUT` | `require input` | No | Task needs clarification. |
+| `STATUS_COMPLETED` | `complete` | **Yes** (or any done/closed-type status) | Task done, PR merged. |
+| `STATUS_BLOCKED` | `blocked` | No | Automation hit an error. |
+
+#### Status Fallbacks (minimal lists)
+
+Only three statuses must exist in the list, so a default **TO DO / IN PROGRESS / DONE** list works out of the box. At startup clawdup fetches the list's actual statuses and rewrites the mapping for any that are missing:
+
+| Missing from list | Falls back to |
+| --- | --- |
+| `to do` | The list's open-type status |
+| `complete` | The list's closed-type (else done-type) status, e.g. `DONE` |
+| `in review` | `in progress` |
+| `require input` | `in progress` |
+| `blocked` | `require input` if present, else `in progress` |
+| `approved` | *No fallback* — approve-to-merge polling is disabled; merge PRs manually or use `AUTO_APPROVE=true` |
+
+Consequences of running in fallback mode:
+
+- Tasks needing review, input, or hit by an error all sit in `in progress` — the automation's task comment says which case applies and what to do next.
+- Crash recovery of orphaned in-progress tasks is disabled (the runner can't distinguish parked tasks from crashed ones); move a stalled task back to `to do` to retry it.
+- Without `approved`, nothing polls for tasks to merge: merge the PR yourself and move the task to done, or set `AUTO_APPROVE=true` to merge immediately after each successful run.
 
 ### Logging
 
@@ -234,8 +252,8 @@ The runner periodically restarts itself to pick up fresh code and avoid long-run
 Settings are resolved in this order (highest priority first):
 
 1. **Environment variables** — `export POLL_INTERVAL_MS=60000`
-2. **`.clawdup.env`** (or `.env.clickup`) — loaded from the current working directory
-3. **`clawdup.config.mjs`** — JavaScript config file for `prompt` and `claudeArgs`
+2. **`.clawdup.env`** (or `.env.clickup`) — loaded from the repository root
+3. **`clawdup.config.mjs`** — JavaScript config file for `prompt` and `claudeArgs`, also at the repository root
 4. **Defaults** — built-in fallback values
 
 Environment variables set before running clawdup always take precedence. The `.clawdup.env` file only sets values that are not already in the environment.
@@ -262,7 +280,7 @@ Clawdup validates configuration at startup and fails fast with clear error messa
 In addition to the above, `clawdup --check` validates:
 
 - ClickUp API connectivity (fetches list or parent task info).
-- ClickUp list statuses match the expected set.
+- ClickUp list statuses cover the required set (`to do`, `in progress`, and a done/closed status) after [fallback resolution](#status-fallbacks-minimal-lists).
 - GitHub CLI (`gh`) is installed and authenticated.
 - Claude Code CLI (`claude`) is installed and responsive.
 - Git repository detection.
@@ -272,32 +290,23 @@ In addition to the above, `clawdup --check` validates:
 
 ## Monorepo Configuration
 
-In a monorepo, each workspace package can have its own clawdup configuration:
+A repository has exactly **one** clawdup configuration, at its root:
 
 ```
 my-monorepo/
 ├── packages/
 │   ├── frontend/
-│   │   ├── .clawdup.env          # CLICKUP_LIST_ID=frontend-list
-│   │   └── clawdup.config.mjs    # Frontend-specific Claude instructions
 │   └── backend/
-│       ├── .clawdup.env          # CLICKUP_LIST_ID=backend-list
-│       └── clawdup.config.mjs    # Backend-specific Claude instructions
+├── .clawdup.env                 # One config for the whole repo (gitignored)
+├── clawdup.config.mjs           # Repo-wide Claude instructions (optional)
 ├── CLAUDE.md                    # Shared project context
 └── pnpm-workspace.yaml
 ```
 
 **How it works:**
 
-- `PROJECT_ROOT` = the directory where `clawdup` is run (e.g., `packages/frontend/`).
-- `GIT_ROOT` = the repository root (e.g., `my-monorepo/`).
-- Config files (`.clawdup.env`, `clawdup.config.mjs`) are resolved from `PROJECT_ROOT`.
-- Git operations (branch, commit, push) run from `GIT_ROOT`.
-- `CLAUDE.md` is checked in `PROJECT_ROOT` first, then falls back to `GIT_ROOT`.
+- `GIT_ROOT` = the repository root, detected via `git rev-parse --show-toplevel` from wherever `clawdup` is invoked.
+- Config files (`.clawdup.env`, `clawdup.config.mjs`), `CLAUDE.md`, runtime state files, and all git operations are anchored at `GIT_ROOT`.
+- Running `clawdup` from any subdirectory behaves identically to running it at the root.
 
-Run clawdup from each package directory to use that package's configuration:
-
-```bash
-cd packages/frontend && clawdup
-cd packages/backend && clawdup
-```
+One ClickUp list (or parent task) feeds the whole repository. Direct work at specific packages through task descriptions and file hints, and encode per-package conventions in `CLAUDE.md` / `clawdup.config.mjs`.

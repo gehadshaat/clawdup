@@ -7,12 +7,12 @@ import { existsSync, readFileSync, unlinkSync } from "fs";
 import { resolve } from "path";
 import { execFile } from "child_process";
 import { promisify } from "util";
-import { BASE_BRANCH, GIT_ROOT, PROJECT_ROOT, CLICKUP_API_TOKEN, DRY_RUN } from "./config.js";
+import { BASE_BRANCH, GIT_ROOT, CLICKUP_API_TOKEN, DRY_RUN } from "./config.js";
 import { log } from "./logger.js";
 
 const execFileAsync = promisify(execFile);
 
-const LOCK_FILE_PATH = resolve(PROJECT_ROOT, ".clawdup.lock");
+const LOCK_FILE_PATH = resolve(GIT_ROOT, ".clawdup.lock");
 
 /**
  * Check whether a given PID belongs to a running Clawdup/Node process.

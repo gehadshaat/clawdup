@@ -1,16 +1,12 @@
 // Interactive setup wizard for clawdup.
-// Writes .clawdup.env in the current working directory.
+// Writes .clawdup.env at the repository root and makes sure it is gitignored.
+// clawdup is installed globally — setup never touches the repo's package.json.
 
 import { createInterface } from "readline";
-import { existsSync, writeFileSync, readFileSync } from "fs";
+import { existsSync, writeFileSync } from "fs";
 import { resolve } from "path";
-import {
-  detectPackageManager,
-  globalInstallCommand,
-  installCommand,
-  runScriptCommand,
-  initCommand,
-} from "./package-manager.js";
+import { detectPackageManager, globalInstallCommand } from "./package-manager.js";
+import { detectRepoRoot, ensureGitignoreEntries } from "./repo-root.js";
 
 const rl = createInterface({
   input: process.stdin,
@@ -40,7 +36,7 @@ function ask(question: string, defaultValue = ""): Promise<string> {
 interface ListResponse {
   id: string;
   name: string;
-  statuses: { status: string }[];
+  statuses: { status: string; type?: string }[];
 }
 
 interface TaskResponse {
@@ -57,6 +53,48 @@ interface TeamResponse {
 
 interface SpaceResponse {
   spaces: { id: string; name: string }[];
+}
+
+/**
+ * Report how well a list's statuses cover the clawdup workflow.
+ * Only "to do", "in progress", and a done/closed status are required — a
+ * minimal ClickUp list (TO DO / IN PROGRESS / DONE) works out of the box.
+ * The optional statuses refine the flow; when absent, clawdup falls back to
+ * the statuses that do exist (see resolveStatusFallbacks in clickup-api.ts).
+ */
+function reportStatusCoverage(statuses: { status: string; type?: string }[]): void {
+  const existing = statuses.map((s) => s.status.toLowerCase());
+  const hasOpenType = statuses.some((s) => s.type === "open");
+  const hasClosedType = statuses.some((s) => s.type === "closed" || s.type === "done");
+
+  const requiredMissing: string[] = [];
+  if (!existing.includes("to do") && !hasOpenType) {
+    requiredMissing.push('"to do" (or any open-type status)');
+  }
+  if (!existing.includes("in progress")) {
+    requiredMissing.push('"in progress"');
+  }
+  if (!existing.includes("complete") && !existing.includes("done") && !hasClosedType) {
+    requiredMissing.push('"done" (or any closed-type status)');
+  }
+
+  const optionalMissing = ["in review", "approved", "require input", "blocked"].filter(
+    (s) => !existing.includes(s),
+  );
+
+  if (requiredMissing.length > 0) {
+    console.log(`\n  Missing REQUIRED statuses: ${requiredMissing.join(", ")}`);
+    console.log(
+      "  clawdup needs at least: to do, in progress, and a done/closed status.",
+    );
+    console.log("  Add them in ClickUp, or map yours via STATUS_* variables in .clawdup.env.");
+  } else if (optionalMissing.length > 0) {
+    console.log(`\n  Minimal status setup detected — missing optional statuses: ${optionalMissing.join(", ")}`);
+    console.log("  That's fine: clawdup falls back to the statuses you have.");
+    console.log('  Run "clawdup --statuses" to see the full recommended setup.');
+  } else {
+    console.log("  All recommended statuses found!");
+  }
 }
 
 const DEFAULT_STATUSES = [
@@ -274,90 +312,9 @@ async function checkCliDependencies(): Promise<void> {
   }
 }
 
-/**
- * Read clawdup's own version from its package.json.
- */
-function getClawdupVersion(): string {
-  try {
-    const pkgPath = resolve(
-      new URL(".", import.meta.url).pathname,
-      "../package.json",
-    );
-    const pkg = JSON.parse(readFileSync(pkgPath, "utf-8")) as { version: string };
-    return pkg.version;
-  } catch {
-    return "latest";
-  }
-}
-
-/**
- * Add clawdup as a devDependency and convenience npm scripts to the
- * target project's package.json.  Safe to call multiple times — existing
- * scripts are not overwritten.
- */
-export function addPackageJsonScripts(): boolean {
-  const cwd = process.cwd();
-  const pkgPath = resolve(cwd, "package.json");
-
-  if (!existsSync(pkgPath)) {
-    console.log("  No package.json found. Skipping package.json setup.");
-    console.log(`  Run '${initCommand(detectPackageManager(cwd))}' first to create a package.json.\n`);
-    return false;
-  }
-
-  const raw = readFileSync(pkgPath, "utf-8");
-  const pkg = JSON.parse(raw) as Record<string, unknown>;
-
-  let changed = false;
-
-  // --- devDependencies ---
-  const devDeps = (pkg.devDependencies ?? {}) as Record<string, string>;
-  if (!devDeps.clawdup) {
-    const version = getClawdupVersion();
-    devDeps.clawdup = `^${version}`;
-    pkg.devDependencies = devDeps;
-    console.log(`  Added clawdup@^${version} to devDependencies`);
-    changed = true;
-  } else {
-    console.log("  SKIP  clawdup already in devDependencies");
-  }
-
-  // --- npm scripts ---
-  const scripts = (pkg.scripts ?? {}) as Record<string, string>;
-
-  const SCRIPTS_TO_ADD: [string, string][] = [
-    ["cook", "clawdup"],
-    ["clawdup:once", "clawdup --once"],
-    ["clawdup:vibe-check", "clawdup --check"],
-    ["clawdup:setup", "clawdup --setup"],
-    ["clawdup:init", "clawdup --init"],
-  ];
-
-  for (const [name, cmd] of SCRIPTS_TO_ADD) {
-    if (!scripts[name]) {
-      scripts[name] = cmd;
-      console.log(`  Added script: "${name}" → "${cmd}"`);
-      changed = true;
-    } else {
-      console.log(`  SKIP  script "${name}" already exists`);
-    }
-  }
-
-  pkg.scripts = scripts;
-
-  if (changed) {
-    writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
-    console.log(`\n  Updated: ${pkgPath}`);
-  } else {
-    console.log("\n  package.json already up to date.");
-  }
-
-  return changed;
-}
-
 export async function runSetup(): Promise<void> {
-  const cwd = process.cwd();
-  const envPath = resolve(cwd, ".clawdup.env");
+  const repoRoot = detectRepoRoot();
+  const envPath = resolve(repoRoot, ".clawdup.env");
 
   console.log(`
 ╔══════════════════════════════════════════════╗
@@ -365,7 +322,8 @@ export async function runSetup(): Promise<void> {
 ╚══════════════════════════════════════════════╝
 `);
 
-  console.log(`Project directory: ${cwd}\n`);
+  console.log(`Repository root: ${repoRoot}`);
+  console.log(`Config will be written to: ${envPath}\n`);
 
   await checkCliDependencies();
 
@@ -445,28 +403,7 @@ export async function runSetup(): Promise<void> {
             `  List: "${list.name}" (statuses: ${list.statuses.map((s) => s.status).join(", ")})`,
           );
 
-          const existing = list.statuses.map((s) => s.status.toLowerCase());
-          const recommended = [
-            "to do",
-            "in progress",
-            "in review",
-            "approved",
-            "require input",
-            "blocked",
-            "complete",
-          ];
-          const missing = recommended.filter((s) => !existing.includes(s));
-
-          if (missing.length > 0) {
-            console.log(
-              `\n  Missing recommended statuses: ${missing.join(", ")}`,
-            );
-            console.log(
-              '  Run "clawdup --statuses" to see the full recommended setup.',
-            );
-          } else {
-            console.log("  All recommended statuses found!");
-          }
+          reportStatusCoverage(list.statuses);
         }
       }
     } catch (err) {
@@ -544,28 +481,7 @@ export async function runSetup(): Promise<void> {
         `  Current statuses: ${list.statuses.map((s) => s.status).join(", ")}`,
       );
 
-      const existing = list.statuses.map((s) => s.status.toLowerCase());
-      const recommended = [
-        "to do",
-        "in progress",
-        "in review",
-        "approved",
-        "require input",
-        "blocked",
-        "complete",
-      ];
-      const missing = recommended.filter((s) => !existing.includes(s));
-
-      if (missing.length > 0) {
-        console.log(
-          `\n  Missing recommended statuses: ${missing.join(", ")}`,
-        );
-        console.log(
-          '  Run "clawdup --statuses" to see the full recommended setup.',
-        );
-      } else {
-        console.log("  All recommended statuses found!");
-      }
+      reportStatusCoverage(list.statuses);
     } catch (err) {
       console.error(`  Failed to validate: ${(err as Error).message}`);
       const cont = await ask("Continue anyway? (y/N)", "N");
@@ -614,42 +530,32 @@ LOG_LEVEL=info
   writeFileSync(envPath, envContent);
   console.log(`\n.clawdup.env written to: ${envPath}`);
 
-  // Remind about .gitignore
-  const gitignorePath = resolve(cwd, ".gitignore");
-  if (existsSync(gitignorePath)) {
-    const gitignore = readFileSync(gitignorePath, "utf-8");
-    if (!gitignore.includes(".clawdup.env")) {
-      console.log("\n  Remember to add .clawdup.env to your .gitignore!");
-    }
+  // Make sure the env file (secrets!) and clawdup's runtime state files
+  // are gitignored — .clawdup.env must never be committed.
+  const added = ensureGitignoreEntries(repoRoot);
+  if (added.length > 0) {
+    console.log(`Added to .gitignore: ${added.join(", ")}`);
+  } else {
+    console.log(".gitignore already covers clawdup files.");
   }
 
-  // Add clawdup to package.json with convenience scripts
-  console.log("\nStep 3: Package.json Integration");
-  console.log("─".repeat(40));
-  addPackageJsonScripts();
-
-  const pm = detectPackageManager(cwd);
-  const dlx = pm === "pnpm" ? "pnpm dlx" : "npx";
   console.log(`
 ╔══════════════════════════════════════════════╗
 ║              Setup Complete!                  ║
 ╚══════════════════════════════════════════════╝
 
 Next steps:
-  1. Install dependencies:
-     ${installCommand(pm)}
+  1. Run a health check:
+     clawdup --check
 
-  2. Run a health check:
-     ${runScriptCommand(pm, "clawdup:vibe-check")}
+  2. Start the automation:
+     clawdup
 
-  3. Start the automation:
-     ${runScriptCommand(pm, "cook")}
+  3. Or process a single task:
+     clawdup --once <task-id>
 
-  4. Or process a single task:
-     ${runScriptCommand(pm, "clawdup:once")} -- <task-id>
-
-  5. Set up the recommended statuses in your ClickUp list:
-     ${dlx} clawdup --statuses
+  4. See the recommended ClickUp statuses:
+     clawdup --statuses
 `);
 
   rl.close();

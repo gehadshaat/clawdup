@@ -25,9 +25,8 @@ This guide walks you through setting up **clawdup** — from ClickUp configurati
 17. [Reviewing and Approving Changes](#reviewing-and-approving-changes)
 18. [Advanced Configuration](#advanced-configuration)
 19. [Monorepo Setup](#monorepo-setup)
-20. [Programmatic API](#programmatic-api)
-21. [Troubleshooting](#troubleshooting)
-22. [FAQ](#faq)
+20. [Troubleshooting](#troubleshooting)
+21. [FAQ](#faq)
 
 ---
 
@@ -102,9 +101,19 @@ This list is where you'll create tasks for clawdup to pick up and implement.
 
 ## Step 3: Configure ClickUp List Statuses
 
-clawdup relies on specific task statuses to track progress. You need to set up these statuses in your ClickUp list.
+clawdup uses task statuses to track progress. **Only three are required** — `to do`, `in progress`, and a done/closed status — so a brand-new ClickUp list with its default `TO DO / IN PROGRESS / DONE` statuses works with no changes at all. The rest are optional refinements for a finer-grained workflow.
 
-### Required Statuses
+### Minimal Setup (works out of the box)
+
+| Status | Type | Description |
+|---|---|---|
+| `TO DO` | open | Task is ready to be picked up by the automation |
+| `IN PROGRESS` | active | Automation is working on it — and where it parks tasks that need review, input, or hit an error (with a comment explaining what's needed) |
+| `DONE` | closed | Done — PR has been merged |
+
+In this mode, clawdup posts the PR link as a task comment, you review and merge the PR yourself (or set `AUTO_APPROVE=true`), and move the task to `DONE`. Tasks needing input or blocked by an error stay `IN PROGRESS` with an explanatory comment — answer it and move the task back to `TO DO` to retry.
+
+### Full Recommended Statuses
 
 | Status | Type | Color | Description |
 |---|---|---|---|
@@ -115,6 +124,8 @@ clawdup relies on specific task statuses to track progress. You need to set up t
 | `require input` | active | `#f9d900` | Task needs clarification (automation added a comment explaining why) |
 | `blocked` | active | `#f44336` | Automation encountered an error |
 | `complete` | closed | `#6bc950` | Done — PR has been merged |
+
+Any recommended status missing from your list falls back automatically: `in review`, `require input`, and `blocked` collapse onto `in progress`; `complete` maps to your list's done/closed status; without `approved`, approve-to-merge polling is disabled.
 
 ### How to Configure Statuses
 
@@ -130,7 +141,7 @@ clawdup relies on specific task statuses to track progress. You need to set up t
    - All others should be "active" type statuses
 8. Click **"Save"**
 
-> **Tip:** You can also run `clawdup --statuses` after installation to see this list as a quick reference.
+> **Tip:** You can also run `clawdup --statuses` after installation to see this list — including the exact fallback behavior — as a quick reference.
 
 ---
 
@@ -261,71 +272,41 @@ You'll need an Anthropic API key or an active Claude subscription for Claude Cod
 
 ## Step 8: Install clawdup
 
-Choose one of these installation methods:
+clawdup is a **global CLI** — install it once per machine. It is never added to your project: no dev dependency, no `package.json` scripts, no lockfile changes. Each repository is configured later with a single untracked `.clawdup.env` file at its root (Step 9).
 
-### Option A: Per-Project Install (Recommended)
-
-Install as a dev dependency in your project:
-
-```bash
-cd your-project
-npm install -D clawdup
-```
-
-Add some scripts to your `package.json`:
-
-```json
-{
-  "scripts": {
-    "cook": "clawdup",
-    "vibe-check": "clawdup --check",
-    "summon": "clawdup --setup",
-    "yolo": "clawdup --once"
-  }
-}
-```
-
-`npm run cook` starts continuous polling, `npm run vibe-check` validates your setup, and `npm run yolo` processes a single task.
-
-### Option B: Global Install
+### Option A: Global Install (the standard way)
 
 ```bash
 npm install -g clawdup
+# or
+pnpm add -g clawdup
 ```
 
-### Option C: Use npx (No Install)
+Upgrade any time with `clawdup --upgrade`.
 
-```bash
-npx clawdup --init
-npx clawdup
-```
+### Option B: Install from GitHub (Private Repo)
 
-### Option D: Install from GitHub (Private Repo)
-
-If clawdup is not published to npm or you need a specific branch from a private repository, install directly from GitHub.
+If clawdup is not published to npm or you need a specific branch from a private repository, install it globally directly from GitHub.
 
 **Prerequisites:** You need GitHub access configured via SSH key, GitHub CLI (`gh auth login`), or a Personal Access Token (PAT) with `repo` scope.
 
 ```bash
 # Via SSH (recommended for private repos)
-npm install -D git+ssh://git@github.com/gehadshaat/clawdup.git
+npm install -g git+ssh://git@github.com/gehadshaat/clawdup.git
 
 # Via SSH — specific branch
-npm install -D git+ssh://git@github.com/gehadshaat/clawdup.git#main
+npm install -g git+ssh://git@github.com/gehadshaat/clawdup.git#main
 
 # Via HTTPS (prompts for credentials or uses a PAT)
-npm install -D git+https://github.com/gehadshaat/clawdup.git
+npm install -g git+https://github.com/gehadshaat/clawdup.git
 
 # Via HTTPS with a Personal Access Token
-npm install -D git+https://<YOUR_PAT>@github.com/gehadshaat/clawdup.git
-
-# Global install via SSH
-npm install -g git+ssh://git@github.com/gehadshaat/clawdup.git
+npm install -g git+https://<YOUR_PAT>@github.com/gehadshaat/clawdup.git
 ```
 
 The package compiles TypeScript automatically during install (via the `prepublishOnly` script).
 
-### Option E: Clone and Link (for Development / Debugging)
+### Option C: Clone and Link (for Development / Debugging)
 
 If you want to modify clawdup itself or debug an issue locally:
 
@@ -367,13 +348,13 @@ There are two ways to configure clawdup: the interactive setup wizard or manual 
 clawdup --setup
 ```
 
-The wizard will:
+Run it from anywhere inside the repository you want to automate. The wizard will:
 1. Ask for your ClickUp API token
 2. Ask for your ClickUp List ID
 3. Validate the connection to ClickUp
 4. Check if the required statuses exist
 5. Ask for optional settings (base branch, polling interval, etc.)
-6. Write the `.clawdup.env` file
+6. Write the `.clawdup.env` file at the **repository root** and add it to `.gitignore`
 
 ### Option B: Quick Init + Manual Edit
 
@@ -382,7 +363,7 @@ The wizard will:
 clawdup --init
 ```
 
-This creates two files:
+This creates two files at the **repository root** (wherever you run it from inside the repo):
 - **`.clawdup.env`** — Environment variables (API token, list ID, etc.)
 - **`clawdup.config.mjs`** — Optional Claude Code customization
 
@@ -403,9 +384,9 @@ CLICKUP_LIST_ID=901234567890
 # LOG_LEVEL=info
 ```
 
-### Add to .gitignore
+### Never Commit .clawdup.env
 
-Your `.clawdup.env` contains secrets. Make sure it's not committed:
+Your `.clawdup.env` contains secrets and must never be committed. Both `clawdup --setup` and `clawdup --init` add it (plus clawdup's runtime state files) to your `.gitignore` automatically. If you created the file by hand, add the entries yourself:
 
 ```bash
 echo ".clawdup.env" >> .gitignore
@@ -433,7 +414,7 @@ Use TypeScript strict mode conventions.
 
 ### Optional: Add a CLAUDE.md File
 
-If your project has a `CLAUDE.md` file (used by Claude Code for project context), clawdup will automatically include its contents in every task prompt. This is the best way to give Claude context about your project's architecture, conventions, and coding standards.
+If your repository has a `CLAUDE.md` file at its root (used by Claude Code for project context), clawdup will automatically include its contents in every task prompt. This is the best way to give Claude context about your project's architecture, conventions, and coding standards.
 
 ```markdown
 # CLAUDE.md
@@ -494,9 +475,9 @@ Start the automation:
 
 ```bash
 clawdup
-# or, if you set up the fun scripts:
-npm run cook
 ```
+
+Run it from anywhere inside the repository — configuration is resolved from the repo root.
 
 This will:
 1. Validate your configuration
@@ -511,8 +492,6 @@ To process one specific task without continuous polling:
 
 ```bash
 clawdup --once <task-id>
-# or
-npm run yolo -- <task-id>
 ```
 
 The task ID is the alphanumeric identifier from ClickUp (visible in the task URL or the task detail panel).
@@ -656,6 +635,8 @@ to do → in progress → in review → approved → complete
 | approved → complete | Automation | clawdup merges the PR |
 | blocked → to do | Human | After fixing the issue, move back to retry |
 
+> **Minimal 3-status lists (TO DO / IN PROGRESS / DONE):** `in review`, `require input`, and `blocked` all collapse onto `IN PROGRESS` — the task comment tells you which case you're in. You merge the PR yourself (or use `AUTO_APPROVE=true`) and move the task to `DONE`; move it back to `TO DO` to retry after answering a question or fixing an error.
+
 ---
 
 ## Reviewing and Approving Changes
@@ -700,6 +681,8 @@ These can be set in `.clawdup.env` or as system environment variables:
 | `STATUS_COMPLETED` | No | `complete` | ClickUp status name for "complete" |
 | `STATUS_BLOCKED` | No | `blocked` | ClickUp status name for "blocked" |
 
+Only `to do`, `in progress`, and a done/closed status must actually exist in your list — missing optional statuses fall back automatically (see [Step 3](#step-3-configure-clickup-list-statuses)).
+
 ### Custom Status Names
 
 If your ClickUp list uses different status names (e.g., "Ready" instead of "to do"), override them:
@@ -731,87 +714,31 @@ LOG_LEVEL=debug
 
 ## Monorepo Setup
 
-In a monorepo, each package can have its own clawdup configuration pointing to a different ClickUp list:
+A repository gets **one** clawdup configuration, at its root:
 
 ```
 my-monorepo/
 ├── packages/
 │   ├── frontend/
-│   │   ├── .clawdup.env          # CLICKUP_LIST_ID=frontend-list-id
-│   │   ├── clawdup.config.mjs    # Frontend-specific instructions
-│   │   └── package.json         # "clawdup": "clawdup"
 │   └── backend/
-│       ├── .clawdup.env          # CLICKUP_LIST_ID=backend-list-id
-│       ├── clawdup.config.mjs    # Backend-specific instructions
-│       └── package.json         # "clawdup": "clawdup"
+├── .clawdup.env                 # One config for the whole repo (gitignored)
+├── clawdup.config.mjs           # Repo-wide Claude instructions (optional)
 ├── CLAUDE.md                    # Shared project context
 └── pnpm-workspace.yaml
 ```
 
 ### How It Works
 
-- Config files (`.clawdup.env`, `clawdup.config.mjs`) are resolved from the directory where `clawdup` is run
-- Git operations automatically use the repository root (detected via `git rev-parse --show-toplevel`)
-- `CLAUDE.md` is checked in both the package directory and the repo root
-- Each package runs its own independent clawdup instance
+- Config files (`.clawdup.env`, `clawdup.config.mjs`) and `CLAUDE.md` are resolved from the repository root (detected via `git rev-parse --show-toplevel`), no matter which subdirectory you run `clawdup` from
+- Git operations, Claude runs, and clawdup's runtime state files are all anchored at the repo root, so tasks can touch any package
+- One ClickUp list (or parent task) feeds the whole repository — use task descriptions and file hints (e.g. "in `packages/frontend/`") to direct work at specific packages, and `clawdup.config.mjs` / `CLAUDE.md` for per-package conventions
 
 ### Running in a Monorepo
 
 ```bash
-# From the frontend package
-cd packages/frontend
-npx clawdup
-
-# Or using package scripts
-pnpm --filter frontend run clawdup
-```
-
----
-
-## Programmatic API
-
-You can import clawdup's modules directly for custom integrations:
-
-```js
-import { startRunner, runSingleTask } from "clawdup";
-import {
-  getTasksByStatus,
-  getTask,
-  updateTaskStatus,
-  addTaskComment,
-  formatTaskForClaude,
-  validateStatuses,
-} from "clawdup/clickup-api";
-import {
-  detectGitHubRepo,
-  createTaskBranch,
-  commitChanges,
-  pushBranch,
-  createPullRequest,
-  mergePullRequest,
-} from "clawdup/git-ops";
-import { runClaudeOnTask } from "clawdup/claude-worker";
-import { STATUS, log } from "clawdup/config";
-```
-
-### Example: Custom Task Processing
-
-```js
-import { getTask, updateTaskStatus, formatTaskForClaude } from "clawdup/clickup-api";
-import { createTaskBranch } from "clawdup/git-ops";
-import { runClaudeOnTask } from "clawdup/claude-worker";
-import { STATUS } from "clawdup/config";
-
-const task = await getTask("abc123");
-const prompt = formatTaskForClaude(task);
-const branch = await createTaskBranch(task.id, "my-feature");
-const result = await runClaudeOnTask(prompt, task.id);
-
-if (result.success) {
-  console.log("Task completed successfully!");
-} else if (result.needsInput) {
-  console.log("More info needed:", result.output);
-}
+# From anywhere inside the repo
+cd my-monorepo        # or any subdirectory
+clawdup
 ```
 
 ---
@@ -821,9 +748,11 @@ if (result.success) {
 ### "Missing required environment variable: CLICKUP_API_TOKEN"
 
 Your `.clawdup.env` file is missing or doesn't contain `CLICKUP_API_TOKEN`. Make sure:
-- The file exists in the directory where you run `clawdup`
+- The file exists at the **root of the repository** you're running `clawdup` in
 - The file is named `.clawdup.env` (or `.env.clickup`)
 - The token value is set correctly (no quotes needed)
+
+Run `clawdup --setup` (or `clawdup --init`) to create it.
 
 ### "ClickUp API error 401"
 
@@ -835,7 +764,7 @@ The list ID is incorrect. Double-check the ID by copying the list link from Clic
 
 ### "Status validation failed"
 
-Your ClickUp list is missing required statuses. Run `clawdup --statuses` to see which statuses are needed, then add them in ClickUp (List Settings > Statuses).
+Your ClickUp list is missing a required status — `to do`, `in progress`, or a done/closed status (optional statuses fall back automatically and never fail validation). Run `clawdup --statuses` to see what's needed, then add the missing status in ClickUp (List Settings > Statuses) or remap yours with `STATUS_*` variables in `.clawdup.env`.
 
 ### "claude command not found"
 

@@ -317,14 +317,14 @@
             <div class="step-number">1</div>
             <div class="step-content">
               <h3>Install</h3>
-              <p>Install globally with npm, or use <code>npx clawdup</code> for zero-install usage.</p>
+              <p>Install once, globally, with npm. Nothing is added to your project — no dev dependency, no scripts.</p>
             </div>
           </div>
           <div class="step">
             <div class="step-number">2</div>
             <div class="step-content">
               <h3>Configure</h3>
-              <p>Run the setup wizard or create a <code>.clawdup.env</code> file with your ClickUp API token and list ID.</p>
+              <p>In your repo, run the setup wizard: it writes an untracked <code>.clawdup.env</code> (your ClickUp API token and list ID) at the repo root and gitignores it.</p>
             </div>
           </div>
           <div class="step">
@@ -349,13 +349,13 @@
             <span class="code-dot green"></span>
             Terminal
           </div>
-          <pre><span class="comment"># Install globally</span>
+          <pre><span class="comment"># Install once, globally</span>
 <span class="prompt">$</span> npm install -g clawdup
 
-<span class="comment"># Or use npx (no install needed)</span>
-<span class="prompt">$</span> npx clawdup --init
+<span class="comment"># In the repo you want to automate:</span>
+<span class="prompt">$</span> cd /path/to/your-repo
 
-<span class="comment"># Run the interactive setup</span>
+<span class="comment"># Run the interactive setup (writes .clawdup.env at the repo root)</span>
 <span class="prompt">$</span> clawdup --setup
 
 <span class="comment"># Validate your configuration</span>
@@ -431,6 +431,7 @@
           </tbody>
         </table>
       </div>
+      <p style="margin-top:1rem;">Only <strong>to do</strong>, <strong>in progress</strong>, and a done/closed status are required — a default <strong>TO&nbsp;DO / IN&nbsp;PROGRESS / DONE</strong> list works out of the box. Missing optional statuses fall back automatically (run <code>clawdup --statuses</code> for details).</p>
     </div>
   </section>
 

@@ -46,29 +46,3 @@ export function globalInstallCommand(pm: PackageManager, pkg: string): string {
   return `npm install -g ${pkg}`;
 }
 
-/**
- * Return the command to install project dependencies.
- *   npm  → "npm install"
- *   pnpm → "pnpm install"
- */
-export function installCommand(pm: PackageManager): string {
-  return `${pm} install`;
-}
-
-/**
- * Return the command to run a package.json script.
- *   npm  → "npm run <script>"
- *   pnpm → "pnpm run <script>"
- */
-export function runScriptCommand(pm: PackageManager, script: string): string {
-  return `${pm} run ${script}`;
-}
-
-/**
- * Return the command to initialize a new package.json.
- *   npm  → "npm init"
- *   pnpm → "pnpm init"
- */
-export function initCommand(pm: PackageManager): string {
-  return `${pm} init`;
-}

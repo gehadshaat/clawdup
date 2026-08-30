@@ -292,8 +292,10 @@ Clawdup scans task content for known prompt injection patterns (e.g., "ignore pr
 - Warning at startup: `The following configured statuses are not in the ClickUp list: {statuses}`
 - Tasks may not be picked up or status transitions may fail
 
+Only `to do`, `in progress`, and a done/closed status are required — a minimal `TO DO / IN PROGRESS / DONE` list is fine. Optional statuses (`in review`, `approved`, `require input`, `blocked`) fall back automatically and never fail validation, so this warning means one of the **required** three is missing.
+
 **Recovery:**
-1. Run `clawdup --statuses` to see the required statuses
+1. Run `clawdup --statuses` to see the required statuses and fallback rules
 2. Add the missing statuses to your ClickUp list (List Settings > Statuses)
 3. Or configure custom status names in `.clawdup.env` (e.g., `STATUS_TODO=open`)
 4. Run `clawdup --check` to verify
@@ -400,7 +402,7 @@ clawdup --once {task-id} --interactive
 2. Use a Personal Access Token (PAT) with `repo` scope:
    - Go to GitHub **Settings > Developer settings > Personal access tokens > Tokens (classic)**
    - Generate a new token with `repo` scope
-   - Install using: `npm install -D git+https://<PAT>@github.com/gehadshaat/clawdup.git`
+   - Install using: `npm install -g git+https://<PAT>@github.com/gehadshaat/clawdup.git`
 3. Or configure git to use `gh` for authentication:
    ```bash
    gh auth login
