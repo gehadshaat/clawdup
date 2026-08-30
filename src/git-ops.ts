@@ -282,19 +282,29 @@ export async function commitChanges(message: string, cwd?: string): Promise<stri
 
 /**
  * Push the current branch to origin with retry logic.
+ * `forceWithLease` force-pushes a rewritten branch (e.g. after a stack
+ * rebase) while still refusing to overwrite commits that arrived on the
+ * remote since our last fetch.
  */
-export async function pushBranch(branchName: string, cwd?: string): Promise<void> {
+export async function pushBranch(
+  branchName: string,
+  cwd?: string,
+  opts?: { forceWithLease?: boolean },
+): Promise<void> {
   if (DRY_RUN) {
-    log("info", `[DRY RUN] Would push branch: ${branchName}`);
+    log("info", `[DRY RUN] Would push branch: ${branchName}${opts?.forceWithLease ? " (force-with-lease)" : ""}`);
     return;
   }
   const dir = cwd ?? GIT_ROOT;
   const delays = [2000, 4000, 8000, 16000];
+  const pushArgs = opts?.forceWithLease
+    ? ["push", "--force-with-lease", "-u", "origin", branchName]
+    : ["push", "-u", "origin", branchName];
 
   for (let attempt = 0; attempt <= delays.length; attempt++) {
     try {
       log("info", `Pushing ${branchName} (attempt ${attempt + 1})`);
-      await gitAt(dir, "push", "-u", "origin", branchName);
+      await gitAt(dir, ...pushArgs);
       log("info", `Push successful`);
       return;
     } catch (err) {
@@ -588,11 +598,11 @@ export async function closePullRequest(prUrl: string): Promise<void> {
 }
 
 /**
- * Update a pull request's title and/or body.
+ * Update a pull request's title, body, and/or base branch.
  */
 export async function updatePullRequest(
   prUrl: string,
-  { title, body }: { title?: string; body?: string },
+  { title, body, base }: { title?: string; body?: string; base?: string },
 ): Promise<void> {
   if (DRY_RUN) {
     log("info", `[DRY RUN] Would update PR: ${prUrl}`);
@@ -605,6 +615,9 @@ export async function updatePullRequest(
   }
   if (body) {
     args.push("--body", body);
+  }
+  if (base) {
+    args.push("--base", base);
   }
   await gh(...args);
 }
@@ -731,9 +744,10 @@ export async function branchHasCommitsAheadOfBase(cwd?: string): Promise<boolean
  */
 export async function branchHasBeenPushed(
   branchName: string,
+  cwd?: string,
 ): Promise<boolean> {
   try {
-    await git("rev-parse", "--verify", `origin/${branchName}`);
+    await gitAt(cwd ?? GIT_ROOT, "rev-parse", "--verify", `origin/${branchName}`);
     return true;
   } catch {
     return false;
@@ -860,6 +874,67 @@ export async function deleteLocalBranch(branchName: string): Promise<void> {
     log("info", `Deleted local branch: ${branchName}`);
   } catch {
     log("debug", `Could not delete branch ${branchName} (may not exist)`);
+  }
+}
+
+/**
+ * Delete a branch on the origin remote. Best-effort: returns false when the
+ * deletion fails (no permission, protected branch, already gone) so callers
+ * can verify before relying on the branch being gone.
+ */
+export async function deleteRemoteBranch(
+  branchName: string,
+  cwd?: string,
+): Promise<boolean> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would delete remote branch: ${branchName}`);
+    return true;
+  }
+  try {
+    await gitAt(cwd ?? GIT_ROOT, "push", "origin", "--delete", branchName);
+    log("info", `Deleted remote branch: ${branchName}`);
+    return true;
+  } catch (err) {
+    log("warn", `Could not delete remote branch ${branchName}: ${(err as Error).message}`);
+    return false;
+  }
+}
+
+/**
+ * Rebase `branchName` onto `ontoRef` (resolved locally first, then via
+ * origin/). Returns true when the rebase completes cleanly. On conflicts the
+ * rebase is aborted, the branch is left at its pre-rebase tip, and false is
+ * returned. Commits whose changes are already contained in `ontoRef` are
+ * dropped by git's patch-id detection, so restacking a branch whose base was
+ * itself rebased replays only the branch's own work.
+ * The branch is checked out as a side effect.
+ */
+export async function rebaseBranchOnto(
+  branchName: string,
+  ontoRef: string,
+  cwd?: string,
+): Promise<boolean> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would rebase ${branchName} onto ${ontoRef}`);
+    return true;
+  }
+  const dir = cwd ?? GIT_ROOT;
+  const ontoSha = await resolveRefToSha(ontoRef, dir);
+  if (!ontoSha) {
+    throw new Error(`Cannot rebase ${branchName}: ref ${ontoRef} does not resolve`);
+  }
+  log("info", `Rebasing ${branchName} onto ${ontoRef}`);
+  try {
+    await gitAt(dir, "rebase", ontoSha, branchName);
+    return true;
+  } catch {
+    try {
+      await gitAt(dir, "rebase", "--abort");
+    } catch {
+      // No rebase in progress (it failed before starting) — nothing to abort
+    }
+    log("warn", `Rebase of ${branchName} onto ${ontoRef} did not apply cleanly — aborted`);
+    return false;
   }
 }
 

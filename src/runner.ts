@@ -29,6 +29,7 @@ import {
   getLeafSubtasks,
   getLeafListTasks,
   getListInfo,
+  inStackBlockerIds,
   orderTasksByDependencies,
   resolveStatusFallbacks,
   statusFeatures,
@@ -51,6 +52,8 @@ import {
   findExistingPR,
   returnToBaseBranch,
   deleteLocalBranch,
+  deleteRemoteBranch,
+  rebaseBranchOnto,
   mergePullRequest,
   getPRState,
   getPRMergeability,
@@ -2178,7 +2181,13 @@ export async function runSingleTask(taskId: string, options?: { interactive?: bo
 
 interface StackLeafRecord {
   leaf: ClickUpTask;
-  disposition: "completed" | "adopted" | "skipped" | "failed" | "not_attempted";
+  disposition:
+    | "completed"
+    | "adopted"
+    | "skipped"
+    | "deferred"
+    | "failed"
+    | "not_attempted";
   detail?: string;
   branchName?: string;
   prUrl?: string;
@@ -2186,14 +2195,16 @@ interface StackLeafRecord {
 
 /**
  * Build the summary comment posted on the parent task after a stack run.
+ * Exported for tests.
  */
-function buildStackSummaryComment(
+export function buildStackSummaryComment(
   records: StackLeafRecord[],
   abortReason: string | null,
   stackLink: StackLinkResult | null,
 ): string {
   const lines: string[] = [];
   const completed = records.filter((r) => r.disposition === "completed").length;
+  const deferred = records.filter((r) => r.disposition === "deferred").length;
 
   lines.push(
     abortReason
@@ -2213,6 +2224,9 @@ function buildStackSummaryComment(
         break;
       case "skipped":
         lines.push(`${label} — ⏭️ skipped (${r.detail ?? "already done"})`);
+        break;
+      case "deferred":
+        lines.push(`${label} — ⚠️ deferred: ${r.detail ?? "needs manual attention"}`);
         break;
       case "failed":
         lines.push(`${label} — ❌ ${r.detail ?? "failed"}`);
@@ -2240,6 +2254,13 @@ function buildStackSummaryComment(
       `The PRs are stacked: each one targets the branch of the PR before it. ` +
         `Merge them bottom-up, in the order listed above, deleting each merged ` +
         `branch — GitHub only retargets the next PR when the merged branch is deleted.`,
+    );
+  }
+  if (deferred > 0) {
+    lines.push("");
+    lines.push(
+      `${deferred} task(s) were deferred so the rest of the stack could continue. ` +
+        `Resolve them and re-run \`--stack\` to pick them up.`,
     );
   }
   if (abortReason) {
@@ -2304,6 +2325,86 @@ async function collectStackLeaves(
 }
 
 /**
+ * Outcome of trying to bring a stale branch onto the stack:
+ * - "contained": the branch has no commits beyond the stack base — pure
+ *   residue (a failed earlier attempt, or work that already reached the
+ *   chain). The branch is left in place; the caller decides its fate.
+ * - "rebased": the branch's own commits now sit on top of the stack base.
+ *   If the branch existed on origin it was force-pushed (with lease) and any
+ *   open PR was retargeted at the stack base.
+ * - "failed": recovery wasn't possible (rebase conflicts, push rejected);
+ *   the branch was left as it was.
+ */
+type StaleBranchRecovery =
+  | { kind: "contained" }
+  | { kind: "rebased" }
+  | { kind: "failed"; reason: string };
+
+/**
+ * Try to bring a stack task's stale branch (one not based on the current
+ * stack head — typically left by a previous run with a different stack
+ * order, or by a --once run) onto the stack, instead of aborting the run.
+ * Always parks the checkout back on the base branch before returning.
+ */
+async function recoverStaleStackBranch(
+  branch: string,
+  stackBase: string,
+): Promise<StaleBranchRecovery> {
+  try {
+    // Sync the local branch to origin's tip first (origin wins when both
+    // exist) so the checks below judge the branch's real state.
+    await checkoutExistingBranch(branch);
+
+    if (await isAncestor(branch, stackBase)) {
+      await returnToBaseBranch();
+      return { kind: "contained" };
+    }
+
+    const wasPushed = await branchHasBeenPushed(branch);
+    if (!(await rebaseBranchOnto(branch, stackBase))) {
+      await returnToBaseBranch();
+      return { kind: "failed", reason: "rebasing it onto the stack hit conflicts" };
+    }
+
+    if (wasPushed) {
+      try {
+        await pushBranch(branch, undefined, { forceWithLease: true });
+      } catch (err) {
+        // Origin still has the old tip and the next checkout would reset the
+        // local branch back to it — undo the local rebase too and give up.
+        await checkoutExistingBranch(branch);
+        await returnToBaseBranch();
+        return {
+          kind: "failed",
+          reason: `the rebased branch could not be force-pushed: ${(err as Error).message}`,
+        };
+      }
+      // A leftover PR still diffs against its old base — retarget it so its
+      // diff shows only this branch's own delta.
+      const prUrl = await findExistingPR(branch);
+      if (prUrl) {
+        try {
+          await updatePullRequest(prUrl, { base: stackBase });
+        } catch (err) {
+          log("warn", `Could not retarget PR ${prUrl} at ${stackBase}: ${(err as Error).message}`);
+        }
+      }
+    }
+
+    await returnToBaseBranch();
+    return { kind: "rebased" };
+  } catch (err) {
+    try {
+      await ensureCleanState();
+      await returnToBaseBranch();
+    } catch {
+      // Best effort — the next task's own checkout will clean up.
+    }
+    return { kind: "failed", reason: (err as Error).message };
+  }
+}
+
+/**
  * Implement a series of tasks sequentially as stacked PRs.
  * With a parent task ID, its leaf subtasks are stacked (subtasks that have
  * their own subtasks are treated as grouping only). Without one, the whole
@@ -2313,7 +2414,11 @@ async function collectStackLeaves(
  * processed one at a time in the main checkout: the first branch is created
  * from BASE_BRANCH, each following branch from the previous one, and each PR
  * targets its branch's base.
- * Aborts the remaining series when a task fails; re-running resumes.
+ * A task that can't be stacked right now (a stale branch that resists
+ * automatic recovery, an unresolved status, a needs-input verdict) is
+ * deferred together with its in-stack dependents while the rest of the
+ * stack continues; only unexpected errors abort the remaining series.
+ * Re-running resumes and picks deferred tasks up.
  */
 export async function runTaskStack(
   parentTaskId?: string | null,
@@ -2394,7 +2499,7 @@ export async function runTaskStack(
           );
         }
       }
-      return { total: ordered.length, completed: 0, skipped: 0, aborted: false };
+      return { total: ordered.length, completed: 0, skipped: 0, deferred: 0, aborted: false };
     }
 
     // One up-front fetch/sync; each processTask re-syncs its own base
@@ -2406,7 +2511,45 @@ export async function runTaskStack(
     const records: StackLeafRecord[] = [];
     let completed = 0;
     let skipped = 0;
+    let deferred = 0;
     let abortReason: string | null = null;
+
+    // Tasks set aside this run whose work is therefore missing from the
+    // chain — their in-stack dependents must be deferred too, rather than
+    // stacked onto a hole.
+    const deferredIds = new Set<string>();
+    const nameById = new Map(ordered.map((t) => [t.id, t.name]));
+
+    // Defer a task: record it, tell ClickUp, and keep the run going with the
+    // tasks that don't depend on it. Re-running --stack picks it up again.
+    const deferTask = async (
+      leaf: ClickUpTask,
+      why: string,
+      opts?: { branchName?: string; prUrl?: string; comment?: boolean },
+    ): Promise<void> => {
+      deferred++;
+      deferredIds.add(leaf.id);
+      log("warn", `Deferring stack task "${leaf.name}" (${leaf.id}): ${why}`);
+      records.push({
+        leaf,
+        disposition: "deferred",
+        detail: why,
+        branchName: opts?.branchName,
+        prUrl: opts?.prUrl,
+      });
+      if (opts?.comment !== false) {
+        try {
+          await addTaskComment(
+            leaf.id,
+            `⏭️ The stack run deferred this task: ${why}.\n\n` +
+              `The run continued with the tasks that don't depend on this one. ` +
+              `Resolve it and re-run \`--stack\` to pick it up.`,
+          );
+        } catch (err) {
+          log("warn", `Could not comment on deferred task ${leaf.id}: ${(err as Error).message}`);
+        }
+      }
+    };
 
     // Whether an existing branch can serve as (or extend) the stack head.
     // The ancestry requirement only applies when the current base is itself a
@@ -2455,6 +2598,22 @@ export async function runTaskStack(
         continue;
       }
 
+      // A task whose in-stack prerequisite was deferred can't be built — the
+      // work it depends on is missing from the chain. Defer it too (which
+      // cascades to its own dependents) instead of stacking onto a hole.
+      const missingBlockers = inStackBlockerIds(fresh, stackIds).filter((id) =>
+        deferredIds.has(id),
+      );
+      if (missingBlockers.length > 0) {
+        const blockerList = missingBlockers
+          .map((id) => `"${nameById.get(id) ?? id}" (${id})`)
+          .join(", ");
+        await deferTask(leaf, `it depends on deferred task(s) ${blockerList}`, {
+          branchName: existing ?? undefined,
+        });
+        continue;
+      }
+
       // On minimal status lists IN_REVIEW falls back onto IN_PROGRESS, making
       // the two indistinguishable by status alone — there, a task counts as
       // in-review only when its branch already carries a PR; otherwise it is
@@ -2473,7 +2632,38 @@ export async function runTaskStack(
       if (inReviewLike) {
         // Typically a PR from a previous stack run awaiting review — adopt
         // its branch as the stack head and continue with the next subtask.
-        if (existing && (await isOnStack(existing))) {
+        if (existing && !(await isOnStack(existing))) {
+          // Not based on the stack — usually a leftover from a run with a
+          // different stack order (e.g. a task was inserted before this
+          // one). Restack it rather than aborting the run.
+          log(
+            "warn",
+            `Stack task "${fresh.name}" (${leaf.id}) is "${status}" on ${existing}, which is not based on ${currentBase} — attempting to restack it.`,
+          );
+          const recovery = await recoverStaleStackBranch(existing, currentBase);
+          if (recovery.kind === "contained") {
+            // Its work is already part of the chain — nothing new to stack
+            // on. Leave its branch/PR alone and keep the current base.
+            skipped++;
+            records.push({
+              leaf,
+              disposition: "skipped",
+              detail: `its branch ${existing} adds nothing beyond the stack base — the work is already in the chain`,
+              branchName: existing,
+            });
+            continue;
+          }
+          if (recovery.kind === "failed") {
+            await deferTask(
+              leaf,
+              `it is "${status}" on ${existing}, which is not based on the stack and could not be restacked (${recovery.reason}) — merge or finish it manually`,
+              { branchName: existing },
+            );
+            continue;
+          }
+          log("info", `Restacked ${existing} onto ${currentBase}.`);
+        }
+        if (existing) {
           currentBase = existing;
           const prUrl =
             adoptedPrUrl ?? ((await findExistingPR(existing)) ?? undefined);
@@ -2489,13 +2679,10 @@ export async function runTaskStack(
           });
           continue;
         }
-        abortReason =
-          `Stack task "${fresh.name}" (${leaf.id}) is "${status}" but its branch is ` +
-          (existing
-            ? `not based on the stack (${existing} does not contain ${currentBase}).`
-            : `missing.`) +
-          ` Merge or complete it first, then re-run --stack.`;
-        records.push({ leaf, disposition: "failed", detail: abortReason });
+        await deferTask(
+          leaf,
+          `it is "${status}" but no branch exists for it — merge or complete it manually`,
+        );
         continue;
       }
 
@@ -2503,22 +2690,62 @@ export async function runTaskStack(
         status !== STATUS.TODO.toLowerCase() &&
         status !== STATUS.IN_PROGRESS.toLowerCase()
       ) {
-        // blocked / require input / unknown — unsafe to build on ambiguity
-        abortReason =
-          `Stack task "${fresh.name}" (${leaf.id}) has unresolved status "${status}". ` +
-          `Resolve it in ClickUp (move it to "${STATUS.TODO}") and re-run --stack.`;
-        records.push({ leaf, disposition: "failed", detail: abortReason });
+        // blocked / require input / unknown — can't build this task now, but
+        // that's no reason to drop the tasks that don't depend on it.
+        await deferTask(
+          leaf,
+          `it has unresolved status "${status}" — resolve it in ClickUp (move it to "${STATUS.TODO}")`,
+          { branchName: existing ?? undefined },
+        );
         continue;
       }
 
       // TODO / IN_PROGRESS: a leftover branch must be based on the stack,
       // since createTaskBranch will reuse it instead of branching fresh.
+      // Bring a stale one (from a run with a different stack order, or a
+      // --once run) onto the stack instead of aborting the run.
       if (existing && !(await isOnStack(existing))) {
-        abortReason =
-          `Stack task "${fresh.name}" (${leaf.id}) has a stale branch ${existing} that is not ` +
-          `based on ${currentBase}. Delete the branch or finish that task via --once, then re-run --stack.`;
-        records.push({ leaf, disposition: "failed", detail: abortReason });
-        continue;
+        log(
+          "warn",
+          `Stack task "${fresh.name}" (${leaf.id}) has a stale branch ${existing} that is not based on ${currentBase} — attempting automatic recovery.`,
+        );
+        const recovery = await recoverStaleStackBranch(existing, currentBase);
+        if (recovery.kind === "failed") {
+          await deferTask(
+            leaf,
+            `its stale branch ${existing} is not based on the stack and could not be recovered (${recovery.reason}) — delete the branch or finish the task via --once`,
+            { branchName: existing },
+          );
+          continue;
+        }
+        if (recovery.kind === "contained") {
+          // Residue with no commits of its own (a failed earlier attempt, or
+          // work that already reached the chain). Deleting it loses nothing
+          // and lets the task branch fresh from the stack base.
+          const stalePrUrl = await findExistingPR(existing);
+          if (stalePrUrl) {
+            try {
+              await closePullRequest(stalePrUrl);
+            } catch {
+              log("warn", `Could not close empty PR ${stalePrUrl} for stale branch ${existing}`);
+            }
+          }
+          await deleteLocalBranch(existing);
+          if (await branchHasBeenPushed(existing)) {
+            await deleteRemoteBranch(existing);
+          }
+          if (await findBranchForTask(leaf.id)) {
+            await deferTask(
+              leaf,
+              `its stale branch ${existing} has no commits of its own but could not be deleted — delete it manually, then re-run --stack`,
+              { branchName: existing },
+            );
+            continue;
+          }
+          log("info", `Recovered: deleted residue branch ${existing}; the task will branch fresh from ${currentBase}.`);
+        } else {
+          log("info", `Recovered: rebased ${existing} onto ${currentBase}.`);
+        }
       }
 
       const info: StackInfo = {
@@ -2562,6 +2789,19 @@ export async function runTaskStack(
           detail: "PR already merged",
           prUrl: outcome.prUrl,
         });
+      } else if (
+        outcome.status === "needs_input" ||
+        outcome.status === "no_changes"
+      ) {
+        // Task-specific verdicts (the creator was already notified inside
+        // processTask) — the rest of the stack shouldn't die for them.
+        await deferTask(
+          leaf,
+          outcome.status === "needs_input"
+            ? "automation needs more input — see the task's comments"
+            : "automation produced no changes — see the task's comments",
+          { branchName: outcome.branchName, prUrl: outcome.prUrl, comment: false },
+        );
       } else {
         abortReason =
           `Stack task "${fresh.name}" (${leaf.id}) ended with "${outcome.status}". ` +
@@ -2581,7 +2821,7 @@ export async function runTaskStack(
     }
     log(
       "info",
-      `\nStack run finished: ${completed} completed, ${skipped} skipped, ${ordered.length} total.`,
+      `\nStack run finished: ${completed} completed, ${skipped} skipped, ${deferred} deferred, ${ordered.length} total.`,
     );
 
     // Link the series' open PRs into a native GitHub stack (public preview),
@@ -2628,6 +2868,7 @@ export async function runTaskStack(
       total: ordered.length,
       completed,
       skipped,
+      deferred,
       aborted: abortReason !== null,
     };
   } finally {

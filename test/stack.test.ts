@@ -7,12 +7,14 @@ import {
   compareSubtaskOrder,
   getLeafSubtasks,
   getLeafListTasks,
+  inStackBlockerIds,
   orderTasksByDependencies,
 } from "../src/clickup-api.js";
 import {
   generateStackPRNote,
   generateStackPromptContext,
 } from "../src/claude-worker.js";
+import { buildStackSummaryComment } from "../src/runner.js";
 import type { ClickUpDependency, ClickUpTask, StackInfo } from "../src/types.js";
 
 function makeTask(id: string, overrides: Partial<ClickUpTask> = {}): ClickUpTask {
@@ -374,5 +376,133 @@ describe("stack text builders", () => {
     const context = generateStackPromptContext(listInfo);
     assert.ok(context.includes('tasks of the "Backlog" list'));
     assert.ok(!context.includes("subtasks of"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// inStackBlockerIds
+// ---------------------------------------------------------------------------
+describe("inStackBlockerIds", () => {
+  const ids = new Set(["a", "b", "c"]);
+
+  it("returns the in-set tasks this task waits on", () => {
+    const task = makeTask("c", { dependencies: [dep("c", "a"), dep("c", "b")] });
+    assert.deepEqual(inStackBlockerIds(task, ids), ["a", "b"]);
+  });
+
+  it("ignores rows where the task is on the blocker side", () => {
+    // ClickUp includes the same row on both tasks; {task_id: b, depends_on: a}
+    // must not read as a blocker of a.
+    const task = makeTask("a", { dependencies: [dep("b", "a")] });
+    assert.deepEqual(inStackBlockerIds(task, ids), []);
+  });
+
+  it("ignores blockers outside the set and self-references", () => {
+    const task = makeTask("b", {
+      dependencies: [dep("b", "external"), dep("b", "b"), dep("b", "a")],
+    });
+    assert.deepEqual(inStackBlockerIds(task, ids), ["a"]);
+  });
+
+  it("drops duplicate blocker rows", () => {
+    const task = makeTask("b", { dependencies: [dep("b", "a"), dep("b", "a")] });
+    assert.deepEqual(inStackBlockerIds(task, ids), ["a"]);
+  });
+
+  it("returns an empty array when the task has no dependencies", () => {
+    assert.deepEqual(inStackBlockerIds(makeTask("a"), ids), []);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildStackSummaryComment
+// ---------------------------------------------------------------------------
+describe("buildStackSummaryComment", () => {
+  it("summarizes a fully successful run", () => {
+    const comment = buildStackSummaryComment(
+      [
+        { leaf: makeTask("a"), disposition: "completed", prUrl: "https://pr/1" },
+        { leaf: makeTask("b"), disposition: "completed", prUrl: "https://pr/2" },
+      ],
+      null,
+      null,
+    );
+    assert.ok(comment.startsWith("✅ Automation stack run finished: 2 new PR(s) created."));
+    assert.ok(comment.includes("1. Task a (CU-a) — ✅ PR: https://pr/1"));
+    assert.ok(comment.includes("Merge them bottom-up"));
+    assert.ok(!comment.includes("deferred"));
+    assert.ok(!comment.includes("Resolve the failure"));
+  });
+
+  it("keeps the deferred footer alongside the native-stack note", () => {
+    const comment = buildStackSummaryComment(
+      [
+        { leaf: makeTask("a"), disposition: "completed", prUrl: "https://pr/1" },
+        { leaf: makeTask("b"), disposition: "deferred", detail: "needs input" },
+      ],
+      null,
+      { outcome: "created", stackNumber: 7, prNumbers: [1] },
+    );
+    assert.ok(comment.includes("native GitHub stack (#7)"));
+    assert.ok(comment.includes("1 task(s) were deferred so the rest of the stack could continue."));
+  });
+
+  it("lists deferred tasks and tells the user how to pick them up", () => {
+    const comment = buildStackSummaryComment(
+      [
+        { leaf: makeTask("a"), disposition: "completed", prUrl: "https://pr/1" },
+        {
+          leaf: makeTask("b"),
+          disposition: "deferred",
+          detail: "its stale branch x could not be recovered (conflicts)",
+        },
+        {
+          leaf: makeTask("c"),
+          disposition: "deferred",
+          detail: 'it depends on deferred task(s) "Task b" (b)',
+        },
+        { leaf: makeTask("d"), disposition: "completed", prUrl: "https://pr/4" },
+      ],
+      null,
+      null,
+    );
+    assert.ok(comment.startsWith("✅ Automation stack run finished: 2 new PR(s) created."));
+    assert.ok(comment.includes("2. Task b (CU-b) — ⚠️ deferred: its stale branch x could not be recovered (conflicts)"));
+    assert.ok(comment.includes('3. Task c (CU-c) — ⚠️ deferred: it depends on deferred task(s) "Task b" (b)'));
+    assert.ok(comment.includes("2 task(s) were deferred so the rest of the stack could continue."));
+    assert.ok(comment.includes("re-run `--stack` to pick them up"));
+    assert.ok(!comment.includes("Resolve the failure"));
+  });
+
+  it("marks an aborted run and its not-attempted tail", () => {
+    const comment = buildStackSummaryComment(
+      [
+        { leaf: makeTask("a"), disposition: "adopted", prUrl: "https://pr/1" },
+        { leaf: makeTask("b"), disposition: "failed", detail: "ended with \"error\"" },
+        { leaf: makeTask("c"), disposition: "not_attempted" },
+      ],
+      "boom",
+      null,
+    );
+    assert.ok(comment.startsWith("⚠️ Automation stack run aborted after 0 new PR(s)."));
+    assert.ok(comment.includes("1. Task a (CU-a) — 🔁 already in review: https://pr/1"));
+    assert.ok(comment.includes("2. Task b (CU-b) — ❌ ended with \"error\""));
+    assert.ok(comment.includes("3. Task c (CU-c) — ⏸️ not attempted (stack aborted earlier)"));
+    assert.ok(comment.includes("Resolve the failure and re-run `--stack` to resume"));
+  });
+
+  it("renders skipped tasks with their reason", () => {
+    const comment = buildStackSummaryComment(
+      [
+        {
+          leaf: makeTask("a"),
+          disposition: "skipped",
+          detail: "already completed",
+        },
+      ],
+      null,
+      null,
+    );
+    assert.ok(comment.includes("1. Task a (CU-a) — ⏭️ skipped (already completed)"));
   });
 });

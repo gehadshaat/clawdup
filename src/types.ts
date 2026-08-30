@@ -124,6 +124,12 @@ export interface StackRunSummary {
   total: number;
   completed: number;
   skipped: number;
+  /**
+   * Tasks the run set aside (stale branch it couldn't recover, unresolved
+   * status, needs-input, ...) together with their in-stack dependents, so the
+   * rest of the stack could continue. Re-running --stack picks them up.
+   */
+  deferred: number;
   aborted: boolean;
 }
 

@@ -318,22 +318,22 @@ When a task is moved to "approved", Clawdup tries to merge its PR. If the PR was
 
 ---
 
-### Stack Run Aborted Mid-Way (`--stack`)
+### Stack Tasks Deferred or Run Aborted (`--stack`)
 
 **Symptoms:**
-- Parent task comment: `⚠️ Automation stack run aborted after N new PR(s).`
-- Some subtasks listed as `⏸️ not attempted (stack aborted earlier)`
-- `clawdup --stack` exited with a non-zero code
+- Parent task comment: `⚠️ deferred: ...` next to some subtasks, and `N task(s) were deferred so the rest of the stack could continue.`
+- Or: `⚠️ Automation stack run aborted after N new PR(s).` with subtasks listed as `⏸️ not attempted (stack aborted earlier)`, and a non-zero exit code
 
 **What happens:**
-Stack mode builds each subtask's branch on the previous one, so when a subtask fails (error, needs input, no changes, or an unresolved status like "blocked"), the remaining subtasks are deliberately not attempted — they would build on missing work.
+Stack mode builds each subtask's branch on the previous one. A subtask that can't be stacked right now — an unresolved status like "blocked", a needs-input / no-changes verdict, or a stale branch (one not based on the stack, typically left by a run with a different stack order or by a `--once` run) that automatic recovery couldn't fix — is **deferred**: set aside together with the subtasks that depend on it, while the rest of the stack continues. Stale branches are recovered automatically first: a branch with no commits of its own is deleted and recreated from the stack, one with real work is rebased onto the stack head and force-pushed (with lease); only when that fails (e.g. rebase conflicts) is the task deferred. The whole run **aborts** only on an unexpected error (or an unreachable ClickUp task) — everything after the failure is then not attempted.
 
 **Recovery:**
-1. Fix the failing subtask: address the error or add the requested details, then move it back to **"to do"** (the parent comment names the exact blocker)
-2. Re-run `clawdup --stack <parent-task-id>` (or plain `clawdup --stack` for a full-list stack) — completed tasks are skipped, tasks already **"in review"** are re-adopted as stacking bases, and processing resumes at the first unfinished one
-3. If the abort message says a branch is *"not based on"* the stack (a stale branch from a non-stack run), delete that branch or finish that task via `--once` first
+1. Fix each deferred/failed subtask: address the error or add the requested details, then move it back to **"to do"** (the parent comment names the exact blocker per subtask)
+2. For a deferred stale branch that couldn't be recovered (rebase conflicts), delete the branch (or finish that task via `--once`, or rebase it onto the stack head yourself)
+3. Re-run `clawdup --stack <parent-task-id>` (or plain `clawdup --stack` for a full-list stack) — completed tasks are skipped, tasks already **"in review"** are re-adopted as stacking bases (restacked automatically when their branch is stale), and deferred tasks are picked up again
 
 **Notes:**
+- Only dependencies **declared in ClickUp** cascade a deferral. If your subtasks implicitly build on each other without dependency links, the run will keep stacking the later ones on the unchanged base — declare the dependencies so a deferred prerequisite also defers its dependents
 - Merge stacked PRs **bottom-up** (PR 1 first). When the run linked the PRs as a native GitHub stack (see the run summary), merging a lower PR automatically rebases and retargets the ones above it. Otherwise, delete each merged branch — GitHub only retargets the next PR when the merged branch is deleted — and the next PR's diff may temporarily include the earlier changes; the approved-task flow's conflict resolution handles this when the task is moved to "approved"
 - Starting the continuous polling runner between stack runs prunes local branches; that's fine — stack resume recreates them from `origin/`
 - `AUTO_APPROVE` is intentionally ignored in stack mode

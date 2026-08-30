@@ -417,6 +417,24 @@ export async function getLeafListTasks(
 }
 
 /**
+ * IDs of the tasks (within `ids`) that block `task` — i.e. the tasks it
+ * depends on. A dependency row where this task is on the `task_id` side
+ * means this task is blocked by `depends_on` (same reading as
+ * getTaskDependencies). Rows pointing outside `ids` and self-references are
+ * ignored; duplicates are dropped.
+ */
+export function inStackBlockerIds(
+  task: ClickUpTask,
+  ids: Set<string>,
+): string[] {
+  const blockers = (task.dependencies ?? [])
+    .filter((d) => d.task_id === task.id)
+    .map((d) => d.depends_on)
+    .filter((id) => ids.has(id) && id !== task.id);
+  return [...new Set(blockers)];
+}
+
+/**
  * Order tasks so that every task comes after the tasks it depends on.
  * Only dependencies between tasks in the given set are considered — external
  * dependencies are the caller's concern. Deterministic: among unblocked
@@ -428,13 +446,7 @@ export function orderTasksByDependencies(tasks: ClickUpTask[]): ClickUpTask[] {
   const blockersOf = new Map<string, string[]>();
 
   for (const t of tasks) {
-    // A dependency row where this task is on the `task_id` side means this
-    // task is blocked by `depends_on` (same reading as getTaskDependencies).
-    const blockers = (t.dependencies ?? [])
-      .filter((d) => d.task_id === t.id)
-      .map((d) => d.depends_on)
-      .filter((id) => ids.has(id) && id !== t.id);
-    blockersOf.set(t.id, blockers);
+    blockersOf.set(t.id, inStackBlockerIds(t, ids));
   }
 
   const ordered: ClickUpTask[] = [];
