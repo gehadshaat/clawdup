@@ -126,3 +126,29 @@ export interface StackRunSummary {
   skipped: number;
   aborted: boolean;
 }
+
+/**
+ * Planned native-stack operation for a bottom-up series of chained PRs,
+ * given each PR's current stack membership.
+ */
+export type StackLinkPlan =
+  | { action: "create"; prNumbers: number[] }
+  | { action: "extend"; stackNumber: number; prNumbers: number[] }
+  | { action: "already-linked"; stackNumber: number; prNumbers: number[] }
+  | { action: "skip"; reason: string };
+
+/**
+ * Outcome of linking a stack run's open PRs into a native GitHub stack.
+ * "unavailable" means the Stacks API is not enabled for the repository
+ * (the feature is in public preview) — the chained PRs still work, they
+ * just need manual bottom-up merging.
+ */
+export type StackLinkResult =
+  | {
+      outcome: "created" | "extended" | "already-linked";
+      stackNumber: number;
+      prNumbers: number[];
+    }
+  | { outcome: "skipped"; reason: string }
+  | { outcome: "unavailable"; reason: string }
+  | { outcome: "failed"; reason: string };

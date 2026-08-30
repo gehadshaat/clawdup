@@ -2,9 +2,9 @@
 
 import { execFile } from "child_process";
 import { promisify } from "util";
-import { BASE_BRANCH, BRANCH_PREFIX, GIT_ROOT, DRY_RUN } from "./config.js";
+import { BASE_BRANCH, BRANCH_PREFIX, GIT_ROOT, DRY_RUN, GITHUB_REPO } from "./config.js";
 import { log } from "./logger.js";
-import type { PullRequestOptions } from "./types.js";
+import type { PullRequestOptions, StackLinkPlan, StackLinkResult } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -346,6 +346,209 @@ export async function createPullRequest({
   const prUrl = await gh(...args);
   log("info", `PR created: ${prUrl}`);
   return prUrl;
+}
+
+// --- Native GitHub stacked PRs (public preview) ---
+// A "native stack" is explicit GitHub metadata linking a bottom-up series of
+// PRs: merging a lower layer automatically rebases and retargets the layers
+// above it, and reviewers get the stack map UI. Managed here through the
+// Stacks REST API via `gh api` — no gh extension required. Plain chained PRs
+// (each targeting the previous branch) are NOT recognized as a stack, and
+// only retarget on merge when the merged head branch is deleted.
+
+/**
+ * Extract the pull request number from a GitHub PR URL.
+ */
+export function parsePRNumber(prUrl: string): number | null {
+  const match = prUrl.match(/\/pull\/(\d+)(?:[/?#]|$)/);
+  return match ? parseInt(match[1]!, 10) : null;
+}
+
+/**
+ * Select the PR URLs of a stacked series that can be linked natively: the
+ * trailing run of entries that carry an open PR. An entry without a PR
+ * breaks the chain, and everything below the break is unlinkable because
+ * each stack layer must target the head of the layer beneath it.
+ */
+export function selectLinkablePrUrls(entries: Array<{ prUrl?: string }>): string[] {
+  const urls: string[] = [];
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const prUrl = entries[i]?.prUrl;
+    if (!prUrl) break;
+    urls.unshift(prUrl);
+  }
+  return urls;
+}
+
+/**
+ * Decide how to link a bottom-up series of PRs given each PR's current
+ * stack membership: create a new stack, extend the stack the series
+ * already bottoms out in (a resumed run), or nothing.
+ */
+export function planStackLink(
+  entries: Array<{ prNumber: number; stackNumber: number | null }>,
+): StackLinkPlan {
+  if (entries.length === 0) {
+    return { action: "skip", reason: "no open PRs in the series" };
+  }
+
+  const stacked = entries.filter((e) => e.stackNumber !== null);
+  if (stacked.length === 0) {
+    if (entries.length < 2) {
+      return { action: "skip", reason: "a stack needs at least two open PRs" };
+    }
+    return { action: "create", prNumbers: entries.map((e) => e.prNumber) };
+  }
+
+  const stackNumber = stacked[0]!.stackNumber!;
+  if (stacked.some((e) => e.stackNumber !== stackNumber)) {
+    return { action: "skip", reason: "the series spans multiple existing stacks" };
+  }
+
+  // New layers can only be appended on top, so already-stacked PRs must
+  // form the bottom of the series.
+  const firstNew = entries.findIndex((e) => e.stackNumber === null);
+  if (firstNew === -1) {
+    return {
+      action: "already-linked",
+      stackNumber,
+      prNumbers: entries.map((e) => e.prNumber),
+    };
+  }
+  if (entries.slice(firstNew).some((e) => e.stackNumber !== null)) {
+    return {
+      action: "skip",
+      reason: `PRs already in stack #${stackNumber} are not at the bottom of the series`,
+    };
+  }
+  return {
+    action: "extend",
+    stackNumber,
+    prNumbers: entries.slice(firstNew).map((e) => e.prNumber),
+  };
+}
+
+/** Resolve the owner/repo slug for Stacks API calls. */
+async function resolveRepoSlug(): Promise<string> {
+  return GITHUB_REPO || (await detectGitHubRepo());
+}
+
+/**
+ * Look up which native stack (if any) a PR belongs to.
+ */
+async function getStackNumberForPR(
+  repo: string,
+  prNumber: number,
+): Promise<number | null> {
+  const out = await gh(
+    "api",
+    `repos/${repo}/stacks?pull_request=${prNumber}&per_page=1`,
+  );
+  const stacks: unknown = JSON.parse(out || "[]");
+  if (!Array.isArray(stacks) || stacks.length === 0) return null;
+  const num = (stacks[0] as { number?: unknown }).number;
+  return typeof num === "number" ? num : null;
+}
+
+/**
+ * Create a native stack from a bottom-up list of PR numbers.
+ * Returns the new stack's number.
+ */
+async function createStackFromPRs(
+  repo: string,
+  prNumbers: number[],
+): Promise<number> {
+  const args = ["api", "--method", "POST", `repos/${repo}/stacks`];
+  for (const n of prNumbers) args.push("-F", `pull_requests[]=${n}`);
+  const out = await gh(...args);
+  const num = (JSON.parse(out) as { number?: unknown }).number;
+  if (typeof num !== "number") {
+    throw new Error("stack created but the response carried no stack number");
+  }
+  return num;
+}
+
+/**
+ * Append PRs onto the top of an existing native stack.
+ */
+async function addPRsToStack(
+  repo: string,
+  stackNumber: number,
+  prNumbers: number[],
+): Promise<void> {
+  const args = ["api", "--method", "POST", `repos/${repo}/stacks/${stackNumber}/add`];
+  for (const n of prNumbers) args.push("-F", `pull_requests[]=${n}`);
+  await gh(...args);
+}
+
+/**
+ * Link a bottom-up series of open PRs into a native GitHub stack, creating
+ * a new stack or extending the one a resumed series already sits in.
+ * Never throws: failures (including the Stacks API being unavailable on
+ * this repository — the feature is in public preview) come back as a
+ * result the caller can report, and the chained PRs keep working as-is.
+ */
+export async function linkStackPRs(prUrls: string[]): Promise<StackLinkResult> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would link ${prUrls.length} PR(s) into a native stack`);
+    return { outcome: "skipped", reason: "dry run" };
+  }
+
+  const prNumbers: number[] = [];
+  for (const url of prUrls) {
+    const n = parsePRNumber(url);
+    if (n === null) {
+      return { outcome: "skipped", reason: `could not parse a PR number from ${url}` };
+    }
+    prNumbers.push(n);
+  }
+  if (prNumbers.length < 2) {
+    return { outcome: "skipped", reason: "a native stack needs at least two open PRs" };
+  }
+
+  try {
+    const repo = await resolveRepoSlug();
+
+    const entries: Array<{ prNumber: number; stackNumber: number | null }> = [];
+    for (const prNumber of prNumbers) {
+      entries.push({ prNumber, stackNumber: await getStackNumberForPR(repo, prNumber) });
+    }
+
+    const plan = planStackLink(entries);
+    switch (plan.action) {
+      case "create": {
+        const stackNumber = await createStackFromPRs(repo, plan.prNumbers);
+        return { outcome: "created", stackNumber, prNumbers: plan.prNumbers };
+      }
+      case "extend": {
+        await addPRsToStack(repo, plan.stackNumber, plan.prNumbers);
+        return {
+          outcome: "extended",
+          stackNumber: plan.stackNumber,
+          prNumbers: plan.prNumbers,
+        };
+      }
+      case "already-linked":
+        return {
+          outcome: "already-linked",
+          stackNumber: plan.stackNumber,
+          prNumbers: plan.prNumbers,
+        };
+      case "skip":
+        return { outcome: "skipped", reason: plan.reason };
+    }
+  } catch (err) {
+    const message = (err as Error).message;
+    if (/HTTP 404/.test(message)) {
+      return {
+        outcome: "unavailable",
+        reason:
+          "the Stacks API returned 404 — stacked pull requests (public preview) " +
+          "may not be enabled for this repository yet",
+      };
+    }
+    return { outcome: "failed", reason: message };
+  }
 }
 
 /**

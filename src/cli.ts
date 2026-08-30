@@ -316,6 +316,10 @@ CLICKUP_LIST_ID=
 # Auto-approve mode: merge PRs immediately after Claude completes (skip manual review)
 # AUTO_APPROVE=true
 
+# Link --stack runs' PRs into a native GitHub stack (public preview) so merging
+# a lower PR automatically retargets the ones above. Best-effort; set to false to disable.
+# NATIVE_STACKS=true
+
 # Log level: debug | info | warn | error
 # LOG_LEVEL=info
 
