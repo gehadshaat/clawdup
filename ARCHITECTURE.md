@@ -400,6 +400,9 @@ The system prompt sent to Claude is built in layers:
 │    - Sanitized (</task> escaped)         │
 │    - Title, description, checklists,     │
 │      subtasks, comments                  │
+│    - Parent task context for subtasks    │
+│      (parent name, description, and      │
+│      sibling subtasks with statuses)     │
 └─────────────────────────────────────────┘
 ```
 

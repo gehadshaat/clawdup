@@ -185,6 +185,34 @@ export async function getTaskWithSubtasks(taskId: string): Promise<ClickUpTask> 
 }
 
 /**
+ * Fetch a task's parent task for prompt context.
+ * When the task being worked on is a subtask, its own description often
+ * assumes the parent's context ("add validation" under "Build signup form"),
+ * so the parent is fetched with its subtasks to show the current task among
+ * its siblings. Returns null when the task has no parent or the parent
+ * cannot be fetched (non-critical — logged as a warning).
+ */
+export async function getParentTaskForContext(
+  task: ClickUpTask,
+): Promise<ClickUpTask | null> {
+  const parentId = task.parent;
+  if (!parentId) return null;
+  if (!isValidTaskId(parentId)) {
+    log("warn", `Task ${task.id} has a parent with invalid ID format: ${parentId}. Skipping parent context.`);
+    return null;
+  }
+  try {
+    return await getTaskWithSubtasks(parentId);
+  } catch (err) {
+    log(
+      "warn",
+      `Could not fetch parent task ${parentId} for context on task ${task.id}: ${(err as Error).message}`,
+    );
+    return null;
+  }
+}
+
+/**
  * Get dependencies for a task.
  * Returns both `dependencies` (tasks blocked by this one) and `waitingOn` (tasks this one waits on).
  *
@@ -782,6 +810,8 @@ export function detectInjectionPatterns(text: string): string[] {
 // Maximum lengths for task content sent to Claude
 const MAX_CHECKLIST_ITEM_LENGTH = 500;
 const MAX_TASK_CONTEXT_BYTES = 50_000; // 50KB total budget for tier 3 (current task)
+// Maximum length of the parent task description included in a subtask's prompt
+const MAX_PARENT_DESCRIPTION_LENGTH = 5000;
 
 /**
  * Truncate a string to a maximum length, appending "... (truncated)" if needed.
@@ -792,18 +822,66 @@ function truncate(text: string, maxLength: number): string {
 }
 
 /**
+ * Format a subtask's parent task as prompt context.
+ * Gives Claude the overall goal a subtask belongs to: the parent's name,
+ * description, and where the current task sits among its sibling subtasks.
+ * Pure — callers fetch the parent via getParentTaskForContext.
+ */
+export function formatParentTaskContext(
+  parent: ClickUpTask,
+  currentTaskId: string,
+): string {
+  const parts: string[] = [];
+
+  parts.push("## Parent Task Context");
+  parts.push(
+    `This task is a subtask of "${truncate(parent.name, 200)}" (CU-${parent.id}). ` +
+      `Use the parent task below as context for the overall goal, but implement ONLY the current task described above.`,
+  );
+  parts.push(`Parent URL: ${parent.url}`);
+  if (parent.status?.status) {
+    parts.push(`Parent status: ${parent.status.status}`);
+  }
+
+  const description = (parent.text_content || parent.description || "").trim();
+  if (description) {
+    parts.push("");
+    parts.push("### Parent Description");
+    parts.push(truncate(description, MAX_PARENT_DESCRIPTION_LENGTH));
+  }
+
+  const siblings = [...(parent.subtasks ?? [])].sort(compareSubtaskOrder);
+  if (siblings.length > 0) {
+    parts.push("");
+    parts.push("### All Subtasks of the Parent");
+    for (const sub of siblings) {
+      const status = sub.status?.status ?? "unknown";
+      const marker = sub.id === currentTaskId ? " ← current task" : "";
+      parts.push(`- ${truncate(sub.name, MAX_CHECKLIST_ITEM_LENGTH)} [${status}]${marker}`);
+    }
+  }
+
+  return parts.join("\n");
+}
+
+/**
  * Extract a clean task description from ClickUp task data.
- * Combines title, description, and any checklist items.
+ * Combines title, description, and any checklist items; when the task is a
+ * subtask, `parentTask` adds the parent's context (see formatParentTaskContext).
  * Applies length limits and content boundaries to prevent prompt injection.
  */
 export function formatTaskForClaude(
   task: ClickUpTask,
   comments?: ClickUpComment[],
+  parentTask?: ClickUpTask | null,
 ): string {
   // Check for injection patterns in all untrusted content
   const allContent = [
     task.name,
     task.text_content || task.description || "",
+    ...(parentTask
+      ? [parentTask.name, parentTask.text_content || parentTask.description || ""]
+      : []),
     ...(comments || []).map((c) => getCommentText(c)),
   ].join("\n");
 
@@ -861,6 +939,13 @@ export function formatTaskForClaude(
       const done = sub.status?.status === STATUS.COMPLETED ? "[x]" : "[ ]";
       parts.push(`- ${done} ${truncate(sub.name, MAX_CHECKLIST_ITEM_LENGTH)}`);
     }
+    parts.push("");
+  }
+
+  // Include the parent task's context when working on a subtask. Placed
+  // before comments so the comment budget below accounts for it.
+  if (parentTask) {
+    parts.push(formatParentTaskContext(parentTask, task.id));
     parts.push("");
   }
 

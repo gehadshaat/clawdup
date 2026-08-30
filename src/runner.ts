@@ -25,6 +25,7 @@ import {
   getUnresolvedDependencies,
   getAllTasksSummary,
   getRelatedTasksContext,
+  getParentTaskForContext,
   getLeafSubtasks,
   getLeafListTasks,
   getListInfo,
@@ -426,9 +427,10 @@ async function dryRunProcessTask(task: ClickUpTask): Promise<void> {
 
   actions.push(`ClickUp: Add comment to task with PR link`);
 
-  // Fetch comments to show prompt stats
+  // Fetch comments and parent context to show prompt stats
   const comments = await getTaskComments(taskId);
-  const taskPrompt = formatTaskForClaude(task, comments);
+  const parentTask = await getParentTaskForContext(task);
+  const taskPrompt = formatTaskForClaude(task, comments, parentTask);
   actions.push(`Claude: Run Claude Code on task (prompt: ${taskPrompt.length} chars)`);
 
   actions.push(`Git: Commit changes and push to branch`);
@@ -519,7 +521,8 @@ async function dryRunProcessReturningTask(task: ClickUpTask, prUrl: string): Pro
   }
 
   const comments = await getTaskComments(taskId);
-  const taskPrompt = formatTaskForClaude(task, comments);
+  const parentTask = await getParentTaskForContext(task);
+  const taskPrompt = formatTaskForClaude(task, comments, parentTask);
   actions.push(`Claude: Run Claude Code with review context (prompt: ${taskPrompt.length} chars)`);
 
   actions.push(`Git: Commit changes and push to branch`);
@@ -621,14 +624,15 @@ async function processTask(
     // Step 4: Build 3-tiered context, format the task for Claude, and run it
     // Save HEAD hash before Claude runs so we can detect if Claude commits via Bash
     const headBefore = await getHeadHash(cwd);
-    const [comments, baseProjectContext] = await Promise.all([
+    const [comments, baseProjectContext, parentTask] = await Promise.all([
       getTaskComments(taskId),
       buildProjectContext(task),
+      getParentTaskForContext(task),
     ]);
     const projectContext = options?.stack
       ? `${baseProjectContext}\n\n${options.stack.promptContext}`
       : baseProjectContext;
-    const taskPrompt = formatTaskForClaude(task, comments);
+    const taskPrompt = formatTaskForClaude(task, comments, parentTask);
     const result = await runClaudeOnTask(taskPrompt, taskId, { interactive: interactiveMode, projectContext, cwd });
     const headAfter = await getHeadHash(cwd);
     const claudeCommitted = headBefore !== headAfter;
@@ -1487,11 +1491,12 @@ async function processReturningTask(
     // Gather new comments as context for why the task was moved back
     const feedback = await collectReviewFeedback(task, prUrl);
     const headBefore = await getHeadHash(cwd);
-    const [comments, projectContext] = await Promise.all([
+    const [comments, projectContext, parentTask] = await Promise.all([
       getTaskComments(taskId),
       buildProjectContext(task),
+      getParentTaskForContext(task),
     ]);
-    const taskPrompt = formatTaskForClaude(task, comments);
+    const taskPrompt = formatTaskForClaude(task, comments, parentTask);
 
     let result: ClaudeResult;
     if (feedback) {
