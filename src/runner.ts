@@ -74,6 +74,9 @@ import {
   isAncestor,
   linkStackPRs,
   selectLinkablePrUrls,
+  isGhStackInstalled,
+  installGhStackExtension,
+  GH_STACK_INSTALL_COMMAND,
 } from "./git-ops.js";
 import {
   runClaudeOnTask,
@@ -2185,6 +2188,14 @@ interface StackLeafRecord {
 }
 
 /**
+ * " #42" when a stack's number is known, "" otherwise (a freshly created
+ * stack's number is read back best-effort after `gh stack link`).
+ */
+function formatStackRef(stackNumber: number | null): string {
+  return stackNumber != null ? ` #${stackNumber}` : "";
+}
+
+/**
  * Build the summary comment posted on the parent task after a stack run.
  */
 function buildStackSummaryComment(
@@ -2231,7 +2242,7 @@ function buildStackSummaryComment(
       stackLink.outcome === "already-linked")
   ) {
     lines.push(
-      `🪜 The open PRs are linked as a native GitHub stack (#${stackLink.stackNumber}). ` +
+      `🪜 The open PRs are linked as a native GitHub stack${formatStackRef(stackLink.stackNumber)}. ` +
         `Merge bottom-up as usual — when a lower PR merges, GitHub automatically ` +
         `rebases and retargets the ones above it.`,
     );
@@ -2304,6 +2315,63 @@ async function collectStackLeaves(
 }
 
 /**
+ * Ask a yes/no question on the terminal. Empty input counts as yes.
+ */
+async function promptYesNo(question: string): Promise<boolean> {
+  const { createInterface } = await import("readline");
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = await new Promise<string>((resolveAnswer) =>
+      rl.question(`${question} [Y/n]: `, resolveAnswer),
+    );
+    return ["", "y", "yes"].includes(answer.trim().toLowerCase());
+  } finally {
+    rl.close();
+  }
+}
+
+/**
+ * Stack runs rely on the `gh stack` extension for native-stack actions,
+ * so require it before any work starts: when it's missing, offer to
+ * install it on an interactive terminal, and abort otherwise (declined,
+ * or nowhere to ask — e.g. CI). Skipped when NATIVE_STACKS=false, where
+ * the run produces plain chained PRs and never calls `gh stack`. Dry
+ * runs only warn — they stop before any linking happens.
+ */
+async function ensureGhStackExtensionOrAbort(): Promise<void> {
+  if (!NATIVE_STACKS) return;
+  if (await isGhStackInstalled()) return;
+
+  if (DRY_RUN) {
+    log(
+      "warn",
+      `The gh stack extension is not installed (${GH_STACK_INSTALL_COMMAND}) — continuing in dry-run mode.`,
+    );
+    return;
+  }
+
+  log(
+    "warn",
+    "Stack mode links the series' PRs into a native GitHub stack via the gh stack extension, which is not installed.",
+  );
+
+  if (process.stdin.isTTY && process.stdout.isTTY) {
+    if (await promptYesNo(`Install it now (${GH_STACK_INSTALL_COMMAND})?`)) {
+      await installGhStackExtension();
+      if (await isGhStackInstalled()) return;
+      throw new Error(
+        "The gh stack extension install did not take effect — check `gh extension list` and re-run --stack.",
+      );
+    }
+  }
+
+  throw new Error(
+    `--stack requires the gh stack extension. Install it (${GH_STACK_INSTALL_COMMAND}) and re-run, ` +
+      `or set NATIVE_STACKS=false to run the stack as plain chained PRs without native stack linking.`,
+  );
+}
+
+/**
  * Implement a series of tasks sequentially as stacked PRs.
  * With a parent task ID, its leaf subtasks are stacked (subtasks that have
  * their own subtasks are treated as grouping only). Without one, the whole
@@ -2333,6 +2401,10 @@ export async function runTaskStack(
   if (!DRY_RUN) acquireLock();
 
   try {
+    // Stack runs depend on the gh stack extension — settle that before any
+    // other work (prompts to install when missing, aborts otherwise).
+    await ensureGhStackExtensionOrAbort();
+
     // Map missing optional statuses to existing ones (minimal status lists)
     await resolveStatusFallbacks();
 
@@ -2593,7 +2665,7 @@ export async function runTaskStack(
       stackLink = await linkStackPRs(selectLinkablePrUrls(completedInSeries));
       switch (stackLink.outcome) {
         case "created":
-          log("info", `Linked ${stackLink.prNumbers.length} PR(s) into native GitHub stack #${stackLink.stackNumber}.`);
+          log("info", `Linked ${stackLink.prNumbers.length} PR(s) into native GitHub stack${formatStackRef(stackLink.stackNumber)}.`);
           break;
         case "extended":
           log("info", `Added ${stackLink.prNumbers.length} PR(s) to native GitHub stack #${stackLink.stackNumber}.`);
