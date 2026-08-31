@@ -29,8 +29,8 @@ Complete reference for all CLI options, environment variables, and configuration
 | `--interactive` | Run Claude Code in interactive mode. Instead of running autonomously, Claude accepts user input via the terminal. Can be combined with `--once` or continuous mode. |
 | `--check` | Validate all configuration (API keys, statuses, CLI tools) and exit. Non-zero exit code on failure. |
 | `--statuses` | Print the recommended ClickUp list statuses and exit. Does not require configuration. |
-| `--setup` | Run the interactive setup wizard that guides you through creating a `.clawdup.env` file at the repository root (and gitignoring it). |
-| `--init` | Create example `.clawdup.env` and `clawdup.config.mjs` files at the repository root, and add them to `.gitignore`. |
+| `--setup` | Run the interactive setup wizard that guides you through creating a `.env.local` file at the repository root (and gitignoring it). |
+| `--init` | Create example `.env.local` and `clawdup.config.mjs` files at the repository root, and add them to `.gitignore`. |
 | `--help`, `-h` | Print usage information and exit. |
 
 ### Examples
@@ -109,12 +109,12 @@ CLICKUP_PARENT_TASK_ID=abc123xyz
 
 ## Configuration Files
 
-### `.clawdup.env`
+### `.env.local`
 
 Primary configuration file. Contains API tokens and settings as `KEY=VALUE` pairs.
 
 - Lives at the **repository root** and is resolved from there no matter which subdirectory `clawdup` is run from.
-- Alternative filename: `.env.clickup` (first found wins).
+- Shared-friendly: when the file already exists (e.g. created by your app framework), `--setup` and `--init` append clawdup's settings instead of overwriting it.
 - Values do **not** override existing environment variables.
 - **Never committed** — it contains secrets. `clawdup --setup` / `clawdup --init` add it to `.gitignore` automatically; keep it there.
 
@@ -158,6 +158,12 @@ Project context file used by Claude Code, at the repository root. Automatically 
 | `CLICKUP_API_TOKEN` | ClickUp API token. Get from: ClickUp Settings > Apps > API Token. |
 | `CLICKUP_LIST_ID` | ClickUp list ID to poll. **Required unless `CLICKUP_PARENT_TASK_ID` is set.** |
 | `CLICKUP_PARENT_TASK_ID` | ClickUp parent task ID to poll subtasks from. **Required unless `CLICKUP_LIST_ID` is set.** |
+
+### ClickUp API
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `CLICKUP_API_BASE_URL` | `https://api.clickup.com/api/v2` | Base URL for all ClickUp API requests. Override it to route requests through a proxy or to point clawdup at a mock server for testing. Include the API path prefix (`/api/v2` for the public API); a trailing slash is stripped. The setup wizard (`--setup`) and preflight checks (`--doctor`) honor the same override — for `--setup`, which runs before `.env.local` exists, export it in the shell first. |
 
 ### Git & GitHub
 
@@ -253,11 +259,11 @@ The runner periodically restarts itself to pick up fresh code and avoid long-run
 Settings are resolved in this order (highest priority first):
 
 1. **Environment variables** — `export POLL_INTERVAL_MS=60000`
-2. **`.clawdup.env`** (or `.env.clickup`) — loaded from the repository root
+2. **`.env.local`** — loaded from the repository root
 3. **`clawdup.config.mjs`** — JavaScript config file for `prompt` and `claudeArgs`, also at the repository root
 4. **Defaults** — built-in fallback values
 
-Environment variables set before running clawdup always take precedence. The `.clawdup.env` file only sets values that are not already in the environment.
+Environment variables set before running clawdup always take precedence. The `.env.local` file only sets values that are not already in the environment.
 
 ---
 
@@ -298,7 +304,7 @@ my-monorepo/
 ├── packages/
 │   ├── frontend/
 │   └── backend/
-├── .clawdup.env                 # One config for the whole repo (gitignored)
+├── .env.local                   # One config for the whole repo (gitignored)
 ├── clawdup.config.mjs           # Repo-wide Claude instructions (optional)
 ├── CLAUDE.md                    # Shared project context
 └── pnpm-workspace.yaml
@@ -307,7 +313,7 @@ my-monorepo/
 **How it works:**
 
 - `GIT_ROOT` = the repository root, detected via `git rev-parse --show-toplevel` from wherever `clawdup` is invoked.
-- Config files (`.clawdup.env`, `clawdup.config.mjs`), `CLAUDE.md`, runtime state files, and all git operations are anchored at `GIT_ROOT`.
+- Config files (`.env.local`, `clawdup.config.mjs`), `CLAUDE.md`, runtime state files, and all git operations are anchored at `GIT_ROOT`.
 - Running `clawdup` from any subdirectory behaves identically to running it at the root.
 
 One ClickUp list (or parent task) feeds the whole repository. Direct work at specific packages through task descriptions and file hints, and encode per-package conventions in `CLAUDE.md` / `clawdup.config.mjs`.

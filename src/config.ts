@@ -1,12 +1,12 @@
 // Configuration module.
 // Resolves settings from (in priority order):
 //   1. Environment variables
-//   2. .clawdup.env at the repository root
+//   2. .env.local at the repository root
 //   3. clawdup.config.mjs at the repository root
 //   4. Defaults
 //
 // clawdup is installed globally, never as a project dependency. Each
-// repository is set up by dropping an untracked .clawdup.env at its root
+// repository is set up by dropping an untracked .env.local at its root
 // (created by `clawdup --init` / `clawdup --setup`, which also gitignore it).
 
 import { existsSync, readFileSync } from "fs";
@@ -16,36 +16,41 @@ import type { UserConfig } from "./types.js";
 
 // GIT_ROOT is the repository root (where .git lives), detected from the
 // invocation directory — so clawdup behaves the same no matter which
-// subdirectory of the repo it is run from. Config files (.clawdup.env,
+// subdirectory of the repo it is run from. Config files (.env.local,
 // clawdup.config.mjs, CLAUDE.md), runtime state files, and git operations
 // all anchor here. Falls back to cwd outside a git repository.
 export const GIT_ROOT: string = detectRepoRoot();
 
 // --- .env loading ---
-// Look for .clawdup.env at the repository root
-const envCandidates = [
-  resolve(GIT_ROOT, ".clawdup.env"),
-  resolve(GIT_ROOT, ".env.clickup"),
-];
-
-for (const envPath of envCandidates) {
-  if (existsSync(envPath)) {
-    const envContent = readFileSync(envPath, "utf-8");
-    for (const line of envContent.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-      const eqIndex = trimmed.indexOf("=");
-      if (eqIndex === -1) continue;
-      const key = trimmed.slice(0, eqIndex).trim();
-      const value = trimmed
-        .slice(eqIndex + 1)
-        .trim()
-        .replace(/^["']|["']$/g, "");
-      if (!process.env[key]) {
-        process.env[key] = value;
-      }
+// Load .env.local from the repository root. A key is only set when not
+// already present, so real environment variables always win over the file.
+const envPath = resolve(GIT_ROOT, ".env.local");
+if (existsSync(envPath)) {
+  const envContent = readFileSync(envPath, "utf-8");
+  for (const line of envContent.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eqIndex = trimmed.indexOf("=");
+    if (eqIndex === -1) continue;
+    const key = trimmed.slice(0, eqIndex).trim();
+    const value = trimmed
+      .slice(eqIndex + 1)
+      .trim()
+      .replace(/^["']|["']$/g, "");
+    if (!process.env[key]) {
+      process.env[key] = value;
     }
-    break; // only load the first one found
+  }
+}
+
+// The old env filenames are not read anymore — nudge once toward the rename
+// so an upgrade doesn't fail with a bare "missing variable" error.
+for (const oldName of [".clawdup.env", ".env.clickup"]) {
+  if (existsSync(resolve(GIT_ROOT, oldName))) {
+    console.warn(
+      `Warning: ${oldName} is no longer read — clawdup now uses .env.local. Rename or delete it.`,
+    );
+    break;
   }
 }
 
@@ -80,7 +85,7 @@ function required(name: string): string {
   const val = process.env[name];
   if (!val) {
     console.error(`ERROR: Missing required environment variable: ${name}`);
-    console.error(`Set it in .clawdup.env (at your repo root) or export it.`);
+    console.error(`Set it in .env.local (at your repo root) or export it.`);
     console.error(`Run "clawdup --setup" or "clawdup --init" to create the file.`);
     process.exit(1);
   }
@@ -97,7 +102,43 @@ if (!CLICKUP_LIST_ID && !CLICKUP_PARENT_TASK_ID) {
     "ERROR: Either CLICKUP_LIST_ID or CLICKUP_PARENT_TASK_ID must be set.",
   );
   console.error(
-    "Set one in .clawdup.env (at your repo root) or export it.",
+    "Set one in .env.local (at your repo root) or export it.",
+  );
+  process.exit(1);
+}
+
+// ClickUp API base URL. Override CLICKUP_API_BASE_URL to route requests
+// through a proxy or point at a mock/self-hosted endpoint. The value must
+// include the API path prefix (the default is ClickUp's public v2 API).
+export const DEFAULT_CLICKUP_API_BASE_URL = "https://api.clickup.com/api/v2";
+
+/**
+ * Resolve the ClickUp API base URL from an override value.
+ * Falls back to the default when unset/blank; strips trailing slashes so
+ * request paths (which start with "/") join cleanly.
+ */
+export function resolveApiBaseUrl(raw: string | undefined): string {
+  const trimmed = (raw ?? "").trim().replace(/\/+$/, "");
+  return trimmed || DEFAULT_CLICKUP_API_BASE_URL;
+}
+
+export const CLICKUP_API_BASE_URL: string = resolveApiBaseUrl(
+  process.env.CLICKUP_API_BASE_URL,
+);
+
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+if (!isHttpUrl(CLICKUP_API_BASE_URL)) {
+  console.error(
+    `ERROR: CLICKUP_API_BASE_URL "${process.env.CLICKUP_API_BASE_URL}" must be an absolute http(s) URL, ` +
+      `e.g. ${DEFAULT_CLICKUP_API_BASE_URL}.`,
   );
   process.exit(1);
 }

@@ -200,7 +200,7 @@ Claude Code took longer than the configured timeout (default: 30 minutes / 1,800
 3. Move back to **"to do"** to retry
 
 **Prevention:**
-- Increase `CLAUDE_TIMEOUT_MS` in `.clawdup.env` for complex tasks
+- Increase `CLAUDE_TIMEOUT_MS` in `.env.local` for complex tasks
 - Increase `CLAUDE_MAX_TURNS` if Claude needs more iterations
 - Write smaller, more focused tasks
 
@@ -261,7 +261,7 @@ Clawdup scans task content for known prompt injection patterns (e.g., "ignore pr
 - **Network errors** — connectivity issues
 
 **Recovery:**
-1. Verify your API token: `curl -H "Authorization: pk_xxx" https://api.clickup.com/api/v2/user`
+1. Verify your API token: `curl -H "Authorization: pk_xxx" https://api.clickup.com/api/v2/user` (use your `CLICKUP_API_BASE_URL` instead if you override it)
 2. Check that `CLICKUP_LIST_ID` or `CLICKUP_PARENT_TASK_ID` is correct
 3. Run `clawdup --check` to validate the configuration
 
@@ -297,7 +297,7 @@ Only `to do`, `in progress`, and a done/closed status are required — a minimal
 **Recovery:**
 1. Run `clawdup --statuses` to see the required statuses and fallback rules
 2. Add the missing statuses to your ClickUp list (List Settings > Statuses)
-3. Or configure custom status names in `.clawdup.env` (e.g., `STATUS_TODO=open`)
+3. Or configure custom status names in `.env.local` (e.g., `STATUS_TODO=open`)
 4. Run `clawdup --check` to verify
 
 ---
@@ -377,7 +377,7 @@ Clawdup links a stack run's open PRs into a **native GitHub stack** (public prev
 
 ## Where to Look in Logs
 
-Clawdup logs all operations with timestamps and severity levels. Set `LOG_LEVEL=debug` in `.clawdup.env` for verbose output.
+Clawdup logs all operations with timestamps and severity levels. Set `LOG_LEVEL=debug` in `.env.local` for verbose output.
 
 **Key log patterns to search for:**
 - `[ERROR]` — failures that stopped a task

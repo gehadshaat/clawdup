@@ -272,7 +272,7 @@ You'll need an Anthropic API key or an active Claude subscription for Claude Cod
 
 ## Step 8: Install clawdup
 
-clawdup is a **global CLI** — install it once per machine. It is never added to your project: no dev dependency, no `package.json` scripts, no lockfile changes. Each repository is configured later with a single untracked `.clawdup.env` file at its root (Step 9).
+clawdup is a **global CLI** — install it once per machine. It is never added to your project: no dev dependency, no `package.json` scripts, no lockfile changes. Each repository is configured later with a single untracked `.env.local` file at its root (Step 9).
 
 ### Option A: Global Install (the standard way)
 
@@ -354,7 +354,7 @@ Run it from anywhere inside the repository you want to automate. The wizard will
 3. Validate the connection to ClickUp
 4. Check if the required statuses exist
 5. Ask for optional settings (base branch, polling interval, etc.)
-6. Write the `.clawdup.env` file at the **repository root** and add it to `.gitignore`
+6. Write the `.env.local` file at the **repository root** and add it to `.gitignore`
 
 ### Option B: Quick Init + Manual Edit
 
@@ -364,10 +364,10 @@ clawdup --init
 ```
 
 This creates two files at the **repository root** (wherever you run it from inside the repo):
-- **`.clawdup.env`** — Environment variables (API token, list ID, etc.)
+- **`.env.local`** — Environment variables (API token, list ID, etc.). If the file already exists (say, from your app framework), the clawdup template is appended to it instead of overwriting it.
 - **`clawdup.config.mjs`** — Optional Claude Code customization
 
-Edit `.clawdup.env` and fill in your values:
+Edit `.env.local` and fill in your values:
 
 ```env
 # Required
@@ -384,13 +384,12 @@ CLICKUP_LIST_ID=901234567890
 # LOG_LEVEL=info
 ```
 
-### Never Commit .clawdup.env
+### Never Commit .env.local
 
-Your `.clawdup.env` contains secrets and must never be committed. Both `clawdup --setup` and `clawdup --init` add it (plus clawdup's runtime state files) to your `.gitignore` automatically. If you created the file by hand, add the entries yourself:
+Your `.env.local` contains secrets and must never be committed. Both `clawdup --setup` and `clawdup --init` add it (plus clawdup's runtime state files) to your `.gitignore` automatically. If you created the file by hand, add the entry yourself:
 
 ```bash
-echo ".clawdup.env" >> .gitignore
-echo ".env.clickup" >> .gitignore
+echo ".env.local" >> .gitignore
 ```
 
 ### Optional: Customize Claude's Behavior
@@ -660,12 +659,13 @@ When clawdup creates a PR:
 
 ### All Environment Variables
 
-These can be set in `.clawdup.env` or as system environment variables:
+These can be set in `.env.local` or as system environment variables:
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `CLICKUP_API_TOKEN` | Yes | — | Your ClickUp personal API token |
 | `CLICKUP_LIST_ID` | Yes | — | The ClickUp list ID to poll |
+| `CLICKUP_API_BASE_URL` | No | `https://api.clickup.com/api/v2` | Base URL for ClickUp API requests (override for proxies or mock servers) |
 | `BASE_BRANCH` | No | `main` | Base branch for creating feature branches |
 | `BRANCH_PREFIX` | No | `clickup` | Prefix for task branch names |
 | `POLL_INTERVAL_MS` | No | `30000` | How often to poll ClickUp (milliseconds) |
@@ -722,7 +722,7 @@ my-monorepo/
 ├── packages/
 │   ├── frontend/
 │   └── backend/
-├── .clawdup.env                 # One config for the whole repo (gitignored)
+├── .env.local                   # One config for the whole repo (gitignored)
 ├── clawdup.config.mjs           # Repo-wide Claude instructions (optional)
 ├── CLAUDE.md                    # Shared project context
 └── pnpm-workspace.yaml
@@ -730,7 +730,7 @@ my-monorepo/
 
 ### How It Works
 
-- Config files (`.clawdup.env`, `clawdup.config.mjs`) and `CLAUDE.md` are resolved from the repository root (detected via `git rev-parse --show-toplevel`), no matter which subdirectory you run `clawdup` from
+- Config files (`.env.local`, `clawdup.config.mjs`) and `CLAUDE.md` are resolved from the repository root (detected via `git rev-parse --show-toplevel`), no matter which subdirectory you run `clawdup` from
 - Git operations, Claude runs, and clawdup's runtime state files are all anchored at the repo root, so tasks can touch any package
 - One ClickUp list (or parent task) feeds the whole repository — use task descriptions and file hints (e.g. "in `packages/frontend/`") to direct work at specific packages, and `clawdup.config.mjs` / `CLAUDE.md` for per-package conventions
 
@@ -748,9 +748,9 @@ clawdup
 
 ### "Missing required environment variable: CLICKUP_API_TOKEN"
 
-Your `.clawdup.env` file is missing or doesn't contain `CLICKUP_API_TOKEN`. Make sure:
+Your `.env.local` file is missing or doesn't contain `CLICKUP_API_TOKEN`. Make sure:
 - The file exists at the **root of the repository** you're running `clawdup` in
-- The file is named `.clawdup.env` (or `.env.clickup`)
+- The file is named `.env.local`
 - The token value is set correctly (no quotes needed)
 
 Run `clawdup --setup` (or `clawdup --init`) to create it.
@@ -765,7 +765,7 @@ The list ID is incorrect. Double-check the ID by copying the list link from Clic
 
 ### "Status validation failed"
 
-Your ClickUp list is missing a required status — `to do`, `in progress`, or a done/closed status (optional statuses fall back automatically and never fail validation). Run `clawdup --statuses` to see what's needed, then add the missing status in ClickUp (List Settings > Statuses) or remap yours with `STATUS_*` variables in `.clawdup.env`.
+Your ClickUp list is missing a required status — `to do`, `in progress`, or a done/closed status (optional statuses fall back automatically and never fail validation). Run `clawdup --statuses` to see what's needed, then add the missing status in ClickUp (List Settings > Statuses) or remap yours with `STATUS_*` variables in `.env.local`.
 
 ### "claude command not found"
 
@@ -866,7 +866,7 @@ By default, clawdup allows: Edit, Write, Read, Glob, Grep, and Bash.
 
 ### How do I see what Claude is doing?
 
-clawdup streams Claude's output to the terminal in real time. You'll see text output and tool usage (file reads, edits, bash commands) as they happen. For more detail, set `LOG_LEVEL=debug` in your `.clawdup.env`.
+clawdup streams Claude's output to the terminal in real time. You'll see text output and tool usage (file reads, edits, bash commands) as they happen. For more detail, set `LOG_LEVEL=debug` in your `.env.local`.
 
 ### What merge strategy does clawdup use?
 
@@ -874,7 +874,7 @@ Squash merge. This keeps your main branch history clean with one commit per task
 
 ### Can I use a different base branch?
 
-Yes, set `BASE_BRANCH` in your `.clawdup.env`:
+Yes, set `BASE_BRANCH` in your `.env.local`:
 
 ```env
 BASE_BRANCH=develop

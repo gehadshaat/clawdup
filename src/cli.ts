@@ -12,12 +12,13 @@
 //   clawdup --init       Create example config files at the repo root
 //
 // clawdup is installed globally (npm install -g clawdup) and configured
-// per-repository via an untracked .clawdup.env at the repo root.
+// per-repository via an untracked .env.local at the repo root.
 
 import { resolve } from "path";
-import { existsSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { detectPackageManager, globalInstallCommand } from "./package-manager.js";
 import { detectRepoRoot, ensureGitignoreEntries } from "./repo-root.js";
+import { hasClawdupConfig } from "./env-file.js";
 
 const args = process.argv.slice(2);
 
@@ -149,13 +150,13 @@ Usage:
 
 Quick Start:
   ${globalInstallCommand(pm, "clawdup")}     Install once, globally
-  clawdup --setup                Interactive setup (writes .clawdup.env at the
+  clawdup --setup                Interactive setup (writes .env.local at the
                                  repo root and gitignores it)
   clawdup --init                 Non-interactive: create example config files
   clawdup                        Run from anywhere inside the repo
 
 Configuration:
-  clawdup is configured per-repository via a .clawdup.env file at the repo
+  clawdup is configured per-repository via a .env.local file at the repo
   root. The file holds secrets and is never committed (--setup / --init add
   it to .gitignore automatically):
     CLICKUP_API_TOKEN=pk_xxx
@@ -253,17 +254,12 @@ Status names can be customized via environment variables (STATUS_TODO, etc).
 
 async function initProject(): Promise<void> {
   const repoRoot = detectRepoRoot();
-  const envDest = resolve(repoRoot, ".clawdup.env");
+  const envDest = resolve(repoRoot, ".env.local");
   const configDest = resolve(repoRoot, "clawdup.config.mjs");
 
   console.log(`Initializing clawdup at the repo root: ${repoRoot}\n`);
 
-  if (existsSync(envDest)) {
-    console.log(`  SKIP  ${envDest} (already exists)`);
-  } else {
-    writeFileSync(
-      envDest,
-      `# ClickUp Task Automation - Environment Variables
+  const envTemplate = `# ClickUp Task Automation - Environment Variables
 # This file holds secrets — it is gitignored and must never be committed.
 # Docs: https://github.com/gehadshaat/clawdup
 
@@ -280,6 +276,10 @@ CLICKUP_LIST_ID=
 # CLICKUP_PARENT_TASK_ID=
 
 # === OPTIONAL ===
+
+# ClickUp API base URL (override to route through a proxy or use a mock
+# server; include the API path prefix)
+# CLICKUP_API_BASE_URL=https://api.clickup.com/api/v2
 
 # GitHub repo in "owner/repo" format (auto-detected from git remote if empty)
 # GITHUB_REPO=your-org/your-repo
@@ -334,9 +334,22 @@ CLICKUP_LIST_ID=
 
 # Log output format: text (default) or json
 # LOG_FORMAT=json
-`,
-    );
+`;
+
+  if (!existsSync(envDest)) {
+    writeFileSync(envDest, envTemplate);
     console.log(`  CREATE  ${envDest}`);
+  } else {
+    const existing = readFileSync(envDest, "utf-8");
+    if (hasClawdupConfig(existing)) {
+      console.log(`  SKIP  ${envDest} (clawdup already configured)`);
+    } else {
+      // .env.local may belong to other tooling — append the clawdup template
+      // rather than rewriting the file.
+      const separator = existing.endsWith("\n") ? "\n" : "\n\n";
+      writeFileSync(envDest, existing + separator + envTemplate);
+      console.log(`  APPEND  ${envDest} (clawdup template added to existing file)`);
+    }
   }
 
   if (existsSync(configDest)) {
@@ -375,7 +388,7 @@ Run the formatter/linter after making changes to ensure code style is correct.
 
   console.log(`
 Done! Next steps:
-  1. Edit .clawdup.env with your ClickUp API token and list ID
+  1. Edit .env.local with your ClickUp API token and list ID
   2. Optionally customize clawdup.config.mjs
   3. Run: clawdup --check   (validate config)
   4. Run: clawdup           (start automation)

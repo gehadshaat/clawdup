@@ -2,8 +2,7 @@ dist/
 dist-test/
 node_modules/
 .idea/
-.clawdup.env
-.env.clickup
+.env.local
 .clawdup.todo.json
 .clawdup.lock
 .clawdup.sessions.json

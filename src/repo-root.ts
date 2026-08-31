@@ -1,6 +1,6 @@
 // Repo-root utilities shared by the CLI, setup wizard, and config loader.
 // clawdup is installed globally and configured per-repository: everything it
-// reads or writes (.clawdup.env, clawdup.config.mjs, state files) lives at
+// reads or writes (.env.local, clawdup.config.mjs, state files) lives at
 // the repository root, regardless of which subdirectory it is invoked from.
 
 import { execFileSync } from "child_process";
@@ -28,8 +28,7 @@ export function detectRepoRoot(cwd: string = process.cwd()): string {
  * secrets and must never be committed; the rest are local runtime state.
  */
 export const GITIGNORE_ENTRIES: readonly string[] = [
-  ".clawdup.env",
-  ".env.clickup",
+  ".env.local",
   ".clawdup.todo.json",
   ".clawdup.lock",
   ".clawdup.sessions.json",

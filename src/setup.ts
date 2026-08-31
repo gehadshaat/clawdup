@@ -1,17 +1,27 @@
 // Interactive setup wizard for clawdup.
-// Writes .clawdup.env at the repository root and makes sure it is gitignored.
+// Writes .env.local at the repository root and makes sure it is gitignored.
 // clawdup is installed globally — setup never touches the repo's package.json.
 
 import { createInterface } from "readline";
-import { existsSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import { detectPackageManager, globalInstallCommand } from "./package-manager.js";
 import { detectRepoRoot, ensureGitignoreEntries } from "./repo-root.js";
+import { hasClawdupConfig, mergeEnvContent } from "./env-file.js";
 
 const rl = createInterface({
   input: process.stdin,
   output: process.stdout,
 });
+
+// ClickUp API base URL. Setup runs before .env.local exists (it can't load
+// config.ts, which requires a token), so an override must come from the shell
+// environment: CLICKUP_API_BASE_URL=... clawdup --setup. Normal runs read the
+// same variable via config.ts.
+const DEFAULT_API_BASE_URL = "https://api.clickup.com/api/v2";
+const API_BASE_URL =
+  (process.env.CLICKUP_API_BASE_URL ?? "").trim().replace(/\/+$/, "") ||
+  DEFAULT_API_BASE_URL;
 
 /**
  * Extracts a ClickUp list ID from a URL or returns the input as-is if it's already a raw ID.
@@ -87,7 +97,7 @@ function reportStatusCoverage(statuses: { status: string; type?: string }[]): vo
     console.log(
       "  clawdup needs at least: to do, in progress, and a done/closed status.",
     );
-    console.log("  Add them in ClickUp, or map yours via STATUS_* variables in .clawdup.env.");
+    console.log("  Add them in ClickUp, or map yours via STATUS_* variables in .env.local.");
   } else if (optionalMissing.length > 0) {
     console.log(`\n  Minimal status setup detected — missing optional statuses: ${optionalMissing.join(", ")}`);
     console.log("  That's fine: clawdup falls back to the statuses you have.");
@@ -120,7 +130,7 @@ function extractSpaceIdFromUrl(url: string): string | null {
  * Fetch workspaces/teams for the given API token.
  */
 async function fetchTeams(apiToken: string): Promise<{ id: string; name: string }[]> {
-  const res = await fetch("https://api.clickup.com/api/v2/team", {
+  const res = await fetch(`${API_BASE_URL}/team`, {
     headers: { Authorization: apiToken },
   });
   if (!res.ok) {
@@ -135,7 +145,7 @@ async function fetchTeams(apiToken: string): Promise<{ id: string; name: string 
  * Fetch spaces in a workspace.
  */
 async function fetchSpaces(apiToken: string, teamId: string): Promise<{ id: string; name: string }[]> {
-  const res = await fetch(`https://api.clickup.com/api/v2/team/${teamId}/space`, {
+  const res = await fetch(`${API_BASE_URL}/team/${teamId}/space`, {
     headers: { Authorization: apiToken },
   });
   if (!res.ok) {
@@ -154,7 +164,7 @@ async function createListInSpace(
   spaceId: string,
   listName: string,
 ): Promise<ListResponse> {
-  const res = await fetch(`https://api.clickup.com/api/v2/space/${spaceId}/list`, {
+  const res = await fetch(`${API_BASE_URL}/space/${spaceId}/list`, {
     method: "POST",
     headers: {
       Authorization: apiToken,
@@ -314,7 +324,7 @@ async function checkCliDependencies(): Promise<void> {
 
 export async function runSetup(): Promise<void> {
   const repoRoot = detectRepoRoot();
-  const envPath = resolve(repoRoot, ".clawdup.env");
+  const envPath = resolve(repoRoot, ".env.local");
 
   console.log(`
 ╔══════════════════════════════════════════════╗
@@ -327,15 +337,24 @@ export async function runSetup(): Promise<void> {
 
   await checkCliDependencies();
 
+  // .env.local may also belong to other tooling — setup never rewrites an
+  // existing file. New settings are appended; when clawdup is already
+  // configured in it, confirm before updating those values in place.
+  let reconfigure = false;
   if (existsSync(envPath)) {
-    const overwrite = await ask(
-      ".clawdup.env already exists. Overwrite? (y/N)",
-      "N",
-    );
-    if (overwrite.toLowerCase() !== "y") {
-      console.log("Setup cancelled. Existing config preserved.");
-      rl.close();
-      return;
+    if (hasClawdupConfig(readFileSync(envPath, "utf-8"))) {
+      const update = await ask(
+        "clawdup is already configured in .env.local. Update its values in place? (y/N)",
+        "N",
+      );
+      if (update.toLowerCase() !== "y") {
+        console.log("Setup cancelled. Existing config preserved.");
+        rl.close();
+        return;
+      }
+      reconfigure = true;
+    } else {
+      console.log(".env.local exists — clawdup settings will be appended to it.");
     }
   }
 
@@ -378,7 +397,7 @@ export async function runSetup(): Promise<void> {
     console.log("\nValidating ClickUp connection...");
     try {
       const res = await fetch(
-        `https://api.clickup.com/api/v2/task/${parentTaskId}?include_subtasks=true`,
+        `${API_BASE_URL}/task/${parentTaskId}?include_subtasks=true`,
         { headers: { Authorization: apiToken } },
       );
       if (!res.ok) {
@@ -394,7 +413,7 @@ export async function runSetup(): Promise<void> {
         listId = task.list.id;
         // Validate statuses from the parent task's list
         const listRes = await fetch(
-          `https://api.clickup.com/api/v2/list/${listId}`,
+          `${API_BASE_URL}/list/${listId}`,
           { headers: { Authorization: apiToken } },
         );
         if (listRes.ok) {
@@ -468,7 +487,7 @@ export async function runSetup(): Promise<void> {
     console.log("\nValidating ClickUp connection...");
     try {
       const res = await fetch(
-        `https://api.clickup.com/api/v2/list/${listId}`,
+        `${API_BASE_URL}/list/${listId}`,
         { headers: { Authorization: apiToken } },
       );
       if (!res.ok) {
@@ -501,37 +520,51 @@ export async function runSetup(): Promise<void> {
   const claudeTimeout = await ask("Claude timeout per task in seconds", "1800");
   const maxTurns = await ask("Max Claude turns per task", "100");
 
-  const clickupSourceLines = useParentTask
-    ? `CLICKUP_PARENT_TASK_ID=${parentTaskId}`
-    : `CLICKUP_LIST_ID=${listId}`;
+  // The settings the wizard manages, in write order. A non-default API base
+  // is persisted so runs use the same endpoint the wizard validated against.
+  const envPairs: Array<[string, string]> = [
+    ["CLICKUP_API_TOKEN", apiToken],
+    useParentTask
+      ? ["CLICKUP_PARENT_TASK_ID", parentTaskId]
+      : ["CLICKUP_LIST_ID", listId],
+    ...(API_BASE_URL === DEFAULT_API_BASE_URL
+      ? []
+      : [["CLICKUP_API_BASE_URL", API_BASE_URL] as [string, string]]),
+    ["BASE_BRANCH", baseBranch],
+    ["BRANCH_PREFIX", branchPrefix],
+    ["POLL_INTERVAL_MS", String(parseInt(pollInterval) * 1000)],
+    ["CLAUDE_TIMEOUT_MS", String(parseInt(claudeTimeout) * 1000)],
+    ["CLAUDE_MAX_TURNS", maxTurns],
+    ["LOG_LEVEL", "info"],
+  ];
 
-  const envContent = `# clawdup Configuration
-# Generated by setup wizard on ${new Date().toISOString()}
-
-# ClickUp
-CLICKUP_API_TOKEN=${apiToken}
-${clickupSourceLines}
-
-# Git
-BASE_BRANCH=${baseBranch}
-BRANCH_PREFIX=${branchPrefix}
-
-# Polling
-POLL_INTERVAL_MS=${parseInt(pollInterval) * 1000}
-
-# Claude Code
-CLAUDE_TIMEOUT_MS=${parseInt(claudeTimeout) * 1000}
-CLAUDE_MAX_TURNS=${maxTurns}
-
-# Log level (debug | info | warn | error)
-LOG_LEVEL=info
-`;
-
-  writeFileSync(envPath, envContent);
-  console.log(`\n.clawdup.env written to: ${envPath}`);
+  if (!existsSync(envPath)) {
+    const envContent =
+      `# clawdup Configuration\n` +
+      `# Generated by setup wizard on ${new Date().toISOString()}\n\n` +
+      envPairs.map(([key, value]) => `${key}=${value}`).join("\n") +
+      "\n";
+    writeFileSync(envPath, envContent);
+    console.log(`\n.env.local written to: ${envPath}`);
+  } else {
+    // Never rewrite an existing .env.local — merge clawdup's settings into
+    // it. In append mode, keys the file already has are left untouched.
+    const merged = mergeEnvContent(
+      readFileSync(envPath, "utf-8"),
+      envPairs,
+      "# clawdup configuration (added by clawdup --setup)",
+      reconfigure,
+    );
+    writeFileSync(envPath, merged);
+    console.log(
+      reconfigure
+        ? `\nclawdup settings updated in .env.local (other content preserved): ${envPath}`
+        : `\nclawdup settings appended to .env.local: ${envPath}`,
+    );
+  }
 
   // Make sure the env file (secrets!) and clawdup's runtime state files
-  // are gitignored — .clawdup.env must never be committed.
+  // are gitignored — .env.local must never be committed.
   const added = ensureGitignoreEntries(repoRoot);
   if (added.length > 0) {
     console.log(`Added to .gitignore: ${added.join(", ")}`);

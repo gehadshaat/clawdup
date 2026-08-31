@@ -4,7 +4,7 @@ Automated ClickUp-to-PR pipeline powered by Claude Code.
 
 Write a ClickUp task. Come back to a PR. clawdup handles everything in between — polling, branching, implementation, and PR creation — so you can focus on the work that actually needs a human.
 
-Works with **any** repository — install once globally, drop an untracked `.clawdup.env` at the repo root, and let it cook. Nothing is added to your project's `package.json` or dependencies.
+Works with **any** repository — install once globally, drop an untracked `.env.local` at the repo root, and let it cook. Nothing is added to your project's `package.json` or dependencies.
 
 > **New to clawdup?** Read the **[Complete Setup & Usage Guide](GUIDE.md)** to go from zero to autopilot.
 >
@@ -21,7 +21,7 @@ Works with **any** repository — install once globally, drop an untracked `.cla
 npm install -g clawdup
 
 # In the repo you want to automate: set up your config
-# (writes .clawdup.env at the repo root and gitignores it)
+# (writes .env.local at the repo root and gitignores it)
 cd /path/to/your-repo
 clawdup --setup
 
@@ -77,7 +77,7 @@ clawdup
 
 ## Installation
 
-clawdup is a **global CLI** — it is never installed into your project. Install it once per machine; configure it per repository with a single untracked `.clawdup.env` file at the repo root. Your project's `package.json`, dependencies, and lockfile stay untouched.
+clawdup is a **global CLI** — it is never installed into your project. Install it once per machine; configure it per repository with a single untracked `.env.local` file at the repo root. Your project's `package.json`, dependencies, and lockfile stay untouched.
 
 ### Global Install
 
@@ -94,13 +94,13 @@ cd /path/to/your-repo
 clawdup --setup    # interactive wizard — or `clawdup --init` for bare config files
 ```
 
-Both commands write `.clawdup.env` (and an example `clawdup.config.mjs`) at the **repository root** and automatically add them to `.gitignore` — the env file holds your ClickUp API token and must never be committed. After that, run `clawdup` from anywhere inside the repo.
+Both commands write `.env.local` (and an example `clawdup.config.mjs`) at the **repository root** and automatically add them to `.gitignore` — the env file holds your ClickUp API token and must never be committed. After that, run `clawdup` from anywhere inside the repo.
 
 Upgrade later with `clawdup --upgrade` (or `npm install -g clawdup@latest`).
 
 ### Monorepos
 
-A repository gets **one** clawdup config: `.clawdup.env` at the repo root, polling one ClickUp list (or parent task) for the whole repo. Git operations and Claude runs are anchored at the repo root, so tasks can touch any package. Use task descriptions (e.g. file hints like `packages/frontend/...`) to direct work at specific packages.
+A repository gets **one** clawdup config: `.env.local` at the repo root, polling one ClickUp list (or parent task) for the whole repo. Git operations and Claude runs are anchored at the repo root, so tasks can touch any package. Use task descriptions (e.g. file hints like `packages/frontend/...`) to direct work at specific packages.
 
 ### Installing from GitHub (Private Repo)
 
@@ -216,20 +216,19 @@ For the finest-grained workflow, add the optional statuses too. Open the list, g
 
 ### 1. Environment File
 
-Create `.clawdup.env` at your **repository root** (`clawdup --setup` or `clawdup --init` does this for you):
+Create `.env.local` at your **repository root** (`clawdup --setup` or `clawdup --init` does this for you):
 
 ```env
 CLICKUP_API_TOKEN=pk_xxx
 CLICKUP_LIST_ID=your-list-id
 ```
 
-The tool also checks `.env.clickup` as an alternative filename. Config is always resolved from the repo root, so `clawdup` behaves the same no matter which subdirectory you run it from.
+Config is always resolved from the repo root, so `clawdup` behaves the same no matter which subdirectory you run it from. If `.env.local` already exists (say, from your app framework), `--setup` and `--init` append clawdup's settings to it instead of overwriting it.
 
 **This file holds secrets and is never committed.** `clawdup --setup` / `clawdup --init` add it (plus clawdup's runtime state files) to your `.gitignore` automatically — verify it's there if you create the file by hand:
 
 ```
-.clawdup.env
-.env.clickup
+.env.local
 ```
 
 ### 2. Config File (Optional)
@@ -262,6 +261,7 @@ If your repository has a `CLAUDE.md` file at its root (used by Claude Code for p
 | `CLICKUP_API_TOKEN`    | Yes      | —               | ClickUp API token                   |
 | `CLICKUP_LIST_ID`      | Yes*     | —               | ClickUp list to poll                |
 | `CLICKUP_PARENT_TASK_ID` | Yes*   | —               | Or: parent task to poll subtasks    |
+| `CLICKUP_API_BASE_URL` | No       | `https://api.clickup.com/api/v2` | Override the ClickUp API base URL (proxy / mock server) |
 | `GITHUB_REPO`          | No       | *(auto-detect)*  | GitHub repo (`owner/repo`)          |
 | `BASE_BRANCH`          | No       | `main`          | Base branch for feature branches    |
 | `BRANCH_PREFIX`        | No       | `clickup`       | Prefix for task branches            |

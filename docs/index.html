@@ -324,7 +324,7 @@
             <div class="step-number">2</div>
             <div class="step-content">
               <h3>Configure</h3>
-              <p>In your repo, run the setup wizard: it writes an untracked <code>.clawdup.env</code> (your ClickUp API token and list ID) at the repo root and gitignores it.</p>
+              <p>In your repo, run the setup wizard: it writes an untracked <code>.env.local</code> (your ClickUp API token and list ID) at the repo root and gitignores it.</p>
             </div>
           </div>
           <div class="step">
@@ -355,7 +355,7 @@
 <span class="comment"># In the repo you want to automate:</span>
 <span class="prompt">$</span> cd /path/to/your-repo
 
-<span class="comment"># Run the interactive setup (writes .clawdup.env at the repo root)</span>
+<span class="comment"># Run the interactive setup (writes .env.local at the repo root)</span>
 <span class="prompt">$</span> clawdup --setup
 
 <span class="comment"># Validate your configuration</span>
@@ -444,7 +444,7 @@
       </div>
       <div class="config-grid">
         <div class="config-card">
-          <h3>.clawdup.env</h3>
+          <h3>.env.local</h3>
           <p>Required settings for ClickUp connection.</p>
           <div class="code-block">
             <pre><span class="comment"># Required</span>
