@@ -261,7 +261,7 @@ Clawdup scans task content for known prompt injection patterns (e.g., "ignore pr
 - **Network errors** — connectivity issues
 
 **Recovery:**
-1. Verify your API token: `curl -H "Authorization: pk_xxx" https://api.clickup.com/api/v2/user`
+1. Verify your API token: `curl -H "Authorization: pk_xxx" https://api.clickup.com/api/v2/user` (use your `CLICKUP_API_BASE_URL` instead if you override it)
 2. Check that `CLICKUP_LIST_ID` or `CLICKUP_PARENT_TASK_ID` is correct
 3. Run `clawdup --check` to validate the configuration
 

@@ -7,7 +7,7 @@ import { existsSync, readFileSync, unlinkSync } from "fs";
 import { resolve } from "path";
 import { execFile } from "child_process";
 import { promisify } from "util";
-import { BASE_BRANCH, GIT_ROOT, CLICKUP_API_TOKEN, DRY_RUN } from "./config.js";
+import { BASE_BRANCH, GIT_ROOT, CLICKUP_API_TOKEN, CLICKUP_API_BASE_URL, DRY_RUN } from "./config.js";
 import { log } from "./logger.js";
 
 const execFileAsync = promisify(execFile);
@@ -230,7 +230,7 @@ function checkLockFile(): PreflightCheckResult {
  */
 async function checkClickUpConnectivity(): Promise<PreflightCheckResult> {
   try {
-    const res = await fetch("https://api.clickup.com/api/v2/user", {
+    const res = await fetch(`${CLICKUP_API_BASE_URL}/user`, {
       method: "GET",
       headers: {
         Authorization: CLICKUP_API_TOKEN,
@@ -256,8 +256,8 @@ async function checkClickUpConnectivity(): Promise<PreflightCheckResult> {
     return {
       name: "ClickUp connectivity",
       ok: false,
-      message: `Cannot reach ClickUp API: ${(err as Error).message}`,
-      fix: "Check your network connection and CLICKUP_API_TOKEN in .clawdup.env.",
+      message: `Cannot reach ClickUp API at ${CLICKUP_API_BASE_URL}: ${(err as Error).message}`,
+      fix: "Check your network connection and CLICKUP_API_TOKEN in .clawdup.env (and CLICKUP_API_BASE_URL if you override it).",
     };
   }
 }

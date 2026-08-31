@@ -281,6 +281,10 @@ CLICKUP_LIST_ID=
 
 # === OPTIONAL ===
 
+# ClickUp API base URL (override to route through a proxy or use a mock
+# server; include the API path prefix)
+# CLICKUP_API_BASE_URL=https://api.clickup.com/api/v2
+
 # GitHub repo in "owner/repo" format (auto-detected from git remote if empty)
 # GITHUB_REPO=your-org/your-repo
 

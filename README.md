@@ -262,6 +262,7 @@ If your repository has a `CLAUDE.md` file at its root (used by Claude Code for p
 | `CLICKUP_API_TOKEN`    | Yes      | —               | ClickUp API token                   |
 | `CLICKUP_LIST_ID`      | Yes*     | —               | ClickUp list to poll                |
 | `CLICKUP_PARENT_TASK_ID` | Yes*   | —               | Or: parent task to poll subtasks    |
+| `CLICKUP_API_BASE_URL` | No       | `https://api.clickup.com/api/v2` | Override the ClickUp API base URL (proxy / mock server) |
 | `GITHUB_REPO`          | No       | *(auto-detect)*  | GitHub repo (`owner/repo`)          |
 | `BASE_BRANCH`          | No       | `main`          | Base branch for feature branches    |
 | `BRANCH_PREFIX`        | No       | `clickup`       | Prefix for task branches            |

@@ -159,6 +159,12 @@ Project context file used by Claude Code, at the repository root. Automatically 
 | `CLICKUP_LIST_ID` | ClickUp list ID to poll. **Required unless `CLICKUP_PARENT_TASK_ID` is set.** |
 | `CLICKUP_PARENT_TASK_ID` | ClickUp parent task ID to poll subtasks from. **Required unless `CLICKUP_LIST_ID` is set.** |
 
+### ClickUp API
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `CLICKUP_API_BASE_URL` | `https://api.clickup.com/api/v2` | Base URL for all ClickUp API requests. Override it to route requests through a proxy or to point clawdup at a mock server for testing. Include the API path prefix (`/api/v2` for the public API); a trailing slash is stripped. The setup wizard (`--setup`) and preflight checks (`--doctor`) honor the same override — for `--setup`, which runs before `.clawdup.env` exists, export it in the shell first. |
+
 ### Git & GitHub
 
 | Variable | Default | Description |

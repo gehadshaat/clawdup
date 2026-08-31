@@ -666,6 +666,7 @@ These can be set in `.clawdup.env` or as system environment variables:
 |---|---|---|---|
 | `CLICKUP_API_TOKEN` | Yes | — | Your ClickUp personal API token |
 | `CLICKUP_LIST_ID` | Yes | — | The ClickUp list ID to poll |
+| `CLICKUP_API_BASE_URL` | No | `https://api.clickup.com/api/v2` | Base URL for ClickUp API requests (override for proxies or mock servers) |
 | `BASE_BRANCH` | No | `main` | Base branch for creating feature branches |
 | `BRANCH_PREFIX` | No | `clickup` | Prefix for task branch names |
 | `POLL_INTERVAL_MS` | No | `30000` | How often to poll ClickUp (milliseconds) |

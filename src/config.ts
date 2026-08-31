@@ -102,6 +102,42 @@ if (!CLICKUP_LIST_ID && !CLICKUP_PARENT_TASK_ID) {
   process.exit(1);
 }
 
+// ClickUp API base URL. Override CLICKUP_API_BASE_URL to route requests
+// through a proxy or point at a mock/self-hosted endpoint. The value must
+// include the API path prefix (the default is ClickUp's public v2 API).
+export const DEFAULT_CLICKUP_API_BASE_URL = "https://api.clickup.com/api/v2";
+
+/**
+ * Resolve the ClickUp API base URL from an override value.
+ * Falls back to the default when unset/blank; strips trailing slashes so
+ * request paths (which start with "/") join cleanly.
+ */
+export function resolveApiBaseUrl(raw: string | undefined): string {
+  const trimmed = (raw ?? "").trim().replace(/\/+$/, "");
+  return trimmed || DEFAULT_CLICKUP_API_BASE_URL;
+}
+
+export const CLICKUP_API_BASE_URL: string = resolveApiBaseUrl(
+  process.env.CLICKUP_API_BASE_URL,
+);
+
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+if (!isHttpUrl(CLICKUP_API_BASE_URL)) {
+  console.error(
+    `ERROR: CLICKUP_API_BASE_URL "${process.env.CLICKUP_API_BASE_URL}" must be an absolute http(s) URL, ` +
+      `e.g. ${DEFAULT_CLICKUP_API_BASE_URL}.`,
+  );
+  process.exit(1);
+}
+
 // GitHub
 export const GITHUB_REPO: string = process.env.GITHUB_REPO || "";
 export const BASE_BRANCH: string = process.env.BASE_BRANCH || "main";

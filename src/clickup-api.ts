@@ -1,12 +1,17 @@
 // ClickUp API v2 client
 // Docs: https://clickup.com/api
 
-import { CLICKUP_API_TOKEN, CLICKUP_LIST_ID, CLICKUP_PARENT_TASK_ID, STATUS, DRY_RUN } from "./config.js";
+import {
+  CLICKUP_API_TOKEN,
+  CLICKUP_API_BASE_URL,
+  CLICKUP_LIST_ID,
+  CLICKUP_PARENT_TASK_ID,
+  STATUS,
+  DRY_RUN,
+} from "./config.js";
 import type { StatusMap } from "./config.js";
 import { log } from "./logger.js";
 import type { ClickUpTask, ClickUpUser, ClickUpList, ClickUpComment, ClickUpDependency } from "./types.js";
-
-const BASE_URL = "https://api.clickup.com/api/v2";
 
 /**
  * Extract plain text from a ClickUp comment.
@@ -31,7 +36,7 @@ async function request<T>(
   path: string,
   body: Record<string, unknown> | null = null,
 ): Promise<T> {
-  const url = path.startsWith("http") ? path : `${BASE_URL}${path}`;
+  const url = path.startsWith("http") ? path : `${CLICKUP_API_BASE_URL}${path}`;
   const opts: RequestInit = {
     method,
     headers: {
