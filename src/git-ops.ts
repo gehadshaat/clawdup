@@ -351,10 +351,70 @@ export async function createPullRequest({
 // --- Native GitHub stacked PRs (public preview) ---
 // A "native stack" is explicit GitHub metadata linking a bottom-up series of
 // PRs: merging a lower layer automatically rebases and retargets the layers
-// above it, and reviewers get the stack map UI. Managed here through the
-// Stacks REST API via `gh api` — no gh extension required. Plain chained PRs
-// (each targeting the previous branch) are NOT recognized as a stack, and
-// only retarget on merge when the merged head branch is deleted.
+// above it, and reviewers get the stack map UI. Stack actions (creating a
+// stack, appending layers) go through the official `gh stack` extension —
+// `gh stack link` chains the already-created PRs — so stack runs require
+// the extension to be installed (the runner offers to install it and
+// aborts otherwise). Only the read-only membership lookup uses the Stacks
+// REST API via `gh api`, because the extension has no non-interactive
+// membership query. Plain chained PRs (each targeting the previous branch)
+// are NOT recognized as a stack, and only retarget on merge when the
+// merged head branch is deleted.
+
+/** Official GitHub CLI extension providing the `gh stack` commands. */
+export const GH_STACK_EXTENSION_REPO = "github/gh-stack";
+
+/** Command a user runs to install the `gh stack` extension. */
+export const GH_STACK_INSTALL_COMMAND = `gh extension install ${GH_STACK_EXTENSION_REPO}`;
+
+/**
+ * Decide from `gh extension list` output whether the `gh stack` extension
+ * is installed. gh derives an extension's command name from its repository
+ * name (gh-stack → `gh stack`), so any listed repository with basename
+ * "gh-stack" provides the command — the official github/gh-stack or a
+ * fork alike.
+ */
+export function parseGhStackInstalled(extensionList: string): boolean {
+  return extensionList
+    .split("\n")
+    .some((line) =>
+      line.split(/\s+/).some((field) => /^(?:[^\s/]+\/)?gh-stack$/i.test(field)),
+    );
+}
+
+/**
+ * Check whether the `gh stack` extension is installed.
+ * `gh extension list` exits non-zero when no extensions are installed at
+ * all — that (like a missing gh) reads as "not installed".
+ */
+export async function isGhStackInstalled(): Promise<boolean> {
+  try {
+    return parseGhStackInstalled(await gh("extension", "list"));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Install the official `gh stack` extension. Throws when the install
+ * fails (gh missing, no network, ...).
+ */
+export async function installGhStackExtension(): Promise<void> {
+  if (DRY_RUN) {
+    log("info", `[DRY RUN] Would run: ${GH_STACK_INSTALL_COMMAND}`);
+    return;
+  }
+  log("info", `Installing the gh stack extension: ${GH_STACK_INSTALL_COMMAND}`);
+  try {
+    await execFileAsync("gh", ["extension", "install", GH_STACK_EXTENSION_REPO], {
+      cwd: GIT_ROOT,
+      timeout: 120000,
+    });
+  } catch (err) {
+    throw new Error(`${GH_STACK_INSTALL_COMMAND} failed: ${(err as Error).message}`);
+  }
+  log("info", "gh stack extension installed.");
+}
 
 /**
  * Extract the pull request number from a GitHub PR URL.
@@ -451,42 +511,62 @@ async function getStackNumberForPR(
 }
 
 /**
- * Create a native stack from a bottom-up list of PR numbers.
- * Returns the new stack's number.
+ * Arguments (after `gh`) for the `gh stack link` invocation realizing a
+ * create or extend plan. PRs are passed bottom-to-top as URLs — never bare
+ * numbers, which `gh stack link` would read as a stack number in first
+ * position. Extending passes the existing stack's number first, appending
+ * the new layers on top; creating pins the bottom layer's base branch
+ * explicitly (the extension defaults to the repository's default branch).
+ */
+export function ghStackLinkArgs(
+  plan:
+    | { action: "create"; baseBranch: string }
+    | { action: "extend"; stackNumber: number },
+  prUrls: string[],
+): string[] {
+  return plan.action === "create"
+    ? ["stack", "link", "--base", plan.baseBranch, ...prUrls]
+    : ["stack", "link", String(plan.stackNumber), ...prUrls];
+}
+
+/**
+ * Create a native stack from a bottom-up list of PR URLs via
+ * `gh stack link`. Returns the new stack's number, read back from the
+ * Stacks API afterwards (the extension prints human-readable output, not
+ * the number) — null when the read-back fails, which doesn't undo the
+ * successful link.
  */
 async function createStackFromPRs(
   repo: string,
-  prNumbers: number[],
-): Promise<number> {
-  const args = ["api", "--method", "POST", `repos/${repo}/stacks`];
-  for (const n of prNumbers) args.push("-F", `pull_requests[]=${n}`);
-  const out = await gh(...args);
-  const num = (JSON.parse(out) as { number?: unknown }).number;
-  if (typeof num !== "number") {
-    throw new Error("stack created but the response carried no stack number");
+  prUrls: string[],
+  bottomPrNumber: number,
+): Promise<number | null> {
+  await gh(...ghStackLinkArgs({ action: "create", baseBranch: BASE_BRANCH }, prUrls));
+  try {
+    return await getStackNumberForPR(repo, bottomPrNumber);
+  } catch {
+    return null;
   }
-  return num;
 }
 
 /**
- * Append PRs onto the top of an existing native stack.
+ * Append PRs (bottom-to-top URLs) onto the top of an existing native stack
+ * via `gh stack link <stack-number> ...`.
  */
 async function addPRsToStack(
-  repo: string,
   stackNumber: number,
-  prNumbers: number[],
+  prUrls: string[],
 ): Promise<void> {
-  const args = ["api", "--method", "POST", `repos/${repo}/stacks/${stackNumber}/add`];
-  for (const n of prNumbers) args.push("-F", `pull_requests[]=${n}`);
-  await gh(...args);
+  await gh(...ghStackLinkArgs({ action: "extend", stackNumber }, prUrls));
 }
 
 /**
- * Link a bottom-up series of open PRs into a native GitHub stack, creating
- * a new stack or extending the one a resumed series already sits in.
- * Never throws: failures (including the Stacks API being unavailable on
- * this repository — the feature is in public preview) come back as a
- * result the caller can report, and the chained PRs keep working as-is.
+ * Link a bottom-up series of open PRs into a native GitHub stack via
+ * `gh stack link`, creating a new stack or extending the one a resumed
+ * series already sits in. Never throws: failures (including stacked PRs
+ * being unavailable on this repository — the feature is in public
+ * preview) come back as a result the caller can report, and the chained
+ * PRs keep working as-is.
  */
 export async function linkStackPRs(prUrls: string[]): Promise<StackLinkResult> {
   if (DRY_RUN) {
@@ -495,12 +575,14 @@ export async function linkStackPRs(prUrls: string[]): Promise<StackLinkResult> {
   }
 
   const prNumbers: number[] = [];
+  const urlByNumber = new Map<number, string>();
   for (const url of prUrls) {
     const n = parsePRNumber(url);
     if (n === null) {
       return { outcome: "skipped", reason: `could not parse a PR number from ${url}` };
     }
     prNumbers.push(n);
+    urlByNumber.set(n, url);
   }
   if (prNumbers.length < 2) {
     return { outcome: "skipped", reason: "a native stack needs at least two open PRs" };
@@ -517,11 +599,13 @@ export async function linkStackPRs(prUrls: string[]): Promise<StackLinkResult> {
     const plan = planStackLink(entries);
     switch (plan.action) {
       case "create": {
-        const stackNumber = await createStackFromPRs(repo, plan.prNumbers);
+        const urls = plan.prNumbers.map((n) => urlByNumber.get(n)!);
+        const stackNumber = await createStackFromPRs(repo, urls, plan.prNumbers[0]!);
         return { outcome: "created", stackNumber, prNumbers: plan.prNumbers };
       }
       case "extend": {
-        await addPRsToStack(repo, plan.stackNumber, plan.prNumbers);
+        const urls = plan.prNumbers.map((n) => urlByNumber.get(n)!);
+        await addPRsToStack(plan.stackNumber, urls);
         return {
           outcome: "extended",
           stackNumber: plan.stackNumber,
@@ -539,6 +623,14 @@ export async function linkStackPRs(prUrls: string[]): Promise<StackLinkResult> {
     }
   } catch (err) {
     const message = (err as Error).message;
+    if (/unknown command "?stack"?/i.test(message)) {
+      // The extension disappeared between the run's up-front check and the
+      // linking step — report instead of crashing the finished run.
+      return {
+        outcome: "failed",
+        reason: `the gh stack extension is not installed (install: ${GH_STACK_INSTALL_COMMAND})`,
+      };
+    }
     if (/HTTP 404/.test(message)) {
       return {
         outcome: "unavailable",

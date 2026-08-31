@@ -1,9 +1,12 @@
 // Tests for native-stack linking's pure helpers: PR-number parsing,
-// linkable-series selection, and the create/extend/skip planning logic.
+// linkable-series selection, the create/extend/skip planning logic,
+// gh-stack extension detection, and `gh stack link` argument building.
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  ghStackLinkArgs,
+  parseGhStackInstalled,
   parsePRNumber,
   planStackLink,
   selectLinkablePrUrls,
@@ -106,5 +109,69 @@ describe("planStackLink", () => {
   it("skips when a stacked PR sits above an unstacked one", () => {
     const plan = planStackLink([unstacked(1), inStack(2, 42)]);
     assert.equal(plan.action, "skip");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseGhStackInstalled
+// ---------------------------------------------------------------------------
+describe("parseGhStackInstalled", () => {
+  it("detects the official extension in tab-separated gh output", () => {
+    assert.equal(parseGhStackInstalled("gh stack\tgithub/gh-stack\tv1.0.0"), true);
+  });
+
+  it("detects a fork of the extension (command name comes from the repo basename)", () => {
+    assert.equal(parseGhStackInstalled("gh stack\tsomeuser/gh-stack\tv0.9.0"), true);
+  });
+
+  it("detects it among other extensions in space-aligned output with a header", () => {
+    const out = [
+      "NAME       REPO                 VERSION",
+      "gh dash    dlvhdr/gh-dash       v4.0.0",
+      "gh stack   github/gh-stack      v1.2.3",
+    ].join("\n");
+    assert.equal(parseGhStackInstalled(out), true);
+  });
+
+  it("ignores similarly named extensions", () => {
+    const out = [
+      "gh stacker\to/gh-stacker\tv1.0.0",
+      "gh stack-tools\to/gh-stack-tools\tv1.0.0",
+    ].join("\n");
+    assert.equal(parseGhStackInstalled(out), false);
+  });
+
+  it("returns false when no extensions are listed", () => {
+    assert.equal(parseGhStackInstalled(""), false);
+    assert.equal(parseGhStackInstalled("no installed extensions found"), false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ghStackLinkArgs
+// ---------------------------------------------------------------------------
+describe("ghStackLinkArgs", () => {
+  const urls = [
+    "https://github.com/o/r/pull/1",
+    "https://github.com/o/r/pull/2",
+  ];
+
+  it("creates with an explicit base and bottom-up PR URLs", () => {
+    assert.deepEqual(ghStackLinkArgs({ action: "create", baseBranch: "main" }, urls), [
+      "stack",
+      "link",
+      "--base",
+      "main",
+      ...urls,
+    ]);
+  });
+
+  it("extends by passing the existing stack's number first", () => {
+    assert.deepEqual(ghStackLinkArgs({ action: "extend", stackNumber: 42 }, urls), [
+      "stack",
+      "link",
+      "42",
+      ...urls,
+    ]);
   });
 });

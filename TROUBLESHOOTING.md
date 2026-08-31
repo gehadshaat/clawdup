@@ -338,6 +338,23 @@ Stack mode builds each subtask's branch on the previous one, so when a subtask f
 - Starting the continuous polling runner between stack runs prunes local branches; that's fine — stack resume recreates them from `origin/`
 - `AUTO_APPROVE` is intentionally ignored in stack mode
 
+---
+
+### `--stack` Aborts: gh stack Extension Required
+
+**Symptoms:**
+- `--stack` exits immediately with `--stack requires the gh stack extension`
+- No install prompt appears (non-interactive terminal, e.g. CI or piped output)
+
+**What happens:**
+Stack runs link the series' PRs into a native GitHub stack through the official `gh stack` extension. On an interactive terminal clawdup offers to install it before the run starts; when it can't ask — or the offer is declined — the run aborts before touching any task.
+
+**Fix:**
+- Install the extension once: `gh extension install github/gh-stack` (then re-run `--stack`)
+- Or set `NATIVE_STACKS=false` to run the stack as plain chained PRs (no extension needed; merge bottom-up and delete each merged branch)
+
+---
+
 ### Stacked PR Still Targets a Merged Branch (`--stack`)
 
 **Symptoms:**
@@ -345,12 +362,12 @@ Stack mode builds each subtask's branch on the previous one, so when a subtask f
 - The next PR's diff looks stale or shows the already-merged changes
 
 **What happens:**
-Clawdup links a stack run's open PRs into a **native GitHub stack** (Stacks REST API, public preview) so GitHub retargets automatically after each merge. When that linking didn't happen — the API was unavailable for the repository, `NATIVE_STACKS=false`, or the stack predates the feature — the PRs are plain chained PRs, and GitHub only retargets the next PR when the merged PR's **head branch is deleted**. Merging without deleting the branch leaves the next PR pointing at a merged, stale branch.
+Clawdup links a stack run's open PRs into a **native GitHub stack** (public preview) via the `gh stack` extension so GitHub retargets automatically after each merge. When that linking didn't happen — stacked PRs unavailable for the repository, `NATIVE_STACKS=false`, or the stack predates the feature — the PRs are plain chained PRs, and GitHub only retargets the next PR when the merged PR's **head branch is deleted**. Merging without deleting the branch leaves the next PR pointing at a merged, stale branch.
 
 **Recovery:**
 1. Delete the merged PR's branch (the "Delete branch" button on the merged PR, or `git push origin --delete <branch>`) — GitHub retargets the dependent PR immediately, even after the fact. Or retarget manually: `gh pr edit <pr-number> --base <base-branch>`
 2. If the merge was a squash, the retargeted PR's diff still shows the earlier changes until the base branch is merged into its branch (or the task is moved to "approved", where the merge-conflict flow handles it)
-3. Optionally link the remaining open PRs into a native stack yourself: `gh api --method POST repos/<owner>/<repo>/stacks -F "pull_requests[]=<lower>" -F "pull_requests[]=<upper>"` (bottom-up), or `gh stack link <lower> <upper>` with the [gh-stack extension](https://docs.github.com/en/pull-requests/reference/stacked-prs-cli-commands)
+3. Optionally link the remaining open PRs into a native stack yourself: `gh stack link <lower-pr-url> <upper-pr-url>` (bottom-up) with the [gh stack extension](https://docs.github.com/en/pull-requests/reference/stacked-prs-cli-commands) — the same extension clawdup uses (`gh extension install github/gh-stack`)
 
 **Prevention:**
 - Leave `NATIVE_STACKS` enabled (the default) — the run summary comment says whether linking succeeded

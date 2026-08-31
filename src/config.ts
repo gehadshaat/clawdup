@@ -245,10 +245,13 @@ export const ADDRESS_PR_COMMENTS: boolean =
   (process.env.ADDRESS_PR_COMMENTS || "true").toLowerCase() === "true";
 
 // Native GitHub stacked PRs (public preview): after a --stack run, link the
-// series' open PRs into a native stack via the GitHub Stacks REST API, so
-// merging a lower PR automatically rebases and retargets the ones above it.
-// Best-effort — on repositories where the API is unavailable the chained
-// PRs behave exactly as before. Set NATIVE_STACKS=false to disable.
+// series' open PRs into a native stack via the official `gh stack` extension
+// (github/gh-stack), so merging a lower PR automatically rebases and
+// retargets the ones above it. The extension is required for stack runs —
+// --stack offers to install it when missing and aborts otherwise. Linking
+// itself stays best-effort: on repositories where stacked PRs are
+// unavailable the chained PRs behave exactly as before. Set
+// NATIVE_STACKS=false to disable (plain chained PRs — no extension needed).
 export const NATIVE_STACKS: boolean =
   (process.env.NATIVE_STACKS || "true").toLowerCase() === "true";
 

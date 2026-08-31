@@ -138,14 +138,18 @@ export type StackLinkPlan =
   | { action: "skip"; reason: string };
 
 /**
- * Outcome of linking a stack run's open PRs into a native GitHub stack.
- * "unavailable" means the Stacks API is not enabled for the repository
- * (the feature is in public preview) — the chained PRs still work, they
- * just need manual bottom-up merging.
+ * Outcome of linking a stack run's open PRs into a native GitHub stack
+ * through the `gh stack` extension. "created" carries a null stackNumber
+ * when the new stack's number could not be read back afterwards
+ * (`gh stack link` itself does not report it). "unavailable" means
+ * stacked pull requests are not enabled for the repository (the feature
+ * is in public preview) — the chained PRs still work, they just need
+ * manual bottom-up merging.
  */
 export type StackLinkResult =
+  | { outcome: "created"; stackNumber: number | null; prNumbers: number[] }
   | {
-      outcome: "created" | "extended" | "already-linked";
+      outcome: "extended" | "already-linked";
       stackNumber: number;
       prNumbers: number[];
     }

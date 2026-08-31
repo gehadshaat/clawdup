@@ -200,6 +200,12 @@ Stack mode (--stack [task-id]):
   leaf subtasks instead), or the subtasks of CLICKUP_PARENT_TASK_ID when
   that is configured.
 
+  The series' open PRs are linked into a native GitHub stack via the gh
+  stack extension (gh extension install github/gh-stack). The extension is
+  required: when it's missing, --stack offers to install it on an
+  interactive terminal and aborts otherwise. Set NATIVE_STACKS=false to
+  skip native linking (plain chained PRs — no extension needed).
+
 Signals:
   SIGINT/SIGTERM: Graceful shutdown (finishes current task, then exits)
 `);
@@ -316,8 +322,11 @@ CLICKUP_LIST_ID=
 # Auto-approve mode: merge PRs immediately after Claude completes (skip manual review)
 # AUTO_APPROVE=true
 
-# Link --stack runs' PRs into a native GitHub stack (public preview) so merging
-# a lower PR automatically retargets the ones above. Best-effort; set to false to disable.
+# Link --stack runs' PRs into a native GitHub stack (public preview) via the
+# gh stack extension (gh extension install github/gh-stack) so merging a lower
+# PR automatically retargets the ones above. --stack offers to install the
+# extension when it's missing and aborts otherwise; set to false to disable
+# native linking (plain chained PRs — no extension needed).
 # NATIVE_STACKS=true
 
 # Log level: debug | info | warn | error
@@ -508,6 +517,22 @@ async function runChecks({
       console.error('    Run: gh auth login');
       allGood = false;
     }
+  }
+
+  // Check the gh stack extension (informational — only --stack needs it,
+  // and --stack itself offers to install it before running)
+  try {
+    const { isGhStackInstalled, GH_STACK_INSTALL_COMMAND } = await import("./git-ops.js");
+    if (await isGhStackInstalled()) {
+      console.log("  gh stack extension: installed");
+    } else {
+      console.log(
+        "  gh stack extension: not installed (only needed for --stack, which " +
+          `offers to install it; or run: ${GH_STACK_INSTALL_COMMAND})`,
+      );
+    }
+  } catch {
+    // gh missing — already reported above
   }
 
   // Check for CLAUDE.md / config file at the repo root (where clawdup

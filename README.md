@@ -348,7 +348,8 @@ clawdup                     # Let it cook (continuous polling)
 clawdup --once <task-id>    # YOLO one task
 clawdup --stack <task-id>   # Implement all leaf subtasks of a task sequentially
                             # as stacked PRs (each branch/PR built on the last),
-                            # linked as a native GitHub stack where available
+                            # linked natively via the gh stack extension
+                            # (offers to install it if missing, aborts otherwise)
 clawdup --stack             # Same, for the full configured source (every open
                             # task in the list, or the parent task's subtasks)
 clawdup --interactive       # Pair-program with the AI (accepts user input)
