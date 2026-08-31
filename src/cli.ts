@@ -12,7 +12,7 @@
 //   clawdup --init       Create example config files at the repo root
 //
 // clawdup is installed globally (npm install -g clawdup) and configured
-// per-repository via an untracked .clawdup.env at the repo root.
+// per-repository via an untracked .env.local at the repo root.
 
 import { resolve } from "path";
 import { existsSync, writeFileSync } from "fs";
@@ -149,14 +149,15 @@ Usage:
 
 Quick Start:
   ${globalInstallCommand(pm, "clawdup")}     Install once, globally
-  clawdup --setup                Interactive setup (writes .clawdup.env at the
+  clawdup --setup                Interactive setup (writes .env.local at the
                                  repo root and gitignores it)
   clawdup --init                 Non-interactive: create example config files
   clawdup                        Run from anywhere inside the repo
 
 Configuration:
-  clawdup is configured per-repository via a .clawdup.env file at the repo
-  root. The file holds secrets and is never committed (--setup / --init add
+  clawdup is configured per-repository via a .env.local file at the repo
+  root (the legacy names .clawdup.env and .env.clickup are still read).
+  The file holds secrets and is never committed (--setup / --init add
   it to .gitignore automatically):
     CLICKUP_API_TOKEN=pk_xxx
     CLICKUP_LIST_ID=xxx          # Poll tasks from a list
@@ -253,7 +254,7 @@ Status names can be customized via environment variables (STATUS_TODO, etc).
 
 async function initProject(): Promise<void> {
   const repoRoot = detectRepoRoot();
-  const envDest = resolve(repoRoot, ".clawdup.env");
+  const envDest = resolve(repoRoot, ".env.local");
   const configDest = resolve(repoRoot, "clawdup.config.mjs");
 
   console.log(`Initializing clawdup at the repo root: ${repoRoot}\n`);
@@ -379,7 +380,7 @@ Run the formatter/linter after making changes to ensure code style is correct.
 
   console.log(`
 Done! Next steps:
-  1. Edit .clawdup.env with your ClickUp API token and list ID
+  1. Edit .env.local with your ClickUp API token and list ID
   2. Optionally customize clawdup.config.mjs
   3. Run: clawdup --check   (validate config)
   4. Run: clawdup           (start automation)

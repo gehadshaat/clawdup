@@ -151,7 +151,7 @@ async function checkRemoteAndBaseBranch(): Promise<PreflightCheckResult> {
       name: "Remote reachable",
       ok: false,
       message: `Base branch "origin/${BASE_BRANCH}" does not exist on remote.`,
-      fix: `Ensure the branch "${BASE_BRANCH}" exists on the remote, or set BASE_BRANCH in .clawdup.env.`,
+      fix: `Ensure the branch "${BASE_BRANCH}" exists on the remote, or set BASE_BRANCH in .env.local.`,
     };
   }
 
@@ -246,7 +246,7 @@ async function checkClickUpConnectivity(): Promise<PreflightCheckResult> {
         ok: false,
         message: `ClickUp API returned ${res.status}: ${text.slice(0, 200)}`,
         fix: res.status === 401
-          ? "Check your CLICKUP_API_TOKEN in .clawdup.env — it may be expired or invalid."
+          ? "Check your CLICKUP_API_TOKEN in .env.local — it may be expired or invalid."
           : "Check your CLICKUP_API_TOKEN and network connection.",
       };
     }
@@ -257,7 +257,7 @@ async function checkClickUpConnectivity(): Promise<PreflightCheckResult> {
       name: "ClickUp connectivity",
       ok: false,
       message: `Cannot reach ClickUp API at ${CLICKUP_API_BASE_URL}: ${(err as Error).message}`,
-      fix: "Check your network connection and CLICKUP_API_TOKEN in .clawdup.env (and CLICKUP_API_BASE_URL if you override it).",
+      fix: "Check your network connection and CLICKUP_API_TOKEN in .env.local (and CLICKUP_API_BASE_URL if you override it).",
     };
   }
 }

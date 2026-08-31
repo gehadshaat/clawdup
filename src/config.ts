@@ -1,12 +1,12 @@
 // Configuration module.
 // Resolves settings from (in priority order):
 //   1. Environment variables
-//   2. .clawdup.env at the repository root
+//   2. .env.local at the repository root (legacy: .clawdup.env, .env.clickup)
 //   3. clawdup.config.mjs at the repository root
 //   4. Defaults
 //
 // clawdup is installed globally, never as a project dependency. Each
-// repository is set up by dropping an untracked .clawdup.env at its root
+// repository is set up by dropping an untracked .env.local at its root
 // (created by `clawdup --init` / `clawdup --setup`, which also gitignore it).
 
 import { existsSync, readFileSync } from "fs";
@@ -16,36 +16,41 @@ import type { UserConfig } from "./types.js";
 
 // GIT_ROOT is the repository root (where .git lives), detected from the
 // invocation directory — so clawdup behaves the same no matter which
-// subdirectory of the repo it is run from. Config files (.clawdup.env,
+// subdirectory of the repo it is run from. Config files (.env.local,
 // clawdup.config.mjs, CLAUDE.md), runtime state files, and git operations
 // all anchor here. Falls back to cwd outside a git repository.
 export const GIT_ROOT: string = detectRepoRoot();
 
 // --- .env loading ---
-// Look for .clawdup.env at the repository root
+// Look for the env file at the repository root. .env.local is the canonical
+// name; .clawdup.env and .env.clickup are legacy names still honored so
+// existing setups keep working. Every file found is loaded in that priority
+// order — a key is only set when not already present, so earlier files win
+// per key and real environment variables always win over any file. That also
+// keeps a framework-owned .env.local (without clawdup vars) from shadowing a
+// legacy .clawdup.env.
 const envCandidates = [
+  resolve(GIT_ROOT, ".env.local"),
   resolve(GIT_ROOT, ".clawdup.env"),
   resolve(GIT_ROOT, ".env.clickup"),
 ];
 
 for (const envPath of envCandidates) {
-  if (existsSync(envPath)) {
-    const envContent = readFileSync(envPath, "utf-8");
-    for (const line of envContent.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-      const eqIndex = trimmed.indexOf("=");
-      if (eqIndex === -1) continue;
-      const key = trimmed.slice(0, eqIndex).trim();
-      const value = trimmed
-        .slice(eqIndex + 1)
-        .trim()
-        .replace(/^["']|["']$/g, "");
-      if (!process.env[key]) {
-        process.env[key] = value;
-      }
+  if (!existsSync(envPath)) continue;
+  const envContent = readFileSync(envPath, "utf-8");
+  for (const line of envContent.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eqIndex = trimmed.indexOf("=");
+    if (eqIndex === -1) continue;
+    const key = trimmed.slice(0, eqIndex).trim();
+    const value = trimmed
+      .slice(eqIndex + 1)
+      .trim()
+      .replace(/^["']|["']$/g, "");
+    if (!process.env[key]) {
+      process.env[key] = value;
     }
-    break; // only load the first one found
   }
 }
 
@@ -80,7 +85,7 @@ function required(name: string): string {
   const val = process.env[name];
   if (!val) {
     console.error(`ERROR: Missing required environment variable: ${name}`);
-    console.error(`Set it in .clawdup.env (at your repo root) or export it.`);
+    console.error(`Set it in .env.local (at your repo root) or export it.`);
     console.error(`Run "clawdup --setup" or "clawdup --init" to create the file.`);
     process.exit(1);
   }
@@ -97,7 +102,7 @@ if (!CLICKUP_LIST_ID && !CLICKUP_PARENT_TASK_ID) {
     "ERROR: Either CLICKUP_LIST_ID or CLICKUP_PARENT_TASK_ID must be set.",
   );
   console.error(
-    "Set one in .clawdup.env (at your repo root) or export it.",
+    "Set one in .env.local (at your repo root) or export it.",
   );
   process.exit(1);
 }

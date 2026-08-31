@@ -530,8 +530,9 @@ Settings are resolved from multiple sources with clear precedence:
 ┌─────────────────────────┐  Highest priority
 │  Environment variables   │  (already set in process.env)
 ├─────────────────────────┤
-│  .clawdup.env file       │  (only sets values NOT in env)
-│  (or .env.clickup)       │
+│  .env.local file         │  (only sets values NOT in env;
+│  (legacy: .clawdup.env,  │   earlier files win per key)
+│   .env.clickup)          │
 ├─────────────────────────┤
 │  clawdup.config.mjs      │  (prompt and claudeArgs only)
 ├─────────────────────────┤
@@ -544,6 +545,6 @@ Settings are resolved from multiple sources with clear precedence:
 Everything is anchored at a single root path:
 - **`GIT_ROOT`** = `git rev-parse --show-toplevel`, detected from the invocation directory (falls back to `cwd` outside a git repo)
 
-Config files (`.clawdup.env`, `clawdup.config.mjs`, `CLAUDE.md`), runtime state files (`.clawdup.lock`, `.clawdup.todo.json`, `.clawdup-sessions/`), and all git operations resolve from `GIT_ROOT` — so `clawdup` behaves identically from any subdirectory of the repository. clawdup itself is installed globally; the repo carries only the untracked `.clawdup.env`.
+Config files (`.env.local`, `clawdup.config.mjs`, `CLAUDE.md`), runtime state files (`.clawdup.lock`, `.clawdup.todo.json`, `.clawdup-sessions/`), and all git operations resolve from `GIT_ROOT` — so `clawdup` behaves identically from any subdirectory of the repository. clawdup itself is installed globally; the repo carries only the untracked `.env.local`.
 
 For the full configuration reference, see [CONFIGURATION.md](CONFIGURATION.md).

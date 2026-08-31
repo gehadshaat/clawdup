@@ -1,5 +1,5 @@
 // Tests for repo-root utilities — chiefly the .gitignore guarantee that
-// keeps .clawdup.env (secrets) and runtime state files out of version control.
+// keeps .env.local (secrets) and runtime state files out of version control.
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -53,8 +53,10 @@ describe("ensureGitignoreEntries", () => {
   });
 
   it("always covers the env file that holds secrets", () => {
-    // Guard against the entry list ever losing the one file that must
-    // absolutely never be committed.
+    // Guard against the entry list ever losing the files that must
+    // absolutely never be committed (canonical name + legacy names that
+    // existing setups still use).
+    assert.ok(GITIGNORE_ENTRIES.includes(".env.local"));
     assert.ok(GITIGNORE_ENTRIES.includes(".clawdup.env"));
     const dir = tempRepoDir();
     ensureGitignoreEntries(dir);

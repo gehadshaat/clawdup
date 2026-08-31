@@ -1,5 +1,5 @@
 // Interactive setup wizard for clawdup.
-// Writes .clawdup.env at the repository root and makes sure it is gitignored.
+// Writes .env.local at the repository root and makes sure it is gitignored.
 // clawdup is installed globally — setup never touches the repo's package.json.
 
 import { createInterface } from "readline";
@@ -13,7 +13,7 @@ const rl = createInterface({
   output: process.stdout,
 });
 
-// ClickUp API base URL. Setup runs before .clawdup.env exists (it can't load
+// ClickUp API base URL. Setup runs before .env.local exists (it can't load
 // config.ts, which requires a token), so an override must come from the shell
 // environment: CLICKUP_API_BASE_URL=... clawdup --setup. Normal runs read the
 // same variable via config.ts.
@@ -96,7 +96,7 @@ function reportStatusCoverage(statuses: { status: string; type?: string }[]): vo
     console.log(
       "  clawdup needs at least: to do, in progress, and a done/closed status.",
     );
-    console.log("  Add them in ClickUp, or map yours via STATUS_* variables in .clawdup.env.");
+    console.log("  Add them in ClickUp, or map yours via STATUS_* variables in .env.local.");
   } else if (optionalMissing.length > 0) {
     console.log(`\n  Minimal status setup detected — missing optional statuses: ${optionalMissing.join(", ")}`);
     console.log("  That's fine: clawdup falls back to the statuses you have.");
@@ -323,7 +323,7 @@ async function checkCliDependencies(): Promise<void> {
 
 export async function runSetup(): Promise<void> {
   const repoRoot = detectRepoRoot();
-  const envPath = resolve(repoRoot, ".clawdup.env");
+  const envPath = resolve(repoRoot, ".env.local");
 
   console.log(`
 ╔══════════════════════════════════════════════╗
@@ -337,8 +337,10 @@ export async function runSetup(): Promise<void> {
   await checkCliDependencies();
 
   if (existsSync(envPath)) {
+    // .env.local may also be used by other tooling — replacing it discards
+    // anything else in the file, so make the prompt explicit about that.
     const overwrite = await ask(
-      ".clawdup.env already exists. Overwrite? (y/N)",
+      ".env.local already exists. Replace the whole file? (y/N)",
       "N",
     );
     if (overwrite.toLowerCase() !== "y") {
@@ -544,10 +546,10 @@ LOG_LEVEL=info
 `;
 
   writeFileSync(envPath, envContent);
-  console.log(`\n.clawdup.env written to: ${envPath}`);
+  console.log(`\n.env.local written to: ${envPath}`);
 
   // Make sure the env file (secrets!) and clawdup's runtime state files
-  // are gitignored — .clawdup.env must never be committed.
+  // are gitignored — .env.local must never be committed.
   const added = ensureGitignoreEntries(repoRoot);
   if (added.length > 0) {
     console.log(`Added to .gitignore: ${added.join(", ")}`);

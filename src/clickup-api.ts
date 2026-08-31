@@ -1285,7 +1285,7 @@ export async function validateStatuses(): Promise<boolean> {
     );
     log(
       "warn",
-      `Please create these statuses in ClickUp or map yours via STATUS_* variables in .clawdup.env. ` +
+      `Please create these statuses in ClickUp or map yours via STATUS_* variables in .env.local. ` +
         `Only "to do", "in progress", and a done/closed status are required — run "clawdup --statuses" for details.`,
     );
     return false;
