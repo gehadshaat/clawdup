@@ -1,7 +1,7 @@
 // Configuration module.
 // Resolves settings from (in priority order):
 //   1. Environment variables
-//   2. .env.local at the repository root (legacy: .clawdup.env, .env.clickup)
+//   2. .env.local at the repository root
 //   3. clawdup.config.mjs at the repository root
 //   4. Defaults
 //
@@ -22,21 +22,10 @@ import type { UserConfig } from "./types.js";
 export const GIT_ROOT: string = detectRepoRoot();
 
 // --- .env loading ---
-// Look for the env file at the repository root. .env.local is the canonical
-// name; .clawdup.env and .env.clickup are legacy names still honored so
-// existing setups keep working. Every file found is loaded in that priority
-// order — a key is only set when not already present, so earlier files win
-// per key and real environment variables always win over any file. That also
-// keeps a framework-owned .env.local (without clawdup vars) from shadowing a
-// legacy .clawdup.env.
-const envCandidates = [
-  resolve(GIT_ROOT, ".env.local"),
-  resolve(GIT_ROOT, ".clawdup.env"),
-  resolve(GIT_ROOT, ".env.clickup"),
-];
-
-for (const envPath of envCandidates) {
-  if (!existsSync(envPath)) continue;
+// Load .env.local from the repository root. A key is only set when not
+// already present, so real environment variables always win over the file.
+const envPath = resolve(GIT_ROOT, ".env.local");
+if (existsSync(envPath)) {
   const envContent = readFileSync(envPath, "utf-8");
   for (const line of envContent.split("\n")) {
     const trimmed = line.trim();
@@ -51,6 +40,17 @@ for (const envPath of envCandidates) {
     if (!process.env[key]) {
       process.env[key] = value;
     }
+  }
+}
+
+// The old env filenames are not read anymore — nudge once toward the rename
+// so an upgrade doesn't fail with a bare "missing variable" error.
+for (const oldName of [".clawdup.env", ".env.clickup"]) {
+  if (existsSync(resolve(GIT_ROOT, oldName))) {
+    console.warn(
+      `Warning: ${oldName} is no longer read — clawdup now uses .env.local. Rename or delete it.`,
+    );
+    break;
   }
 }
 

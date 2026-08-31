@@ -364,7 +364,7 @@ clawdup --init
 ```
 
 This creates two files at the **repository root** (wherever you run it from inside the repo):
-- **`.env.local`** — Environment variables (API token, list ID, etc.)
+- **`.env.local`** — Environment variables (API token, list ID, etc.). If the file already exists (say, from your app framework), the clawdup template is appended to it instead of overwriting it.
 - **`clawdup.config.mjs`** — Optional Claude Code customization
 
 Edit `.env.local` and fill in your values:
@@ -750,7 +750,7 @@ clawdup
 
 Your `.env.local` file is missing or doesn't contain `CLICKUP_API_TOKEN`. Make sure:
 - The file exists at the **root of the repository** you're running `clawdup` in
-- The file is named `.env.local` (the legacy names `.clawdup.env` and `.env.clickup` also work)
+- The file is named `.env.local`
 - The token value is set correctly (no quotes needed)
 
 Run `clawdup --setup` (or `clawdup --init`) to create it.

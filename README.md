@@ -223,7 +223,7 @@ CLICKUP_API_TOKEN=pk_xxx
 CLICKUP_LIST_ID=your-list-id
 ```
 
-The legacy filenames `.clawdup.env` and `.env.clickup` are still read (with `.env.local` taking precedence per variable), so existing setups keep working. Config is always resolved from the repo root, so `clawdup` behaves the same no matter which subdirectory you run it from.
+Config is always resolved from the repo root, so `clawdup` behaves the same no matter which subdirectory you run it from. If `.env.local` already exists (say, from your app framework), `--setup` and `--init` append clawdup's settings to it instead of overwriting it.
 
 **This file holds secrets and is never committed.** `clawdup --setup` / `clawdup --init` add it (plus clawdup's runtime state files) to your `.gitignore` automatically — verify it's there if you create the file by hand:
 

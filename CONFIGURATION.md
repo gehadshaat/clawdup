@@ -114,7 +114,7 @@ CLICKUP_PARENT_TASK_ID=abc123xyz
 Primary configuration file. Contains API tokens and settings as `KEY=VALUE` pairs.
 
 - Lives at the **repository root** and is resolved from there no matter which subdirectory `clawdup` is run from.
-- Legacy filenames: `.clawdup.env` and `.env.clickup` are still read, so existing setups keep working. All found files are loaded with `.env.local` taking precedence per variable.
+- Shared-friendly: when the file already exists (e.g. created by your app framework), `--setup` and `--init` append clawdup's settings instead of overwriting it.
 - Values do **not** override existing environment variables.
 - **Never committed** — it contains secrets. `clawdup --setup` / `clawdup --init` add it to `.gitignore` automatically; keep it there.
 
@@ -259,11 +259,11 @@ The runner periodically restarts itself to pick up fresh code and avoid long-run
 Settings are resolved in this order (highest priority first):
 
 1. **Environment variables** — `export POLL_INTERVAL_MS=60000`
-2. **`.env.local`** (then the legacy `.clawdup.env`, `.env.clickup`) — loaded from the repository root
+2. **`.env.local`** — loaded from the repository root
 3. **`clawdup.config.mjs`** — JavaScript config file for `prompt` and `claudeArgs`, also at the repository root
 4. **Defaults** — built-in fallback values
 
-Environment variables set before running clawdup always take precedence. The env files only set values that are not already in the environment — which also means `.env.local` wins over the legacy files per variable.
+Environment variables set before running clawdup always take precedence. The `.env.local` file only sets values that are not already in the environment.
 
 ---
 

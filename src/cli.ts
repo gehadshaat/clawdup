@@ -15,9 +15,10 @@
 // per-repository via an untracked .env.local at the repo root.
 
 import { resolve } from "path";
-import { existsSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { detectPackageManager, globalInstallCommand } from "./package-manager.js";
 import { detectRepoRoot, ensureGitignoreEntries } from "./repo-root.js";
+import { hasClawdupConfig } from "./env-file.js";
 
 const args = process.argv.slice(2);
 
@@ -156,8 +157,7 @@ Quick Start:
 
 Configuration:
   clawdup is configured per-repository via a .env.local file at the repo
-  root (the legacy names .clawdup.env and .env.clickup are still read).
-  The file holds secrets and is never committed (--setup / --init add
+  root. The file holds secrets and is never committed (--setup / --init add
   it to .gitignore automatically):
     CLICKUP_API_TOKEN=pk_xxx
     CLICKUP_LIST_ID=xxx          # Poll tasks from a list
@@ -259,12 +259,7 @@ async function initProject(): Promise<void> {
 
   console.log(`Initializing clawdup at the repo root: ${repoRoot}\n`);
 
-  if (existsSync(envDest)) {
-    console.log(`  SKIP  ${envDest} (already exists)`);
-  } else {
-    writeFileSync(
-      envDest,
-      `# ClickUp Task Automation - Environment Variables
+  const envTemplate = `# ClickUp Task Automation - Environment Variables
 # This file holds secrets — it is gitignored and must never be committed.
 # Docs: https://github.com/gehadshaat/clawdup
 
@@ -339,9 +334,22 @@ CLICKUP_LIST_ID=
 
 # Log output format: text (default) or json
 # LOG_FORMAT=json
-`,
-    );
+`;
+
+  if (!existsSync(envDest)) {
+    writeFileSync(envDest, envTemplate);
     console.log(`  CREATE  ${envDest}`);
+  } else {
+    const existing = readFileSync(envDest, "utf-8");
+    if (hasClawdupConfig(existing)) {
+      console.log(`  SKIP  ${envDest} (clawdup already configured)`);
+    } else {
+      // .env.local may belong to other tooling — append the clawdup template
+      // rather than rewriting the file.
+      const separator = existing.endsWith("\n") ? "\n" : "\n\n";
+      writeFileSync(envDest, existing + separator + envTemplate);
+      console.log(`  APPEND  ${envDest} (clawdup template added to existing file)`);
+    }
   }
 
   if (existsSync(configDest)) {

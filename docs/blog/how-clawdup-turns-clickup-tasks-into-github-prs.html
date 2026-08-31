@@ -150,12 +150,12 @@
 
       <ol>
         <li><strong>Environment variables</strong> (highest priority)</li>
-        <li><strong>.clawdup.env file</strong> in the working directory</li>
+        <li><strong>.env.local file</strong> at the repository root</li>
         <li><strong>clawdup.config.mjs</strong> for Claude-specific settings</li>
         <li><strong>Defaults</strong> (lowest priority)</li>
       </ol>
 
-      <p>This cascade means you can set project-wide defaults in a config file and override specific values per-environment using environment variables. In a monorepo, each package can have its own <code>.clawdup.env</code> pointing to a different ClickUp list while sharing the same repository.</p>
+      <p>This cascade means you can set project-wide defaults in a config file and override specific values per-environment using environment variables. The <code>.env.local</code> file at the repository root configures the whole repo, no matter which subdirectory clawdup runs from.</p>
 
       <h2>Why This Architecture</h2>
 

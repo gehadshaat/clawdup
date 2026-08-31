@@ -530,9 +530,7 @@ Settings are resolved from multiple sources with clear precedence:
 ┌─────────────────────────┐  Highest priority
 │  Environment variables   │  (already set in process.env)
 ├─────────────────────────┤
-│  .env.local file         │  (only sets values NOT in env;
-│  (legacy: .clawdup.env,  │   earlier files win per key)
-│   .env.clickup)          │
+│  .env.local file         │  (only sets values NOT in env)
 ├─────────────────────────┤
 │  clawdup.config.mjs      │  (prompt and claudeArgs only)
 ├─────────────────────────┤

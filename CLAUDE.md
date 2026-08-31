@@ -58,9 +58,9 @@ Tests cover pure functions (no network); running them requires dummy config env 
 ## Key Architecture Decisions
 
 - **Zero runtime deps:** Everything uses Node built-ins and shelled-out CLI tools
-- **Global CLI, per-repo config:** clawdup is installed globally, never as a project dependency; each repo is configured by an untracked `.env.local` at its root (created and gitignored by `--setup`/`--init`; the legacy names `.clawdup.env` / `.env.clickup` are still read)
+- **Global CLI, per-repo config:** clawdup is installed globally, never as a project dependency; each repo is configured by an untracked `.env.local` at its root (created and gitignored by `--setup`/`--init`)
 - **Repo-root anchoring:** GIT_ROOT (detected via `git rev-parse --show-toplevel` from cwd) anchors config files, CLAUDE.md, runtime state files, and git operations — running from any subdirectory behaves identically
 - **Stream-JSON parsing:** Claude Code output is consumed as JSONL for structured event processing
 - **Security-first:** Task content from ClickUp is treated as untrusted input — prompt injection detection, content sanitization, and boundary markers are enforced (see [PROMPT_SAFETY.md](PROMPT_SAFETY.md) for full guidelines)
-- **Config cascade:** Environment variables → repo-root `.env.local` (then legacy `.clawdup.env`, `.env.clickup`) → `clawdup.config.mjs` → defaults
+- **Config cascade:** Environment variables → repo-root `.env.local` → `clawdup.config.mjs` → defaults
 - **Minimal status lists:** Only `to do` / `in progress` / a done-closed status are required in ClickUp; missing optional statuses (in review, approved, require input, blocked) are resolved to fallbacks at startup (`resolveStatusFallbacks` in clickup-api.ts)
