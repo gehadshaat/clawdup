@@ -72,6 +72,8 @@ import {
   pruneWorktrees,
   resetSlotToBase,
   isAncestor,
+  evaluateStackBase,
+  describeStackBaseVerdict,
   linkStackPRs,
   selectLinkablePrUrls,
   isGhStackInstalled,
@@ -94,6 +96,7 @@ import type {
   ClickUpTask,
   ClaudeResult,
   TaskOutcome,
+  StackBaseVerdict,
   StackContext,
   StackInfo,
   StackLinkResult,
@@ -2481,13 +2484,39 @@ export async function runTaskStack(
     let abortReason: string | null = null;
 
     // Whether an existing branch can serve as (or extend) the stack head.
-    // The ancestry requirement only applies when the current base is itself a
-    // stack branch — a branch must contain its predecessor's work. When the
+    // A branch whose PR has merged (or whose commits are already in the
+    // current base) is finished — its work is in the chain, and GitHub has
+    // usually deleted the remote branch, so a PR targeting it would fail.
+    // A local-only branch cannot be a PR base either. The ancestry
+    // requirement only applies when the current base is itself a stack
+    // branch — a branch must contain its predecessor's work. When the
     // current base is BASE_BRANCH there is no predecessor, and requiring
     // descent from the latest base would falsely reject resumes after the
     // base branch has advanced.
-    const isOnStack = async (branch: string): Promise<boolean> =>
-      currentBase === BASE_BRANCH || isAncestor(currentBase, branch);
+    const assessStackBase = async (branch: string): Promise<StackBaseVerdict> => {
+      let prState: string | null = null;
+      try {
+        const prUrl = await findExistingPR(branch);
+        if (prUrl) prState = await getPRState(prUrl);
+      } catch (err) {
+        log("debug", `Could not read PR state for ${branch}: ${(err as Error).message}`);
+      }
+      return evaluateStackBase({
+        prState,
+        pushed: await branchHasBeenPushed(branch),
+        containedInBase: await isAncestor(branch, currentBase),
+        onStack: currentBase === BASE_BRANCH || (await isAncestor(currentBase, branch)),
+      });
+    };
+
+    // A finished branch that only exists locally (its remote copy was deleted
+    // on merge) would otherwise be picked up again by findBranchForTask.
+    const dropStaleLocalBranch = async (branch: string): Promise<void> => {
+      if (!(await branchHasBeenPushed(branch))) {
+        log("info", `Removing stale local branch ${branch} — its work is already merged`);
+        await deleteLocalBranch(branch);
+      }
+    };
 
     for (let i = 0; i < ordered.length; i++) {
       const leaf = ordered[i]!;
@@ -2514,8 +2543,17 @@ export async function runTaskStack(
       if (status === STATUS.COMPLETED.toLowerCase()) {
         // Already done. If it left an unmerged stack branch behind, keep
         // stacking on it; otherwise its work is already in the chain's base.
-        if (existing && (await isOnStack(existing))) {
-          currentBase = existing;
+        if (existing) {
+          const verdict = await assessStackBase(existing);
+          if (verdict.usable) {
+            currentBase = existing;
+          } else {
+            log(
+              "info",
+              `Not stacking on completed task ${leaf.id}: ${describeStackBaseVerdict(verdict, existing, currentBase)}. Base stays ${currentBase}.`,
+            );
+            if (verdict.reason === "merged") await dropStaleLocalBranch(existing);
+          }
         }
         skipped++;
         records.push({
@@ -2545,7 +2583,10 @@ export async function runTaskStack(
       if (inReviewLike) {
         // Typically a PR from a previous stack run awaiting review — adopt
         // its branch as the stack head and continue with the next subtask.
-        if (existing && (await isOnStack(existing))) {
+        const verdict = existing
+          ? await assessStackBase(existing)
+          : ({ usable: false, reason: "unpushed" } as const);
+        if (existing && verdict.usable) {
           currentBase = existing;
           const prUrl =
             adoptedPrUrl ?? ((await findExistingPR(existing)) ?? undefined);
@@ -2561,10 +2602,45 @@ export async function runTaskStack(
           });
           continue;
         }
+        if (
+          existing &&
+          !verdict.usable &&
+          (verdict.reason === "merged" || verdict.reason === "contained")
+        ) {
+          // Its PR merged (or its commits landed) while ClickUp still says
+          // in review — the work is already in the chain's base, so there is
+          // nothing to stack on. Treat it as done and keep the current base.
+          const prUrl = adoptedPrUrl ?? ((await findExistingPR(existing)) ?? undefined);
+          log(
+            "info",
+            `Stack task ${leaf.id} is "${status}" but ${describeStackBaseVerdict(verdict, existing, currentBase)}. Treating it as done; base stays ${currentBase}.`,
+          );
+          if (verdict.reason === "merged") {
+            await dropStaleLocalBranch(existing);
+            try {
+              await addTaskComment(
+                leaf.id,
+                `✅ The associated PR was already merged${prUrl ? `: ${prUrl}` : ""}\n\nMoving task to complete.`,
+              );
+              await updateTaskStatus(leaf.id, STATUS.COMPLETED);
+            } catch (err) {
+              log("warn", `Could not mark task ${leaf.id} complete: ${(err as Error).message}`);
+            }
+          }
+          skipped++;
+          records.push({
+            leaf,
+            disposition: "skipped",
+            detail: verdict.reason === "merged" ? "PR already merged" : "work already in base",
+            branchName: existing,
+            prUrl,
+          });
+          continue;
+        }
         abortReason =
           `Stack task "${fresh.name}" (${leaf.id}) is "${status}" but its branch is ` +
           (existing
-            ? `not based on the stack (${existing} does not contain ${currentBase}).`
+            ? `not usable as a stack base (${describeStackBaseVerdict(verdict, existing, currentBase)}).`
             : `missing.`) +
           ` Merge or complete it first, then re-run --stack.`;
         records.push({ leaf, disposition: "failed", detail: abortReason });
@@ -2585,12 +2661,20 @@ export async function runTaskStack(
 
       // TODO / IN_PROGRESS: a leftover branch must be based on the stack,
       // since createTaskBranch will reuse it instead of branching fresh.
-      if (existing && !(await isOnStack(existing))) {
-        abortReason =
-          `Stack task "${fresh.name}" (${leaf.id}) has a stale branch ${existing} that is not ` +
-          `based on ${currentBase}. Delete the branch or finish that task via --once, then re-run --stack.`;
-        records.push({ leaf, disposition: "failed", detail: abortReason });
-        continue;
+      // A branch whose PR already merged is fine to hand to processTask —
+      // it detects the merged PR and marks the task complete.
+      if (existing) {
+        const verdict = await assessStackBase(existing);
+        const alreadyMerged = !verdict.usable && verdict.reason === "merged";
+        const onStack =
+          currentBase === BASE_BRANCH || (await isAncestor(currentBase, existing));
+        if (!alreadyMerged && !onStack) {
+          abortReason =
+            `Stack task "${fresh.name}" (${leaf.id}) has a stale branch ${existing} that is not ` +
+            `based on ${currentBase}. Delete the branch or finish that task via --once, then re-run --stack.`;
+          records.push({ leaf, disposition: "failed", detail: abortReason });
+          continue;
+        }
       }
 
       const info: StackInfo = {

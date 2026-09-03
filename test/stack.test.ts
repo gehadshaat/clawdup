@@ -13,6 +13,7 @@ import {
   generateStackPRNote,
   generateStackPromptContext,
 } from "../src/claude-worker.js";
+import { describeStackBaseVerdict, evaluateStackBase } from "../src/git-ops.js";
 import type { ClickUpDependency, ClickUpTask, StackInfo } from "../src/types.js";
 
 function makeTask(id: string, overrides: Partial<ClickUpTask> = {}): ClickUpTask {
@@ -374,5 +375,72 @@ describe("stack text builders", () => {
     const context = generateStackPromptContext(listInfo);
     assert.ok(context.includes('tasks of the "Backlog" list'));
     assert.ok(!context.includes("subtasks of"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// evaluateStackBase — can an existing branch be the next stack base?
+// ---------------------------------------------------------------------------
+describe("evaluateStackBase", () => {
+  const usable = { prState: "open", pushed: true, containedInBase: false, onStack: true };
+
+  it("accepts an open, pushed branch that descends from the current base", () => {
+    assert.deepEqual(evaluateStackBase(usable), { usable: true });
+  });
+
+  it("accepts a pushed branch with no PR yet when it is on the stack", () => {
+    assert.deepEqual(evaluateStackBase({ ...usable, prState: null }), { usable: true });
+  });
+
+  it("rejects a branch whose PR has already merged, even if it still exists on origin", () => {
+    assert.deepEqual(evaluateStackBase({ ...usable, prState: "merged" }), {
+      usable: false,
+      reason: "merged",
+    });
+  });
+
+  it("rejects a merged branch before any other reason", () => {
+    // The user-reported case: every PR in the stack merged, GitHub deleted the
+    // remote branches, and only the stale local branches remain.
+    assert.deepEqual(
+      evaluateStackBase({ prState: "merged", pushed: false, containedInBase: false, onStack: true }),
+      { usable: false, reason: "merged" },
+    );
+  });
+
+  it("rejects a branch whose commits are already in the current base", () => {
+    assert.deepEqual(evaluateStackBase({ ...usable, containedInBase: true }), {
+      usable: false,
+      reason: "contained",
+    });
+  });
+
+  it("rejects a local-only branch — GitHub cannot target it", () => {
+    assert.deepEqual(evaluateStackBase({ ...usable, pushed: false }), {
+      usable: false,
+      reason: "unpushed",
+    });
+  });
+
+  it("rejects a pushed branch that does not contain the current base", () => {
+    assert.deepEqual(evaluateStackBase({ ...usable, onStack: false }), {
+      usable: false,
+      reason: "off-stack",
+    });
+  });
+
+  it("does not treat a closed (unmerged) PR as merged", () => {
+    assert.deepEqual(evaluateStackBase({ ...usable, prState: "closed" }), { usable: true });
+  });
+});
+
+describe("describeStackBaseVerdict", () => {
+  it("names the branch and base in each reason", () => {
+    const b = "clickup/CU-1-x";
+    assert.match(describeStackBaseVerdict({ usable: false, reason: "merged" }, b, "main"), /already merged/);
+    assert.match(describeStackBaseVerdict({ usable: false, reason: "contained" }, b, "main"), /contained in main/);
+    assert.match(describeStackBaseVerdict({ usable: false, reason: "unpushed" }, b, "main"), /only locally/);
+    assert.match(describeStackBaseVerdict({ usable: false, reason: "off-stack" }, b, "main"), /does not contain main/);
+    assert.match(describeStackBaseVerdict({ usable: true }, b, "main"), /can be stacked on/);
   });
 });
