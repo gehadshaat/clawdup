@@ -120,6 +120,32 @@ export interface StackContext {
   prNote: string;
 }
 
+/**
+ * What is known about an existing task branch when deciding whether a stack
+ * run can build the next PR on top of it.
+ */
+export interface StackBaseFacts {
+  /** State of the branch's most recent PR ("open" | "merged" | "closed"), or null when it has none. */
+  prState: string | null;
+  /** The branch exists on origin (a PR can only target a remote branch). */
+  pushed: boolean;
+  /** The branch is already an ancestor of the current stack base — its work is in the chain. */
+  containedInBase: boolean;
+  /** The branch descends from the current stack base (always true when the base is BASE_BRANCH). */
+  onStack: boolean;
+}
+
+/**
+ * Whether an existing branch can serve as the next stack base, and if not, why.
+ * - merged: its PR has merged, so its work already lives in the chain's base
+ * - contained: its commits are already in the current base
+ * - unpushed: it exists only locally, so GitHub cannot target it
+ * - off-stack: it does not contain the current base's work
+ */
+export type StackBaseVerdict =
+  | { usable: true }
+  | { usable: false; reason: "merged" | "contained" | "unpushed" | "off-stack" };
+
 export interface StackRunSummary {
   total: number;
   completed: number;

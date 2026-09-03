@@ -4,7 +4,13 @@ import { execFile } from "child_process";
 import { promisify } from "util";
 import { BASE_BRANCH, BRANCH_PREFIX, GIT_ROOT, DRY_RUN, GITHUB_REPO } from "./config.js";
 import { log } from "./logger.js";
-import type { PullRequestOptions, StackLinkPlan, StackLinkResult } from "./types.js";
+import type {
+  PullRequestOptions,
+  StackBaseFacts,
+  StackBaseVerdict,
+  StackLinkPlan,
+  StackLinkResult,
+} from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -867,6 +873,44 @@ export async function isAncestor(
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Decide whether an existing task branch can be the next stack base.
+ *
+ * A branch whose PR has merged (or whose commits are already in the current
+ * base) has nothing left to stack on — its work is in the chain already, and
+ * GitHub usually deletes the remote branch on merge, so targeting it would
+ * fail with "Base ref must be a branch". A local-only branch cannot be a PR
+ * base either. Otherwise the branch must descend from the current base.
+ */
+export function evaluateStackBase(facts: StackBaseFacts): StackBaseVerdict {
+  if (facts.prState === "merged") return { usable: false, reason: "merged" };
+  if (facts.containedInBase) return { usable: false, reason: "contained" };
+  if (!facts.pushed) return { usable: false, reason: "unpushed" };
+  if (!facts.onStack) return { usable: false, reason: "off-stack" };
+  return { usable: true };
+}
+
+/**
+ * Human-readable explanation of a non-usable stack base verdict.
+ */
+export function describeStackBaseVerdict(
+  verdict: StackBaseVerdict,
+  branch: string,
+  currentBase: string,
+): string {
+  if (verdict.usable) return `${branch} can be stacked on`;
+  switch (verdict.reason) {
+    case "merged":
+      return `its PR has already merged, so ${branch} is not a valid base`;
+    case "contained":
+      return `${branch} is already contained in ${currentBase}`;
+    case "unpushed":
+      return `${branch} exists only locally and was never pushed`;
+    case "off-stack":
+      return `${branch} does not contain ${currentBase}`;
   }
 }
 
