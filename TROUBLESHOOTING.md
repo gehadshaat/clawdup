@@ -340,6 +340,28 @@ Stack mode builds each subtask's branch on the previous one, so when a subtask f
 
 ---
 
+### Stack Run Deferred Tasks: Stack Cap Reached (`--stack`)
+
+**Symptoms:**
+- Log line: `Stack cap reached: N open PR(s) already stacked (MAX_STACKED_PRS=5)`
+- Parent task comment: `✅ Automation stack run finished: N new PR(s) created, M task(s) deferred (stack cap reached).`
+- Some tasks listed as `⏸️ deferred (stack cap of 5 open PR(s) reached)`
+- A re-run creates no new PRs at all (`0 new PR(s) created`) while earlier PRs are still open
+
+**What happens:**
+Stack mode caps how many open PRs it leaves stacked on top of each other (`MAX_STACKED_PRS`, default 5). Tall stacks are hard to review and have to be merged bottom-up, so once the chain holds that many open PRs the remaining tasks are deferred — not failed — and the run exits with code 0. Still-open PRs from earlier runs count toward the cap (they are adopted as stacking bases on resume), so re-running before merging anything just reports the cap again.
+
+**Recovery:**
+1. Review and merge the open stacked PRs bottom-up (PR 1 first)
+2. Re-run `clawdup --stack <parent-task-id>` (or plain `clawdup --stack`) — merged tasks are skipped without counting, and processing continues with the deferred tasks, up to the cap again
+3. To allow taller stacks, raise `MAX_STACKED_PRS` in `.env.local` (or set it to `0` to remove the cap)
+
+**Notes:**
+- Lowering the cap below the number of PRs already open never un-stacks anything — the run only stops creating new PRs until enough of them merge
+- `clawdup --dry-run --stack` prints the cap next to the planned stack and notes when the plan exceeds it
+
+---
+
 ### `--stack` Aborts: gh stack Extension Required
 
 **Symptoms:**

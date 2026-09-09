@@ -381,6 +381,7 @@ CLICKUP_LIST_ID=901234567890
 # CLAUDE_TIMEOUT_MS=1800000
 # CLAUDE_MAX_TURNS=100
 # MAX_CONCURRENT_TASKS=2
+# MAX_STACKED_PRS=5
 # LOG_LEVEL=info
 ```
 
@@ -673,6 +674,7 @@ These can be set in `.env.local` or as system environment variables:
 | `CLAUDE_TIMEOUT_MS` | No | `1800000` | Max time per task for Claude (milliseconds, default 30 min) |
 | `CLAUDE_MAX_TURNS` | No | `100` | Max agentic turns Claude can take per task |
 | `MAX_CONCURRENT_TASKS` | No | `2` | ClickUp tasks processed in parallel (each gets its own git worktree). Set to `1` to disable. Range: 1–10. |
+| `MAX_STACKED_PRS` | No | `5` | Maximum open PRs a `--stack` run keeps stacked on each other (still-open PRs from earlier runs count). Tasks beyond the cap are deferred until those PRs merge — re-run `--stack` to continue. Set to `0` for no cap. |
 | `LOG_LEVEL` | No | `info` | Log verbosity: `debug`, `info`, `warn`, `error` |
 | `STATUS_TODO` | No | `to do` | ClickUp status name for "to do" |
 | `STATUS_IN_PROGRESS` | No | `in progress` | ClickUp status name for "in progress" |

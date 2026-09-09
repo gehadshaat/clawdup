@@ -196,6 +196,11 @@ Stack mode (--stack [task-id]):
   Merge the PRs bottom-up. AUTO_APPROVE is ignored in this mode. If a task
   fails, the remaining ones are not attempted — re-run --stack to resume.
 
+  The stack is capped: at most MAX_STACKED_PRS open PRs (default 5) are
+  stacked per run, counting still-open PRs from earlier runs. Tasks beyond
+  the cap are deferred — merge the open PRs, then re-run --stack to continue
+  with them. Set MAX_STACKED_PRS=0 to remove the cap.
+
   Without a task ID, the full configured source is stacked the same way:
   every open task in CLICKUP_LIST_ID (tasks with subtasks contribute their
   leaf subtasks instead), or the subtasks of CLICKUP_PARENT_TASK_ID when
@@ -328,6 +333,11 @@ CLICKUP_LIST_ID=
 # extension when it's missing and aborts otherwise; set to false to disable
 # native linking (plain chained PRs — no extension needed).
 # NATIVE_STACKS=true
+
+# Maximum open PRs a --stack run leaves stacked on each other. Still-open PRs
+# from earlier runs count; tasks beyond the cap are deferred until the open
+# PRs merge (re-run --stack to continue). Set to 0 for no cap.
+# MAX_STACKED_PRS=5
 
 # Log level: debug | info | warn | error
 # LOG_LEVEL=info
