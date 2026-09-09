@@ -2,7 +2,7 @@
 
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import { resolve } from "path";
-import { POLL_INTERVAL_MS, RELAUNCH_INTERVAL_MS, STATUS, BASE_BRANCH, GIT_ROOT, CLICKUP_LIST_ID, CLICKUP_PARENT_TASK_ID, AUTO_APPROVE, ADDRESS_PR_COMMENTS, DRY_RUN, BRANCH_PREFIX, MAX_CONCURRENT_TASKS, NATIVE_STACKS } from "./config.js";
+import { POLL_INTERVAL_MS, RELAUNCH_INTERVAL_MS, STATUS, BASE_BRANCH, GIT_ROOT, CLICKUP_LIST_ID, CLICKUP_PARENT_TASK_ID, AUTO_APPROVE, ADDRESS_PR_COMMENTS, DRY_RUN, BRANCH_PREFIX, MAX_CONCURRENT_TASKS, NATIVE_STACKS, MAX_STACKED_PRS } from "./config.js";
 import { log, startTimer } from "./logger.js";
 import {
   getTasksByStatus,
@@ -2182,12 +2182,27 @@ export async function runSingleTask(taskId: string, options?: { interactive?: bo
   }
 }
 
-interface StackLeafRecord {
+export interface StackLeafRecord {
   leaf: ClickUpTask;
-  disposition: "completed" | "adopted" | "skipped" | "failed" | "not_attempted";
+  disposition:
+    | "completed"
+    | "adopted"
+    | "skipped"
+    | "failed"
+    | "not_attempted"
+    | "deferred";
   detail?: string;
   branchName?: string;
   prUrl?: string;
+}
+
+/**
+ * Whether a stack already holds as many open PRs as the cap allows, so the
+ * next task has to wait for a later run (after the open PRs merge). A cap
+ * of 0 means unlimited.
+ */
+export function isStackCapReached(stackedPrs: number, cap: number): boolean {
+  return cap > 0 && stackedPrs >= cap;
 }
 
 /**
@@ -2200,19 +2215,25 @@ function formatStackRef(stackNumber: number | null): string {
 
 /**
  * Build the summary comment posted on the parent task after a stack run.
+ * `stackCap` is the MAX_STACKED_PRS value the run applied (0 = unlimited),
+ * named in the note explaining deferred tasks.
  */
-function buildStackSummaryComment(
+export function buildStackSummaryComment(
   records: StackLeafRecord[],
   abortReason: string | null,
   stackLink: StackLinkResult | null,
+  stackCap: number,
 ): string {
   const lines: string[] = [];
   const completed = records.filter((r) => r.disposition === "completed").length;
+  const deferred = records.filter((r) => r.disposition === "deferred").length;
 
   lines.push(
     abortReason
       ? `⚠️ Automation stack run aborted after ${completed} new PR(s).`
-      : `✅ Automation stack run finished: ${completed} new PR(s) created.`,
+      : deferred > 0
+        ? `✅ Automation stack run finished: ${completed} new PR(s) created, ${deferred} task(s) deferred (stack cap reached).`
+        : `✅ Automation stack run finished: ${completed} new PR(s) created.`,
   );
   lines.push("");
 
@@ -2234,6 +2255,9 @@ function buildStackSummaryComment(
       case "not_attempted":
         lines.push(`${label} — ⏸️ not attempted (stack aborted earlier)`);
         break;
+      case "deferred":
+        lines.push(`${label} — ⏸️ deferred (stack cap of ${stackCap} open PR(s) reached)`);
+        break;
     }
   });
 
@@ -2254,6 +2278,14 @@ function buildStackSummaryComment(
       `The PRs are stacked: each one targets the branch of the PR before it. ` +
         `Merge them bottom-up, in the order listed above, deleting each merged ` +
         `branch — GitHub only retargets the next PR when the merged branch is deleted.`,
+    );
+  }
+  if (deferred > 0) {
+    lines.push("");
+    lines.push(
+      `ℹ️ Stack cap reached: at most ${stackCap} open PR(s) are stacked per run (MAX_STACKED_PRS), ` +
+        `and still-open PRs from earlier runs count. Merge the open PRs bottom-up, then re-run ` +
+        `\`--stack\` to continue with the ${deferred} deferred task(s).`,
     );
   }
   if (abortReason) {
@@ -2441,13 +2473,22 @@ export async function runTaskStack(
     }
 
     // Print the planned stack topology
-    log("info", `\nPlanned stack (${ordered.length} task(s), base: ${BASE_BRANCH}):`);
+    const capLabel = MAX_STACKED_PRS > 0 ? `, cap: ${MAX_STACKED_PRS} open PR(s)` : "";
+    log("info", `\nPlanned stack (${ordered.length} task(s), base: ${BASE_BRANCH}${capLabel}):`);
     let plannedBase = BASE_BRANCH;
     for (let i = 0; i < ordered.length; i++) {
       const leaf = ordered[i]!;
       const branch = `${BRANCH_PREFIX}/CU-${leaf.id}-${slugify(leaf.name)}`;
       log("info", `  ${i + 1}. ${leaf.name} (${leaf.id}) — ${branch} → PR into ${plannedBase}`);
       plannedBase = branch;
+    }
+    if (MAX_STACKED_PRS > 0 && ordered.length > MAX_STACKED_PRS) {
+      log(
+        "info",
+        `At most ${MAX_STACKED_PRS} open PR(s) are stacked per run (MAX_STACKED_PRS) — still-open PRs ` +
+          `from earlier runs count, merged ones don't. Tasks beyond the cap are deferred: merge the ` +
+          `open PRs and re-run --stack to continue with them.`,
+      );
     }
 
     if (AUTO_APPROVE) {
@@ -2469,7 +2510,7 @@ export async function runTaskStack(
           );
         }
       }
-      return { total: ordered.length, completed: 0, skipped: 0, aborted: false };
+      return { total: ordered.length, completed: 0, skipped: 0, deferred: 0, aborted: false };
     }
 
     // One up-front fetch/sync; each processTask re-syncs its own base
@@ -2482,6 +2523,12 @@ export async function runTaskStack(
     let completed = 0;
     let skipped = 0;
     let abortReason: string | null = null;
+    // Open PRs currently stacked in the chain — adopted from earlier runs or
+    // created now (a pushed branch without a PR yet occupies a layer too).
+    // Once it reaches MAX_STACKED_PRS, the remaining tasks are deferred to a
+    // later run instead of growing the stack further.
+    let stackedPrs = 0;
+    let capReached = false;
 
     // Whether an existing branch can serve as (or extend) the stack head.
     // A branch whose PR has merged (or whose commits are already in the
@@ -2525,6 +2572,10 @@ export async function runTaskStack(
         records.push({ leaf, disposition: "not_attempted" });
         continue;
       }
+      if (capReached) {
+        records.push({ leaf, disposition: "deferred" });
+        continue;
+      }
 
       log("info", `\n>>> Stack ${i + 1}/${ordered.length}: ${leaf.name} (${leaf.id}) — base: ${currentBase}`);
 
@@ -2547,6 +2598,7 @@ export async function runTaskStack(
           const verdict = await assessStackBase(existing);
           if (verdict.usable) {
             currentBase = existing;
+            stackedPrs++;
           } else {
             log(
               "info",
@@ -2588,6 +2640,7 @@ export async function runTaskStack(
           : ({ usable: false, reason: "unpushed" } as const);
         if (existing && verdict.usable) {
           currentBase = existing;
+          stackedPrs++;
           const prUrl =
             adoptedPrUrl ?? ((await findExistingPR(existing)) ?? undefined);
           previousPrUrl = prUrl;
@@ -2647,6 +2700,23 @@ export async function runTaskStack(
         continue;
       }
 
+      // From here on the task needs a new PR. When the chain already holds
+      // as many open PRs as MAX_STACKED_PRS allows, this task and the rest
+      // of the series wait for a later run — after the open PRs merge, a
+      // re-run skips them and continues here. Adopting still-open PRs above
+      // is unaffected: it creates nothing, it only recognizes existing state.
+      if (isStackCapReached(stackedPrs, MAX_STACKED_PRS)) {
+        capReached = true;
+        log(
+          "info",
+          `Stack cap reached: ${stackedPrs} open PR(s) already stacked (MAX_STACKED_PRS=${MAX_STACKED_PRS}). ` +
+            `Deferring "${fresh.name}" (${leaf.id}) and the remaining task(s) — merge the open PRs, ` +
+            `then re-run --stack to continue.`,
+        );
+        records.push({ leaf, disposition: "deferred" });
+        continue;
+      }
+
       if (
         status !== STATUS.TODO.toLowerCase() &&
         status !== STATUS.IN_PROGRESS.toLowerCase()
@@ -2696,6 +2766,7 @@ export async function runTaskStack(
 
       if (outcome.status === "success" && outcome.branchName) {
         completed++;
+        stackedPrs++;
         currentBase = outcome.branchName;
         previousPrUrl = outcome.prUrl;
         completedInSeries.push({
@@ -2732,12 +2803,13 @@ export async function runTaskStack(
       }
     }
 
+    const deferred = records.filter((r) => r.disposition === "deferred").length;
     if (abortReason) {
       log("error", `Stack run aborted: ${abortReason}`);
     }
     log(
       "info",
-      `\nStack run finished: ${completed} completed, ${skipped} skipped, ${ordered.length} total.`,
+      `\nStack run finished: ${completed} completed, ${skipped} skipped, ${deferred} deferred, ${ordered.length} total.`,
     );
 
     // Link the series' open PRs into a native GitHub stack (public preview),
@@ -2767,7 +2839,7 @@ export async function runTaskStack(
       }
     }
 
-    const summaryComment = buildStackSummaryComment(records, abortReason, stackLink);
+    const summaryComment = buildStackSummaryComment(records, abortReason, stackLink, MAX_STACKED_PRS);
     if (source.summaryTaskId) {
       try {
         await addTaskComment(source.summaryTaskId, summaryComment);
@@ -2784,6 +2856,7 @@ export async function runTaskStack(
       total: ordered.length,
       completed,
       skipped,
+      deferred,
       aborted: abortReason !== null,
     };
   } finally {

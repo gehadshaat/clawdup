@@ -271,6 +271,7 @@ If your repository has a `CLAUDE.md` file at its root (used by Claude Code for p
 | `CLAUDE_TIMEOUT_MS`    | No       | `1800000`       | Timeout per task (ms)               |
 | `CLAUDE_MAX_TURNS`     | No       | `100`           | Max agentic turns per task          |
 | `MAX_CONCURRENT_TASKS` | No       | `2`             | Tasks processed in parallel (1=off, range 1-10) |
+| `MAX_STACKED_PRS`      | No       | `5`             | Max open PRs a `--stack` run keeps stacked; the rest wait for the next run (0=no cap) |
 | `ADDRESS_PR_COMMENTS`  | No       | `true`          | Auto-address new PR review comments on in-progress / in-review tasks |
 | `LOG_LEVEL`            | No       | `info`          | `debug` / `info` / `warn` / `error` |
 | `STATUS_TODO`          | No       | `to do`         | ClickUp status: to do               |
@@ -351,7 +352,9 @@ clawdup --stack <task-id>   # Implement all leaf subtasks of a task sequentially
                             # linked natively via the gh stack extension
                             # (offers to install it if missing, aborts otherwise)
 clawdup --stack             # Same, for the full configured source (every open
-                            # task in the list, or the parent task's subtasks)
+                            # task in the list, or the parent task's subtasks).
+                            # Both cap the stack at MAX_STACKED_PRS open PRs
+                            # (default 5) — merge them and re-run to continue
 clawdup --interactive       # Pair-program with the AI (accepts user input)
 clawdup --check             # Vibe check your configuration
 clawdup --statuses          # Show recommended ClickUp statuses

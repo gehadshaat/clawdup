@@ -296,6 +296,18 @@ export const ADDRESS_PR_COMMENTS: boolean =
 export const NATIVE_STACKS: boolean =
   (process.env.NATIVE_STACKS || "true").toLowerCase() === "true";
 
+// Maximum number of open PRs a --stack run may leave stacked on top of each
+// other (default 5). Stacks taller than that are hard to review and merge
+// bottom-up, so once the chain holds this many open PRs the remaining tasks
+// are deferred — still-open PRs adopted from an earlier run count, merged
+// ones don't. Merging the open PRs and re-running --stack continues with the
+// deferred tasks. Set to 0 to remove the cap.
+export const MAX_STACKED_PRS: number = parsePositiveInt(
+  "MAX_STACKED_PRS",
+  process.env.MAX_STACKED_PRS,
+  5,
+);
+
 // Dry-run mode: simulate the full automation flow without making any changes
 export const DRY_RUN: boolean = (process.env.DRY_RUN || "").toLowerCase() === "true";
 

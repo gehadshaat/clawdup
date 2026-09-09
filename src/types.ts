@@ -150,6 +150,8 @@ export interface StackRunSummary {
   total: number;
   completed: number;
   skipped: number;
+  /** Tasks not attempted because the stack already held MAX_STACKED_PRS open PRs. */
+  deferred: number;
   aborted: boolean;
 }
 
